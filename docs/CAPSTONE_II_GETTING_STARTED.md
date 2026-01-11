@@ -715,7 +715,7 @@ By end of OPS-2, you should have:
 
 ---
 
-## Let's Build! 🚀
+## Let's Ship This
 
 Ready? Start with **Step 1** above (reading design doc) and work through Phase 1 & 2 today.
 
@@ -724,4 +724,6 @@ Ready? Start with **Step 1** above (reading design doc) and work through Phase 1
 - Task checklist: `docs/CAPSTONE_II_IMPLEMENTATION_CHECKLIST.md`
 - Existing automation logic: `services/ids-api/src/k8s_automation.py` (can port to operator)
 
-**Let's ship this! ⚡**
+**Ready to build!**
+
+
