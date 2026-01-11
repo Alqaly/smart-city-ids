@@ -1,0 +1,277 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: suricata-forwarder-config
+  namespace: monitoring
+data:
+  ids-api-url: "http://ids-api:8000/api/alerts"
+  ids-api-token: "suricata-forwarder-token"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suricata-forwarder
+  namespace: monitoring
+  labels:
+    app: suricata-forwarder
+    component: forwarder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: suricata-forwarder
+  template:
+    metadata:
+      labels:
+        app: suricata-forwarder
+        component: forwarder
+      annotations:
+        description: "Suricata Eve JSON to IDS API Alert converter"
+    spec:
+      serviceAccountName: default
+      containers:
+      - name: suricata-forwarder
+        image: python:3.12-slim
+        imagePullPolicy: IfNotPresent
+        workingDir: /app
+        command:
+        - /bin/bash
+        - -c
+        - |
+          apt-get update && apt-get install -y curl &&
+          pip install fastapi uvicorn httpx pydantic &&
+          python main.py
+        ports:
+        - name: http-health
+          containerPort: 8100
+          protocol: TCP
+        - name: udp-syslog
+          containerPort: 514
+          protocol: UDP
+        env:
+        - name: IDS_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: suricata-forwarder-config
+              key: ids-api-url
+        - name: IDS_API_TOKEN
+          valueFrom:
+            configMapKeyRef:
+              name: suricata-forwarder-config
+              key: ids-api-token
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http-health
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 250m
+            memory: 512Mi
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: app-code
+        configMap:
+          name: suricata-forwarder-code
+          defaultMode: 0555
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: suricata-forwarder-code
+  namespace: monitoring
+data:
+  main.py: |
+    #!/usr/bin/env python3
+    """
+    Suricata Eve JSON → IDS API Alert Forwarder
+    Converts Suricata network IDS alerts to IDS API format.
+    Listens on UDP:514, parses Eve JSON, and forwards to IDS API /api/alerts endpoint.
+    """
+    
+    import json
+    import logging
+    import socket
+    import sys
+    import os
+    from datetime import datetime
+    from typing import Optional, Dict, Any
+    
+    import httpx
+    import uvicorn
+    from fastapi import FastAPI
+    from pydantic import BaseModel, Field
+    
+    # Configuration
+    IDS_API_URL = os.getenv("IDS_API_URL", "http://ids-api:8000/api/alerts")
+    IDS_API_TOKEN = os.getenv("IDS_API_TOKEN", "suricata-forwarder-token")
+    LISTEN_PORT = 514
+    LISTEN_HOST = "0.0.0.0"
+    SYSLOG_BUFFER = 4096
+    
+    # Logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    logger = logging.getLogger(__name__)
+    
+    # Data Models
+    class IDSAlert(BaseModel):
+        output: str = Field(..., min_length=1, max_length=2048)
+        rule: str = Field(..., min_length=1, max_length=512)
+        priority: str = Field(..., pattern="^(Emergency|Alert|Critical|Error|Warning|Notice|Informational|Debug)$")
+        time: str = Field(..., regex=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+        output_fields: Dict[str, str] = Field(default_factory=dict)
+    
+    # FastAPI
+    app = FastAPI(title="Suricata Forwarder", version="1.0.0")
+    alerts_forwarded = 0
+    
+    @app.get("/health")
+    async def health():
+        return {"status": "healthy", "service": "suricata-forwarder", "alerts": alerts_forwarded}
+    
+    @app.get("/metrics")
+    async def metrics():
+        return {"suricata_alerts_forwarded": alerts_forwarded}
+    
+    # Conversion
+    def priority_to_syslog(eve_priority: Optional[int]) -> str:
+        priority_map = {1: "Critical", 2: "Error", 3: "Warning", 4: "Notice"}
+        return priority_map.get(eve_priority, "Warning")
+    
+    def convert_eve_to_alert(eve_json: Dict[str, Any]) -> Optional[IDSAlert]:
+        try:
+            timestamp = eve_json.get("timestamp", datetime.utcnow().isoformat() + "Z")
+            alert_data = eve_json.get("alert", {})
+            signature = alert_data.get("signature", "Unknown Suricata Alert")
+            signature_id = alert_data.get("signature_id", 0)
+            category = alert_data.get("category", "Unknown")
+            priority_num = alert_data.get("severity", 3)
+            priority_str = priority_to_syslog(priority_num)
+            src_ip = eve_json.get("src_ip", "unknown")
+            dest_ip = eve_json.get("dest_ip", "unknown")
+            src_port = eve_json.get("src_port", "")
+            dest_port = eve_json.get("dest_port", "")
+            proto = eve_json.get("proto", "unknown").upper()
+            
+            output = f"Suricata Network Alert: {signature} ({src_ip}:{src_port} → {dest_ip}:{dest_port}/{proto}) [SigID: {signature_id}, Category: {category}]"
+            output_fields = {
+                "container.name": "suricata",
+                "alert.signature": signature,
+                "alert.signature_id": str(signature_id),
+                "src_ip": src_ip,
+                "dest_ip": dest_ip,
+                "proto": proto
+            }
+            
+            return IDSAlert(
+                output=output,
+                rule=signature,
+                priority=priority_str,
+                time=timestamp,
+                output_fields=output_fields
+            )
+        except Exception as e:
+            logger.error(f"Conversion error: {e}")
+            return None
+    
+    async def forward_to_ids_api(alert: IDSAlert) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    IDS_API_URL,
+                    json=alert.dict(),
+                    headers={"Authorization": f"Bearer {IDS_API_TOKEN}", "Content-Type": "application/json"}
+                )
+                if response.status_code == 200:
+                    logger.info(f"✅ Forwarded: {alert.rule}")
+                    return True
+                else:
+                    logger.error(f"❌ IDS API error {response.status_code}")
+                    return False
+        except Exception as e:
+            logger.error(f"Forward error: {e}")
+            return False
+    
+    async def udp_listener():
+        logger.info(f"📡 Listening on {LISTEN_HOST}:{LISTEN_PORT}/UDP")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((LISTEN_HOST, LISTEN_PORT))
+        
+        try:
+            while True:
+                data, addr = sock.recvfrom(SYSLOG_BUFFER)
+                try:
+                    message = data.decode("utf-8", errors="ignore").strip()
+                    json_start = message.find("{")
+                    if json_start == -1:
+                        continue
+                    json_str = message[json_start:]
+                    eve_json = json.loads(json_str)
+                    alert = convert_eve_to_alert(eve_json)
+                    if alert:
+                        await forward_to_ids_api(alert)
+                except Exception as e:
+                    logger.error(f"Error: {e}")
+        finally:
+            sock.close()
+    
+    if __name__ == "__main__":
+        import threading
+        listener_thread = threading.Thread(target=lambda: __import__("asyncio").run(udp_listener()), daemon=True)
+        listener_thread.start()
+        uvicorn.run(app, host="0.0.0.0", port=8100, log_level="info")
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: suricata-forwarder
+  namespace: monitoring
+  labels:
+    app: suricata-forwarder
+spec:
+  type: ClusterIP
+  ports:
+  - name: http-health
+    port: 8100
+    targetPort: http-health
+    protocol: TCP
+  - name: udp-syslog
+    port: 514
+    targetPort: udp-syslog
+    protocol: UDP
+  selector:
+    app: suricata-forwarder

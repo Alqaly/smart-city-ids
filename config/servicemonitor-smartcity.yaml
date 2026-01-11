@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: smart-city-services
+  namespace: monitoring
+  labels:
+    app: smart-city-monitor
+spec:
+  selector:
+    matchLabels:
+      prometheus-scrape: "true"
+  namespaceSelector:
+    matchNames:
+    - smart-city
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics

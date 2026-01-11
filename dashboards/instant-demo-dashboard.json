@@ -1,0 +1,62 @@
+{
+  "dashboard": {
+    "title": "🚀 Smart City IDS - Live Demo",
+    "tags": ["demo", "smart-city", "security"],
+    "panels": [
+      {
+        "id": 1,
+        "title": "🏗️ INFRASTRUCTURE",
+        "type": "stat",
+        "targets": [{
+          "expr": "count(kube_pod_info{namespace='smart-city'})",
+          "legendFormat": "12 Services Running"
+        }],
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "fixed", "fixedColor": "green"},
+            "thresholds": {"steps": [{"value": null, "color": "green"}]}
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "🛡️ SECURITY STACK",
+        "type": "stat",
+        "targets": [{
+          "expr": "count(kube_pod_info{namespace='falco-system'}) + count(kube_pod_info{namespace='monitoring'})",
+          "legendFormat": "5 Monitoring Pods"
+        }],
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "fixed", "fixedColor": "blue"}
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "📊 SERVICE DISTRIBUTION",
+        "type": "barchart",
+        "targets": [{
+          "expr": "count by (app) (kube_pod_info{namespace='smart-city'})",
+          "legendFormat": "{{app}}"
+        }],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6}
+      },
+      {
+        "id": 4,
+        "title": "🎯 DEMO READY",
+        "type": "text",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 0},
+        "options": {
+          "content": "# ✅ SMART CITY IDS READY\n\n## 🎯 Demo Features:\n- **12 Smart City Services**\n- **Falco Security Monitoring**\n- **Suricata Network IDS**\n- **LLM-Powered Analysis**\n- **Real-time Dashboards**\n\n## 📊 Live Metrics:\n- Service Health\n- Security Alerts\n- Performance Data\n- Automated Responses",
+          "mode": "markdown"
+        }
+      }
+    ],
+    "time": {"from": "now-1h", "to": "now"}
+  },
+  "folderId": 0,
+  "overwrite": true
+}

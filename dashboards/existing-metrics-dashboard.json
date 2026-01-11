@@ -1,0 +1,51 @@
+{
+  "dashboard": {
+    "title": "Smart City - Kubernetes Metrics",
+    "tags": ["kubernetes", "smart-city", "demo"],
+    "panels": [
+      {
+        "id": 1,
+        "title": "🏗️ Smart City Pods",
+        "type": "stat",
+        "targets": [{
+          "expr": "count(kube_pod_info{namespace='smart-city'})",
+          "legendFormat": "Total Pods"
+        }],
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "📦 Pods by Application",
+        "type": "barchart",
+        "targets": [{
+          "expr": "count by (app) (kube_pod_info{namespace='smart-city'})",
+          "legendFormat": "{{app}}"
+        }],
+        "gridPos": {"h": 10, "w": 16, "x": 8, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "💾 Memory Usage (MB)",
+        "type": "gauge",
+        "targets": [{
+          "expr": "sum(container_memory_usage_bytes{namespace='smart-city'}) / 1024 / 1024",
+          "legendFormat": "Memory"
+        }],
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "⚡ CPU Usage",
+        "type": "stat",
+        "targets": [{
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace='smart-city'}[5m]))",
+          "legendFormat": "CPU Cores"
+        }],
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8}
+      }
+    ],
+    "time": {"from": "now-1h", "to": "now"}
+  },
+  "folderId": 0,
+  "overwrite": true
+}

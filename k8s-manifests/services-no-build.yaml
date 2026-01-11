@@ -1,0 +1,233 @@
+---
+# Traffic Camera Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-camera
+  namespace: smart-city
+  labels:
+    app: traffic-camera
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: traffic-camera
+  template:
+    metadata:
+      labels:
+        app: traffic-camera
+    spec:
+      containers:
+      - name: traffic-camera
+        image: python:3.9-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - "pip install flask==3.0.0 && python /app/app.py"
+        ports:
+        - containerPort: 5000
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: PORT
+          value: "5000"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: code
+        configMap:
+          name: traffic-camera-code
+      - name: tmp
+        emptyDir: {}
+
+---
+# Traffic Camera Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: traffic-camera-service
+  namespace: smart-city
+  labels:
+    app: traffic-camera
+spec:
+  selector:
+    app: traffic-camera
+  ports:
+  - port: 80
+    targetPort: 5000
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Healthcare API Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcare-api
+  namespace: smart-city
+  labels:
+    app: healthcare-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: healthcare-api
+  template:
+    metadata:
+      labels:
+        app: healthcare-api
+    spec:
+      containers:
+      - name: healthcare-api
+        image: python:3.9-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - "pip install flask==3.0.0 && python /app/app.py"
+        ports:
+        - containerPort: 5001
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: PORT
+          value: "5001"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: code
+        configMap:
+          name: healthcare-api-code
+      - name: tmp
+        emptyDir: {}
+
+---
+# Healthcare API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthcare-api-service
+  namespace: smart-city
+  labels:
+    app: healthcare-api
+spec:
+  selector:
+    app: healthcare-api
+  ports:
+  - port: 80
+    targetPort: 5001
+    protocol: TCP
+  type: ClusterIP
+
+---
+# Parking System Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parking-system
+  namespace: smart-city
+  labels:
+    app: parking-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: parking-system
+  template:
+    metadata:
+      labels:
+        app: parking-system
+    spec:
+      containers:
+      - name: parking-system
+        image: python:3.9-slim
+        command: ["/bin/sh", "-c"]
+        args:
+          - "pip install flask==3.0.0 && python /app/app.py"
+        ports:
+        - containerPort: 5002
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: PORT
+          value: "5002"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+              - ALL
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: code
+        configMap:
+          name: parking-system-code
+      - name: tmp
+        emptyDir: {}
+
+---
+# Parking System Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: parking-system-service
+  namespace: smart-city
+  labels:
+    app: parking-system
+spec:
+  selector:
+    app: parking-system
+  ports:
+  - port: 80
+    targetPort: 5002
+    protocol: TCP
+  type: ClusterIP

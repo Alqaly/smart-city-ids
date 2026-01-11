@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-camera
+  namespace: smart-city
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: traffic-camera
+  template:
+    metadata:
+      labels:
+        app: traffic-camera
+    spec:
+      containers:
+      - name: traffic-camera
+        image: python:3.9-slim
+        command: ["python", "-m", "http.server", "80"]
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: traffic-camera-service
+  namespace: smart-city
+spec:
+  selector:
+    app: traffic-camera
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthcare-api
+  namespace: smart-city
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: healthcare-api
+  template:
+    metadata:
+      labels:
+        app: healthcare-api
+    spec:
+      containers:
+      - name: healthcare-api
+        image: python:3.9-slim
+        command: ["python", "-m", "http.server", "80"]
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthcare-api-service
+  namespace: smart-city
+spec:
+  selector:
+    app: healthcare-api
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: parking-system
+  namespace: smart-city
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: parking-system
+  template:
+    metadata:
+      labels:
+        app: parking-system
+    spec:
+      containers:
+      - name: parking-system
+        image: python:3.9-slim
+        command: ["python", "-m", "http.server", "80"]
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: parking-system-service
+  namespace: smart-city
+spec:
+  selector:
+    app: parking-system
+  ports:
+  - port: 80
+    targetPort: 80

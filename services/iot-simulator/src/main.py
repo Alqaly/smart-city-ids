@@ -1,0 +1,244 @@
+import paho.mqtt.client as mqtt
+import flask
+import threading
+import time
+import json
+import random
+import os
+import logging
+from prometheus_client import Counter, Gauge, generate_latest, Histogram, REGISTRY
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+app = flask.Flask(__name__)
+
+# Prometheus metrics
+messages_sent = Counter('iot_messages_sent_total', 'Total messages sent', ['device_type'])
+messages_received = Counter('iot_messages_received_total', 'Total messages received', ['device_type'])
+message_latency = Histogram('iot_message_latency_seconds', 'Message latency in seconds', ['device_type'])
+device_status = Gauge('iot_device_status', 'Device status (1=online, 0=offline)', ['device_id'])
+connection_errors = Counter('iot_connection_errors_total', 'Connection errors')
+device_temperature = Gauge('iot_device_temperature', 'Device temperature in Celsius', ['device_id'])
+device_power = Gauge('iot_device_power_consumption', 'Power consumption in watts', ['device_id'])
+device_battery = Gauge('iot_device_battery_level', 'Battery level percentage', ['device_id'])
+
+class IoTDevice:
+    def __init__(self, device_id, device_type="sensor"):
+        self.device_id = device_id
+        self.device_type = device_type
+        self.client = mqtt.Client(client_id=device_id)
+        self.mqtt_broker = os.getenv('MQTT_BROKER', 'mqtt-broker')
+        self.mqtt_port = int(os.getenv('MQTT_PORT', 1883))
+        self.connected = False
+        self.sent_count = 0
+        self.received_count = 0
+        self.latencies = []
+        
+        # Realistic simulation parameters
+        self.latency_range = (0.01, 0.5)  # 10-500ms
+        self.packet_loss_prob = 0.1  # 10%
+        self.failure_prob = 0.05  # 5%
+        self.heartbeat_interval = random.randint(5, 15)  # Variable intervals
+        
+        # Device-specific parameters
+        self.temperature = random.uniform(20.0, 45.0)
+        self.power_consumption = random.uniform(5.0, 25.0)
+        self.battery_level = random.uniform(0.3, 1.0)
+        
+        self.setup_mqtt()
+        
+    def setup_mqtt(self):
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
+        self.client.on_disconnect = self.on_disconnect
+        self.client.on_publish = self.on_publish
+        
+    def on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            logger.info(f"✅ Device {self.device_id} connected to MQTT broker")
+            self.connected = True
+            device_status.labels(device_id=self.device_id).set(1)
+            # Subscribe to relevant topics
+            client.subscribe(f"iot/devices/{self.device_id}/control")
+            client.subscribe("iot/devices/broadcast")
+            client.subscribe("iot/alerts")
+        else:
+            logger.error(f"❌ Connection failed with code {rc}")
+            self.connected = False
+            device_status.labels(device_id=self.device_id).set(0)
+            
+    def on_message(self, client, userdata, msg):
+        try:
+            payload = json.loads(msg.payload.decode())
+            self.received_count += 1
+            messages_received.labels(device_type=self.device_type).inc()
+            
+            # Calculate latency if timestamp exists
+            if 'timestamp' in payload:
+                latency = time.time() - payload['timestamp']
+                message_latency.labels(device_type=self.device_type).observe(latency)
+                self.latencies.append(latency)
+                if len(self.latencies) > 10:
+                    self.latencies.pop(0)
+                    
+            logger.info(f"📨 Device {self.device_id} received: {msg.topic}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error processing message: {e}")
+            
+    def on_disconnect(self, client, userdata, rc):
+        logger.warning(f"⚠️ Device {self.device_id} disconnected")
+        self.connected = False
+        device_status.labels(device_id=self.device_id).set(0)
+        
+    def on_publish(self, client, userdata, mid):
+        logger.debug(f"📤 Device {self.device_id} published message {mid}")
+        
+    def connect(self):
+        try:
+            logger.info(f"🔗 Connecting to {self.mqtt_broker}:{self.mqtt_port}")
+            self.client.connect(self.mqtt_broker, self.mqtt_port, 60)
+            self.client.loop_start()
+            return True
+        except Exception as e:
+            logger.error(f"❌ Connection failed: {e}")
+            connection_errors.inc()
+            return False
+            
+    def publish_telemetry(self):
+        while True:
+            if self.connected and random.random() > self.packet_loss_prob:
+                # Update device metrics realistically
+                self.temperature += random.uniform(-0.5, 0.5)
+                self.temperature = max(20.0, min(45.0, self.temperature))
+                self.power_consumption = random.uniform(5.0, 25.0)
+                self.battery_level -= 0.001  # Slow battery drain
+                
+                # Update Prometheus metrics
+                device_temperature.labels(device_id=self.device_id).set(self.temperature)
+                device_power.labels(device_id=self.device_id).set(self.power_consumption)
+                device_battery.labels(device_id=self.device_id).set(self.battery_level)
+                
+                telemetry = {
+                    'device_id': self.device_id,
+                    'device_type': self.device_type,
+                    'timestamp': time.time(),
+                    'type': 'telemetry',
+                    'temperature': round(self.temperature, 2),
+                    'power_consumption': round(self.power_consumption, 2),
+                    'battery_level': round(self.battery_level, 3),
+                    'status': 'healthy',
+                    'location': {
+                        'lat': random.uniform(40.0, 41.0),
+                        'lon': random.uniform(-74.0, -73.0)
+                    }
+                }
+                
+                # Simulate network latency
+                time.sleep(random.uniform(*self.latency_range))
+                
+                self.client.publish(
+                    f"iot/devices/{self.device_id}/telemetry",
+                    json.dumps(telemetry),
+                    qos=1
+                )
+                self.sent_count += 1
+                messages_sent.labels(device_type=self.device_type).inc()
+                logger.debug(f"📊 Device {self.device_id} sent telemetry")
+                
+            time.sleep(self.heartbeat_interval)
+            
+    def simulate_failure(self):
+        while True:
+            if random.random() < self.failure_prob:
+                logger.warning(f"🔴 Device {self.device_id} simulating failure")
+                device_status.labels(device_id=self.device_id).set(0)
+                # Simulate device going offline
+                time.sleep(random.randint(20, 60))  # 20-60 second outage
+                device_status.labels(device_id=self.device_id).set(1)
+                logger.info(f"🟢 Device {self.device_id} recovered")
+            time.sleep(30)
+
+# Global device instance
+device = None
+
+@app.route('/')
+def index():
+    return {"message": "IoT Device Simulator", "status": "running"}
+
+@app.route('/status')
+def status():
+    if device:
+        avg_latency = sum(device.latencies) / len(device.latencies) if device.latencies else 0
+        return {
+            'device_id': device.device_id,
+            'device_type': device.device_type,
+            'connected': device.connected,
+            'messages_sent': device.sent_count,
+            'messages_received': device.received_count,
+            'average_latency': round(avg_latency, 3),
+            'temperature': round(device.temperature, 2),
+            'battery_level': round(device.battery_level, 3)
+        }
+    return {'status': 'device not initialized'}
+
+@app.route('/metrics')
+def metrics():
+    return generate_latest(REGISTRY), 200, {'Content-Type': 'text/plain'}
+
+@app.route('/publish', methods=['POST'])
+def publish_message():
+    if device and device.connected:
+        data = flask.request.json
+        data['timestamp'] = time.time()
+        data['source_device'] = device.device_id
+        
+        device.client.publish(
+            f"iot/devices/{device.device_id}/custom",
+            json.dumps(data),
+            qos=1
+        )
+        return {'status': 'message published', 'topic': f'iot/devices/{device.device_id}/custom'}
+    return {'status': 'device not connected'}, 400
+
+@app.route('/alert', methods=['POST'])
+def send_alert():
+    if device and device.connected:
+        alert_data = flask.request.json
+        alert_data.update({
+            'timestamp': time.time(),
+            'device_id': device.device_id,
+            'severity': alert_data.get('severity', 'medium')
+        })
+        
+        device.client.publish(
+            "iot/alerts",
+            json.dumps(alert_data),
+            qos=2  # Highest QoS for alerts
+        )
+        return {'status': 'alert published', 'severity': alert_data['severity']}
+    return {'status': 'device not connected'}, 400
+
+def start_device():
+    global device
+    device_id = os.getenv('DEVICE_ID', f"iot-{random.randint(1000, 9999)}")
+    device_type = os.getenv('DEVICE_TYPE', random.choice(['temperature', 'humidity', 'motion', 'camera', 'air_quality']))
+    
+    device = IoTDevice(device_id, device_type)
+    
+    if device.connect():
+        # Start background threads
+        threading.Thread(target=device.publish_telemetry, daemon=True).start()
+        threading.Thread(target=device.simulate_failure, daemon=True).start()
+        logger.info(f"🚀 Started {device_type} device: {device_id}")
+    else:
+        logger.error(f"❌ Failed to start device: {device_id}")
+
+if __name__ == '__main__':
+    start_device()
+    app.run(host='0.0.0.0', port=5000, debug=False)

@@ -1,0 +1,139 @@
+-- Migration 001: Initial schema with encryption support
+-- Created: 2026-01-10
+-- Description: Creates users, API keys, alerts, and audit tables
+
+-- Run migrations as a single transaction to avoid partial schema application
+BEGIN;
+
+-- Create users table
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    role VARCHAR(50) DEFAULT 'monitor' NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    is_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_username ON users (username);
+CREATE INDEX IF NOT EXISTS idx_email ON users (email);
+CREATE INDEX IF NOT EXISTS idx_role ON users (role);
+
+-- Create API keys table
+CREATE TABLE IF NOT EXISTS api_keys (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(1024),
+    is_active BOOLEAN DEFAULT TRUE,
+    last_used TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_key ON api_keys (key);
+CREATE INDEX IF NOT EXISTS idx_api_user_id ON api_keys (user_id);
+
+-- Create alerts table with encrypted fields
+CREATE TABLE IF NOT EXISTS alerts (
+    id SERIAL PRIMARY KEY,
+    alert_id VARCHAR(36) UNIQUE NOT NULL,
+    source VARCHAR(50),
+    rule VARCHAR(512),
+    severity INTEGER,
+    encrypted_alert_data BYTEA NOT NULL,
+    encrypted_analysis BYTEA,
+    alert_source_ip VARCHAR(45),
+    alert_dest_ip VARCHAR(45),
+    container_name VARCHAR(255),
+    threat_type VARCHAR(255),
+    is_analyzed BOOLEAN DEFAULT FALSE,
+    analysis_error VARCHAR(1024),
+    actions_taken JSON DEFAULT '[]',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP,
+    created_by VARCHAR(255) DEFAULT 'system'
+);
+
+CREATE INDEX IF NOT EXISTS idx_alert_id ON alerts (alert_id);
+CREATE INDEX IF NOT EXISTS idx_source ON alerts (source);
+CREATE INDEX IF NOT EXISTS idx_severity ON alerts (severity);
+CREATE INDEX IF NOT EXISTS idx_container_name ON alerts (container_name);
+CREATE INDEX IF NOT EXISTS idx_threat_type ON alerts (threat_type);
+CREATE INDEX IF NOT EXISTS idx_created_at ON alerts (created_at);
+
+-- Create analysis results table
+CREATE TABLE IF NOT EXISTS analysis_results (
+    id SERIAL PRIMARY KEY,
+    alert_id VARCHAR(36) NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+    model VARCHAR(255),
+    encrypted_result BYTEA NOT NULL,
+    analysis_time_ms INTEGER,
+    confidence_score INTEGER,
+    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_alert_id ON analysis_results (alert_id);
+
+-- Create automation actions table
+CREATE TABLE IF NOT EXISTS automation_actions (
+    id SERIAL PRIMARY KEY,
+    alert_id VARCHAR(36) NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+    action_type VARCHAR(255),
+    target_resource VARCHAR(255),
+    target_namespace VARCHAR(255),
+    status VARCHAR(50),
+    error_message VARCHAR(1024),
+    execution_time_ms INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    triggered_by VARCHAR(255)
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_alert_id ON automation_actions (alert_id);
+CREATE INDEX IF NOT EXISTS idx_action_status ON automation_actions (status);
+CREATE INDEX IF NOT EXISTS idx_action_type ON automation_actions (action_type);
+
+-- Create audit logs table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action VARCHAR(255) NOT NULL,
+    resource_type VARCHAR(255),
+    resource_id VARCHAR(255),
+    details JSON,
+    status VARCHAR(50),
+    error_message VARCHAR(1024),
+    ip_address VARCHAR(45),
+    user_agent VARCHAR(512),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs (user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action);
+CREATE INDEX IF NOT EXISTS idx_audit_resource_type ON audit_logs (resource_type);
+CREATE INDEX IF NOT EXISTS idx_audit_resource_id ON audit_logs (resource_id);
+CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs (created_at);
+
+-- Attempt to enable pgcrypto extension for encryption functions.
+-- NOTE: CREATE EXTENSION pgcrypto may require superuser privileges. This block will
+-- skip the extension if the current DB user lacks permission and emit a NOTICE.
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EXCEPTION WHEN insufficient_privilege THEN
+    RAISE NOTICE 'Skipping CREATE EXTENSION pgcrypto: insufficient privileges. Run as DB superuser to enable DB-side encryption functions.';
+END;
+$$;
+
+-- Create partitioning for alerts table (for large deployments)
+-- ALTER TABLE alerts PARTITION BY RANGE (date_trunc('month', created_at));
+
+COMMIT;
+
+COMMIT;

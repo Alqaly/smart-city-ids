@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-forwarder-script
+  namespace: falco-system
+data:
+  forwarder.py: |
+    #!/usr/bin/env python3
+    import json
+    import requests
+    import logging
+    from kubernetes import client, config, watch
+    import time
+    
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    IDS_API = "http://ids-api-service.smart-city:8000/api/alerts"
+    
+    def forward_to_ids():
+        try:
+            config.load_incluster_config()
+            v1 = client.CoreV1Api()
+            
+            logger.info("Starting Falco → IDS forwarder...")
+            
+            # Wait for Falco pod
+            while True:
+                pods = v1.list_namespaced_pod(
+                    namespace="falco-system",
+                    label_selector="app.kubernetes.io/name=falco"
+                )
+                if pods.items:
+                    break
+                logger.info("Waiting for Falco pod...")
+                time.sleep(5)
+            
+            falco_pod = pods.items[0].metadata.name
+            logger.info(f"Monitoring: {falco_pod}")
+            
+            w = watch.Watch()
+            for line in w.stream(
+                v1.read_namespaced_pod_log,
+                name=falco_pod,
+                namespace="falco-system",
+                container="falco",
+                follow=True
+            ):
+                try:
+                    if line.strip().startswith('{'):
+                        alert = json.loads(line)
+                        
+                        if 'rule' in alert and 'output' in alert:
+                            logger.info(f"🚨 Alert: {alert.get('rule')}")
+                            
+                            response = requests.post(IDS_API, json=alert, timeout=5)
+                            if response.status_code == 200:
+                                logger.info(f"✅ Forwarded to IDS")
+                            else:
+                                logger.warning(f"Failed: {response.status_code}")
+                except json.JSONDecodeError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error: {e}")
+        except Exception as e:
+            logger.error(f"Fatal error: {e}")
+            time.sleep(10)
+    
+    if __name__ == "__main__":
+        while True:
+            try:
+                forward_to_ids()
+            except Exception as e:
+                logger.error(f"Restarting due to: {e}")
+                time.sleep(10)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: falco-forwarder-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: falco-forwarder-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: falco-forwarder-role
+subjects:
+- kind: ServiceAccount
+  name: falco-forwarder
+  namespace: falco-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: falco-forwarder
+  namespace: falco-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: falco-forwarder
+  namespace: falco-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: falco-forwarder
+  template:
+    metadata:
+      labels:
+        app: falco-forwarder
+    spec:
+      serviceAccountName: falco-forwarder
+      containers:
+      - name: forwarder
+        image: python:3.11-slim
+        command: ["/bin/bash", "-c"]
+        args:
+          - |
+            pip install -q kubernetes requests
+            python /scripts/forwarder.py
+        volumeMounts:
+        - name: scripts
+          mountPath: /scripts
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: scripts
+        configMap:
+          name: falco-forwarder-script

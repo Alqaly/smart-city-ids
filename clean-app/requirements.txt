@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+groq
+kubernetes
+python-dotenv
+prometheus-client
+pydantic
+requests
