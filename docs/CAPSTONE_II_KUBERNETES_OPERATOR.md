@@ -1011,30 +1011,35 @@ Dashboard should display:
 ## 9. Deployment Phases
 
 ### Phase 1: Research & Design (Week 1) ✅ **Current**
+
 - [x] Framework selection (Kopf)
 - [x] CRD schema design
 - [x] Architecture diagrams
 - [x] Error handling strategy
 
 ### Phase 2: Implementation (Week 2-3)
+
 - [ ] Implement Kopf handlers
 - [ ] Create ThreatResponse CRD
 - [ ] Integrate with FastAPI backend
 - [ ] Add unit & integration tests
 
 ### Phase 3: Testing (Week 3-4)
+
 - [ ] Deploy to K3s cluster
 - [ ] Run attack simulations
 - [ ] Verify auto-rollback
 - [ ] Performance testing
 
 ### Phase 4: Observability (Week 4-5)
+
 - [ ] Add Prometheus metrics
 - [ ] Build Grafana dashboards
 - [ ] Document operational procedures
 - [ ] Create runbooks
 
 ### Phase 5: Documentation & Demo (Week 5)
+
 - [ ] Complete API documentation
 - [ ] Record demo video
 - [ ] Prepare presentation slides

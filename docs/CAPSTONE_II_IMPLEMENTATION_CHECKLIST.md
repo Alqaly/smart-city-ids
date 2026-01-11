@@ -335,4 +335,7 @@ kubectl describe tr <name> -n smart-city
 
 ---
 
-**Ready to start OPS-2? Let's build this operator! 🚀**
+## Ready to start OPS-2
+
+Let's build this operator! 🚀
+
