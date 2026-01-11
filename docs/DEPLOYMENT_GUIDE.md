@@ -14,64 +14,70 @@ This system consists of:
 ## Quick Start
 
 ### Access the System
+
 ```bash
-# View all pods
+
 kubectl get pods -A
 
 # View smart city services
+
 kubectl get pods -n smart-city
 
 # Run demo
-./demo.sh
-```
 
-### Scale IoT Devices
+./demo.sh
 ```bash
-# Scale to 20 devices
+
+```bash
+
 ./scale-iot.sh 20
 
 # Check status
-kubectl get pods -n smart-city -l app=iot-device
-```
 
-### Access Dashboards
+kubectl get pods -n smart-city -l app=iot-device
+```bash
 
 #### Prometheus
+
 ```bash
 kubectl port-forward -n monitoring svc/prometheus 9090:9090
-# Open: http://localhost:9090
-```
 
-#### Grafana
+# Open: <http://localhost:9090>
+
+```bash
+
 ```bash
 kubectl port-forward -n monitoring svc/grafana 3000:3000
-# Open: http://localhost:3000
-# Login: admin / admin123
-```
 
-## Troubleshooting
+# Open: <http://localhost:3000>
+
+# Login: admin / admin123
+
+```bash
 
 ### K3s not starting
+
 ```bash
 sudo systemctl status k3s
-sudo journalctl -u k3s -f
-```
 
-### Pods not starting
+sudo journalctl -u k3s -f
+```bash
+
 ```bash
 kubectl describe pod <pod-name> -n <namespace>
-kubectl logs <pod-name> -n <namespace>
-```
 
-### Reset everything
+kubectl logs <pod-name> -n <namespace>
+```bash
+
 ```bash
 sudo /usr/local/bin/k3s-uninstall.sh
-./complete-setup.sh
-```
 
-## Architecture Diagram
-```
+./complete-setup.sh
+```bash
+
+```bash
 ┌─────────────────────────────────────────────┐
+
 │          Smart City Infrastructure           │
 ├─────────────────────────────────────────────┤
 │                                             │
@@ -103,11 +109,10 @@ sudo /usr/local/bin/k3s-uninstall.sh
     │  Prometheus  │  │    Grafana    │
     │  (Metrics)   │  │ (Dashboards)  │
     └──────────────┘  └───────────────┘
-```
-
-## Component Details
+```bash
 
 ### IoT Device Simulation
+
 - **Protocol**: MQTT (Eclipse Mosquitto)
 - **Behavior**: Periodic heartbeats (10s), event-driven alerts
 - **Network**: Simulated latency (10-500ms), packet loss (10%)
@@ -115,11 +120,13 @@ sudo /usr/local/bin/k3s-uninstall.sh
 - **API**: REST endpoints on port 5000 (/status, /metrics)
 
 ### Security Monitoring
+
 - **Falco**: Monitors system calls, file access, process execution
 - **Suricata**: Monitors network traffic, applies IDS rules
 - **Integration**: Both forward alerts to LLM for analysis
 
 ### Technologies Used
+
 | Component | Technology | Version |
 |-----------|------------|---------|
 | Container Runtime | K3s | v1.33.5 |

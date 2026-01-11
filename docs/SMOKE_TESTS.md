@@ -5,38 +5,41 @@ Local and CI smoke tests to verify core functionality.
 ## Local smoke tests (manual)
 
 ### 1. Validate environment & tools
+
 ```bash
-make check
-```
-**Expected:** All tools present (python, node, psql, kubectl optional).
+```bash
 
 ### 2. Validate docs
+
 ```bash
-make docs-check
-```
-**Expected:** No markdown lint errors or broken links.
+```bash
 
 ### 3. Try database migrations (optional, requires PostgreSQL)
+
 ```bash
 export DATABASE_URL="postgres://user:pass@localhost:5432/smartcity_test"
+
 make db-migrate
-```
-**Expected:** Migrations apply without errors. (Note: pgcrypto may skip if no superuser.)
+```bash
 
 ### 4. Run IDS API locally
+
 ```bash
 cd services/ids-api/src
+
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 export GROQ_API_KEY="gsk_..." # or OPENAI_API_KEY
 uvicorn main:app --host 0.0.0.0 --port 8000
-```
-**Expected:** Server starts, output shows `Uvicorn running on http://0.0.0.0:8000`.
+```bash
 
 ### 5. Send a sample alert
+
 In another terminal:
+
 ```bash
-curl -X POST http://localhost:8000/api/alerts \
+curl -X POST <http://localhost:8000/api/alerts> \
+
   -H "Content-Type: application/json" \
   -d '{
     "output": "Falco rule triggered: Unexpected process spawned",
@@ -49,11 +52,11 @@ curl -X POST http://localhost:8000/api/alerts \
       "proc.user": "root"
     }
   }'
-```
+```bash
 
-**Expected response** (HTTP 200):
 ```json
 {
+
   "alert_id": "...",
   "status": "processing",
   "analysis": {
@@ -64,25 +67,23 @@ curl -X POST http://localhost:8000/api/alerts \
     "automated_actions": [...]
   }
 }
-```
+```bash
 
-**Check:**
 - `status` is `"processing"` or `"success"`.
 - `analysis.severity` is 1–10.
 - `analysis.threat_type` is populated.
 - If severity >= 8, `automated_actions` includes `["isolate_pod"]`.
 
 ### 6. Run pytest smoke tests
-```bash
-make smoke-test
-```
 
-**Expected:** All tests pass (green output).
+```bash
+```bash
 
 Actual test runs:
 - `test_post_alert_basic_flow()` — sends sample alert, checks HTTP 200 + valid JSON response.
 
 ### 7. Debug if needed
+
 If a test fails, check:
 - IDS API logs (in terminal where you started uvicorn).
 - LLM API key is set and valid: `echo $GROQ_API_KEY` or `echo $OPENAI_API_KEY`.
@@ -94,12 +95,14 @@ Runs on every push and PR. Files:
 - `.github/workflows/smoke-tests.yml` — runs pytest on `tests/smoke/test_smoke_api.py`.
 - `.github/workflows/docs.yml` — runs `make docs-check`.
 
-**What's tested:**
+### What's tested
+
 - Markdown linting (no style errors).
 - Broken links (all links valid).
 - API smoke test: alert ingestion + LLM analysis + valid response.
 
-**To check CI status:**
+### To check CI status
+
 - Go to [GitHub Actions](https://github.com/yourusername/smart-city-ids/actions).
 - Check the latest workflows for smoke-tests and docs.
 - If a workflow fails, click it to see error details.
@@ -116,34 +119,40 @@ Runs on every push and PR. Files:
 ## Debugging failed tests
 
 ### If `make docs-check` fails
+
 ```bash
-# See which file has the error
+
 npx markdownlint-cli README.md docs/*.md
 # Fix style issues (usually heading format, trailing spaces)
-# Then re-run
-make docs-check
-```
 
-### If `make smoke-test` fails
+# Then re-run
+
+make docs-check
 ```bash
-# Run with verbose output
+
+```bash
+
 pytest -vv tests/smoke/test_smoke_api.py
 # Check IDS API logs (in terminal where uvicorn runs)
-# Verify LLM API key: echo $GROQ_API_KEY
-# Try running IDS API manually and posting an alert (step 5 above)
-```
 
-### If `curl` alert POST fails
+# Verify LLM API key: echo $GROQ_API_KEY
+
+# Try running IDS API manually and posting an alert (step 5 above)
+
 ```bash
-# Check IDS API is running
-curl http://localhost:8000/health
+
+```bash
+
+curl <http://localhost:8000/health>
 # Check alert JSON is valid (use jq or a JSON validator)
+
 # Check LLM API key is set
+
 env | grep -E "GROQ|OPENAI"
 # Check IDS API logs for parsing errors
-```
 
-## Expected timeline
+```bash
+
 - **make check** — ~2 sec
 - **make docs-check** — ~5 sec
 - **make smoke-test** — ~10 sec
@@ -151,6 +160,7 @@ env | grep -E "GROQ|OPENAI"
 - **Full local validation** — ~20 sec
 
 ## Next steps after smoke tests pass
+
 - If running locally: ready for PR / code review.
 - If running in CI: ready for merge (if all reviews pass).
 - Before demo: run full demo with K3s (`./scripts/start-everything.sh`), see docs/PROJECT_CONTEXT.md.

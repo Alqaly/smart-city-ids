@@ -3,14 +3,17 @@
 ## 🎯 PROJECT STATUS (Last Updated: 2025-11-09)
 
 ### What We're Building
+
 LLM-Driven Intrusion Detection System for Edge-Enabled Smart Cities
 - Student: Ali Suhail (ID: 60106420)
 - Supervisor: Dr. Dana Haj Hussein
 - Team: 3-4 students (Ali = AI/LLM specialist)
 
 ### Current System Architecture
-```
+
+```bash
 Azure VM (192.168.0.170) → K3s Cluster → 3 Smart City Services
+
   ├─ Traffic Camera Service (2 replicas)
   ├─ Healthcare API Service (2 replicas)  
   └─ Parking System Service (2 replicas)
@@ -21,9 +24,8 @@ Security Monitoring:
 
 Automation:
   └─ Kubernetes API (automated responses)
-```
+```bash
 
-### Dr. Dana's Requirements (From Proposal)
 ✅ MUST HAVE:
 - Kubernetes cluster (K3s) ✓ Deployed
 - Falco OR Suricata for IDS ✓ Falco working
@@ -40,8 +42,10 @@ Automation:
 - Baseline comparison (manual vs AI monitoring)
 
 ### File Structure
-```
+
+```bash
 ~/smart-city-ids/
+
 ├── src/
 │   ├── main.py                    # FastAPI IDS application
 │   ├── config.py                  # Configuration from env vars
@@ -59,9 +63,8 @@ Automation:
 ├── complete_check.sh              # System verification script
 ├── requirements.txt               # Python dependencies
 └── venv/                          # Python virtual environment
-```
+```bash
 
-### Current Working State
 ✅ WORKING:
 - K3s cluster installed and running
 - 6 Smart City IoT pods deployed (traffic, healthcare, parking)
@@ -78,58 +81,67 @@ Automation:
 - No metrics collection
 
 ### API Keys (Configured in ~/.bashrc)
+
 ```bash
 export OPENAI_API_KEY="sk-proj-NL..."
+
 export GROQ_API_KEY="gsk_Np3JT2..."
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-```
+```bash
 
-### Common Issues & Fixes
 1. **K3s API Unreachable:**
+
 ```bash
    sudo systemctl restart k3s && sleep 15
+
    sudo chmod 644 /etc/rancher/k3s/k3s.yaml
    export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
    kubectl get nodes
-```
+```bash
+1. **IDS Import Errors:**
 
-2. **IDS Import Errors:**
    - Problem: `from src.config import Config` fails
    - Fix: Change to `from config import Config` in main.py
 
-3. **Pods Not Running:**
+1. **Pods Not Running:**
+
 ```bash
    kubectl apply -f k8s-manifests/services-no-build.yaml
-   kubectl get pods -n smart-city -w
-```
 
-### Quick Recovery Commands
+   kubectl get pods -n smart-city -w
 ```bash
-# 1. Navigate to project
+
+```bash
+
 cd ~/smart-city-ids
 
 # 2. Activate Python environment
+
 source venv/bin/activate
 
 # 3. Check system status
+
 ./complete_check.sh
 
 # 4. Fix K3s if needed
+
 sudo systemctl restart k3s && sleep 15
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # 5. Verify pods
+
 kubectl get pods -n smart-city
 kubectl get pods -n falco-system
 
 # 6. Start IDS API
+
 python3 -m uvicorn src.main:app --host 0.0.0.0 --port 8000
 
 # 7. Run demo
-./demo_script.sh
-```
 
-### Next Steps (Priority Order)
+./demo_script.sh
+```bash
+
 1. **FIX K3s API reliability** - Most critical
 2. **Add LangChain wrapper** - Dr. Dana requirement
 3. **Deploy Prometheus** - For proper metrics
@@ -178,6 +190,7 @@ Can you help me continue from where I left off? First, let me run ./complete_che
 ---
 
 ## 📊 Key Metrics to Track (For Final Report)
+
 - Detection time: <2 seconds (target)
 - AI analysis time: <1 second (target)
 - Total response time: <5 seconds (target)
@@ -186,6 +199,7 @@ Can you help me continue from where I left off? First, let me run ./complete_che
 - Time saved: 428x faster than manual (30min → 3.5sec)
 
 ## 🎓 For Teacher Demo
+
 Show her:
 1. System overview (kubectl get pods --all-namespaces)
 2. Falco monitoring active

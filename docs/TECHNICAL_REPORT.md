@@ -23,8 +23,9 @@ This document describes the design, implementation, and deployment of a **Real-t
 
 ## SYSTEM ARCHITECTURE
 
-```
+```bash
 Attack Data → Attack Receiver (Port 5555)
+
     ↓
 Dual LLM Analysis (ChatGPT + Cloud API)
     ↓
@@ -33,9 +34,7 @@ Threat Assessment
 Automated Response (Isolate/Block/Alert)
     ↓
 Kubernetes Services + Incident Log
-```
-
----
+```bash
 
 ## TECHNOLOGY STACK
 
@@ -54,19 +53,22 @@ Kubernetes Services + Incident Log
 
 ### Phase 1: Environment Setup
 
-**Why WSL2?**
+### Why WSL2?
+
 - Native Linux on Windows
 - Full Kubernetes support
 - Network connectivity
 - Development efficiency
 
-**Steps:**
+### Steps
+
 1. Open Kali Linux terminal
 2. Create project directory: `mkdir -p ~/smart-city-ids`
 3. Create virtual environment: `python3 -m venv venv`
 4. Activate: `source venv/bin/activate`
 
-**Why Virtual Environment?**
+### Why Virtual Environment?
+
 - Isolates dependencies
 - Prevents system conflicts
 - Enables clean reinstalls
@@ -74,35 +76,38 @@ Kubernetes Services + Incident Log
 
 ### Phase 2: Kubernetes Setup
 
-**Why K3s?**
+### Why K3s?
+
 - Only 512MB, lightweight
 - Perfect for edge computing
 - Production-ready
 - Single installation command
 
-**Installation:**
+### Installation
+
 ```bash
-curl -sfL https://get.k3s.io | K3S_KUBECONFIG_MODE=644 sh -
+curl -sfL <https://get.k3s.io> | K3S_KUBECONFIG_MODE=644 sh -
+
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 kubectl cluster-info
-```
+```bash
 
-**Verification:**
 ```bash
 kubectl get nodes
+
 # Expected: node "pc" with status "Ready"
-```
 
-### Phase 3: Microservices Development
+```bash
 
-**Why 3 Services?**
+### Why 3 Services?
+
 - Traffic Camera: IoT monitoring simulation
 - Healthcare: Demonstrates data sensitivity (HIPAA)
 - Parking: Smart infrastructure example
 
 **Traffic Camera Service** (`smart-city-services/traffic-camera/app.py`):
+
 ```python
-from flask import Flask, jsonify
 
 app = Flask(__name__)
 
@@ -113,9 +118,8 @@ def health():
 @app.route('/api/cameras', methods=['GET'])
 def get_cameras():
     return jsonify({"cameras": {...}}), 200
-```
+```bash
 
-**Why REST API?**
 - Standard HTTP protocol
 - Easy to test
 - Scalable architecture
@@ -123,9 +127,11 @@ def get_cameras():
 
 ### Phase 4: Attack Receiver Implementation
 
-**Core Function:**
+### Core Function
+
 ```python
 @app.route('/api/attack', methods=['POST'])
+
 def receive_attack():
     # 1. Receive JSON attack data
     # 2. Validate required fields
@@ -134,9 +140,8 @@ def receive_attack():
     # 5. Take automated actions
     # 6. Log incident
     # 7. Return results
-```
+```bash
 
-**Why This Design?**
 1. **Validation First** - Prevents crashes from bad data
 2. **Parallel Analysis** - Both LLMs run simultaneously
 3. **Severity-Based Actions** - Different responses for different threats
@@ -150,7 +155,8 @@ def receive_attack():
 - Uses ConfigMaps for app code injection
 - Targets `smart-city` namespace
 
-**Why ConfigMaps?**
+### Why ConfigMaps?
+
 - No Docker images needed
 - Direct code injection
 - Easy updates
@@ -158,15 +164,17 @@ def receive_attack():
 
 ### Phase 6: Testing & Validation
 
-**Test 1: Services Accessible**
+### Test 1: Services Accessible
+
 ```bash
 kubectl port-forward svc/traffic-camera-service 8001:80 -n smart-city
-curl http://localhost:8001/health
-```
 
-**Test 2: Attack Reception**
+curl <http://localhost:8001/health>
 ```bash
-curl -X POST http://192.168.0.170:5555/api/attack \
+
+```bash
+curl -X POST <http://192.168.0.170:5555/api/attack> \
+
   -H "Content-Type: application/json" \
   -d '{
     "type":"DDoS",
@@ -175,9 +183,8 @@ curl -X POST http://192.168.0.170:5555/api/attack \
     "severity":"critical",
     "data":{"rps":50000}
   }'
-```
+```bash
 
-**Test 3: LLM Analysis**
 - ChatGPT provides threat assessment
 - Cloud API provides secondary analysis
 - Both results returned to client
@@ -188,16 +195,18 @@ curl -X POST http://192.168.0.170:5555/api/attack \
 
 ### Complete Startup Sequence
 
-**Terminal 1: Start Kubernetes**
+### Terminal 1: Start Kubernetes
+
 ```bash
 sudo systemctl start k3s
+
 sleep 5
 kubectl cluster-info
-```
+```bash
 
-**Terminal 2: Deploy Services**
 ```bash
 cd ~/smart-city-ids
+
 kubectl apply -f k8s-manifests/namespace.yaml
 
 kubectl create configmap traffic-camera-code \
@@ -205,27 +214,25 @@ kubectl create configmap traffic-camera-code \
   -n smart-city --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl apply -f k8s-manifests/services-no-build.yaml
-```
+```bash
 
-**Terminal 3: Start Attack Receiver**
 ```bash
 cd ~/smart-city-ids
+
 source venv/bin/activate
 export CHATGPT_API_KEY="sk-proj-YOUR_KEY"
-export CLOUD_API_URL="https://your-api"
+export CLOUD_API_URL="<https://your-api">
 export CLOUD_API_KEY="your-key"
 
 python src/attack_receiver.py
-```
-
-**Terminal 4: Send Test Attack**
 ```bash
-curl -X POST http://192.168.0.170:5555/api/attack \
+
+```bash
+curl -X POST <http://192.168.0.170:5555/api/attack> \
+
   -H "Content-Type: application/json" \
   -d '{"type":"DDoS",...}'
-```
-
----
+```bash
 
 ## API SPECIFICATION
 
@@ -233,9 +240,11 @@ curl -X POST http://192.168.0.170:5555/api/attack \
 
 **URL:** `POST /api/attack`
 
-**Request:**
+### Request
+
 ```json
 {
+
   "type": "DDoS|Malware|NetworkIntrusion|DataExfiltration",
   "source_ip": "192.168.1.100",
   "target": "traffic-camera",
@@ -246,11 +255,11 @@ curl -X POST http://192.168.0.170:5555/api/attack \
     "duration": "ongoing"
   }
 }
-```
+```bash
 
-**Response:**
 ```json
 {
+
   "status": "processed",
   "attack_id": 1,
   "analysis": {
@@ -268,29 +277,29 @@ curl -X POST http://192.168.0.170:5555/api/attack \
     ]
   }
 }
-```
-
-### Endpoint 2: Health Check
+```bash
 
 **URL:** `GET /health`
 
-**Response:**
+### Response
+
 ```json
 {
+
   "status": "ready",
   "attacks_received": 5,
   "cloud_api": "✅",
   "chatgpt_api": "✅"
 }
-```
-
-### Endpoint 3: Get All Attacks
+```bash
 
 **URL:** `GET /api/attacks`
 
-**Response:**
+### Response
+
 ```json
 {
+
   "total": 5,
   "attacks": [
     {
@@ -304,21 +313,21 @@ curl -X POST http://192.168.0.170:5555/api/attack \
     }
   ]
 }
-```
-
----
+```bash
 
 ## SECURITY ARCHITECTURE
 
 ### Threat Model
 
-**Assets Protected:**
+### Assets Protected
+
 - Traffic Camera Systems
 - Healthcare Patient Data
 - Parking Infrastructure
 - Network Resources
 
-**Threats Detected:**
+### Threats Detected
+
 1. DDoS Attacks (volumetric)
 2. Data Exfiltration (HIPAA violations)
 3. Malware Injection
@@ -327,22 +336,26 @@ curl -X POST http://192.168.0.170:5555/api/attack \
 
 ### Security Controls
 
-**Layer 1: Input Validation**
+### Layer 1: Input Validation
+
 - JSON schema checks
 - Required field validation
 - Type verification
 
-**Layer 2: API Security**
+### Layer 2: API Security
+
 - API key authentication (future)
 - Rate limiting (future)
 - HTTPS/TLS (future)
 
-**Layer 3: Service Isolation**
+### Layer 3: Service Isolation
+
 - Kubernetes namespaces
 - Network policies (configured)
 - RBAC authorization
 
-**Layer 4: Incident Response**
+### Layer 4: Incident Response
+
 - Automated service isolation
 - IP blocking
 - Team notifications
@@ -352,12 +365,13 @@ curl -X POST http://192.168.0.170:5555/api/attack \
 
 ## PERFORMANCE METRICS
 
-**Test Environment:**
+### Test Environment
+
 - Host: Kali Linux WSL2
 - CPU: 4 cores
 - RAM: 4GB allocated
 
-**Results:**
+### Results
 
 | Metric | Result |
 |--------|--------|
@@ -375,41 +389,42 @@ curl -X POST http://192.168.0.170:5555/api/attack \
 
 **Cause:** Kali Python system protection
 
-**Fix:**
+### Fix
+
 ```bash
 python3 -m venv venv
-source venv/bin/activate
-```
 
-### Issue 2: K3s Port Conflicts
+source venv/bin/activate
+```bash
 
 **Cause:** Port 6443 already in use
 
-**Fix:**
+### Fix
+
 ```bash
 sudo systemctl stop k3s
+
 sleep 3
 sudo systemctl start k3s
-```
-
-### Issue 3: ChatGPT Quota Exceeded
+```bash
 
 **Cause:** API usage limit reached
 
-**Fix:**
-1. Add payment: https://platform.openai.com/account/billing
+### Fix
+
+1. Add payment: <https://platform.openai.com/account/billing>
 2. Set usage limits
 3. Use new API key
 
 ### Issue 4: Pods Not Starting
 
-**Diagnosis:**
+### Diagnosis
+
 ```bash
 kubectl describe pod <pod-name> -n smart-city
-kubectl logs <pod-name> -n smart-city
-```
 
----
+kubectl logs <pod-name> -n smart-city
+```bash
 
 ## FUTURE ENHANCEMENTS
 
@@ -420,12 +435,12 @@ kubectl logs <pod-name> -n smart-city
    - Use `iptables` to block IPs
    - Send email/Slack alerts
 
-2. **Enhanced Analytics**
+1. **Enhanced Analytics**
    - Attack pattern clustering
    - Anomaly detection
    - Predictive modeling
 
-3. **Web Dashboard**
+1. **Web Dashboard**
    - Real-time incident display
    - Attack statistics
    - Response metrics
@@ -437,12 +452,12 @@ kubectl logs <pod-name> -n smart-city
    - Azure AKS support
    - GCP Kubernetes Engine
 
-2. **Monitoring Stack**
+1. **Monitoring Stack**
    - Prometheus metrics
    - Grafana dashboards
    - Alert management
 
-3. **SIEM Integration**
+1. **SIEM Integration**
    - Log forwarding
    - Threat intelligence feeds
    - Automated correlation
@@ -454,12 +469,12 @@ kubectl logs <pod-name> -n smart-city
    - Behavioral analysis
    - Zero-day detection
 
-2. **Enterprise Features**
+1. **Enterprise Features**
    - Multi-tenancy
    - LDAP integration
    - Compliance reporting
 
-3. **Ecosystem**
+1. **Ecosystem**
    - Industry standard APIs
    - Threat intelligence feeds
    - Playbook marketplace
@@ -485,32 +500,34 @@ Before Production:
 
 ## QUICK REFERENCE
 
-**Your System Details:**
+### Your System Details
+
 - IP Address: 192.168.0.170
 - Port: 5555
 - Location: /home/kali/smart-city-ids/
 - K8s Namespace: smart-city
 - K3s Version: v1.33.5+k3s1
 
-**Key Commands:**
+### Key Commands
+
 ```bash
-# Start system
+
 cd ~/smart-city-ids && source venv/bin/activate && python src/attack_receiver.py
 
 # Check status
+
 kubectl get pods -n smart-city
 
 # View logs
+
 kubectl logs -f deployment/traffic-camera -n smart-city
 
 # Stop system
-pkill -f "attack_receiver" && sudo systemctl stop k3s
-```
 
----
+pkill -f "attack_receiver" && sudo systemctl stop k3s
+```bash
 
 **Document Version:** 1.0  
 **Created:** November 3, 2025  
 **Status:** Ready for GitHub/Academic Publication  
 **Classification:** Open Source  
-

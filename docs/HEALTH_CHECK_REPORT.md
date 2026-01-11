@@ -1,10 +1,12 @@
 # Smart City IDS - Project Health Check Report
+
 **Date:** January 10, 2026  
 **Status:** ✅ **READY FOR DEVELOPMENT**
 
 ---
 
 ## 📦 Environment Check
+
 ✅ **Python Version:** 3.12.3  
 ✅ **Virtual Environment:** Active and functional (`./venv`)  
 ✅ **All core dependencies installed:**
@@ -17,11 +19,14 @@
 ---
 
 ## 📁 Project Structure & Organization
+
 ✅ **ORGANIZED AND COMPATIBLE**
 
 ### Core Services
-```
+
+```bash
 services/ids-api/src/
+
 ├── main.py                    ✅ FastAPI application
 ├── config.py                  ✅ Configuration management
 ├── llm_engine_groq.py         ✅ Groq/LLaMA integration
@@ -32,22 +37,22 @@ services/ids-api/src/
 ├── metrics_collector.py       ✅ Metrics collection
 ├── prometheus_metrics.py      ✅ Prometheus integration
 └── requirements.txt           ✅ Dependencies locked
-```
+```bash
 
-### IoT Services (Demo)
-```
+```bash
 smart-city-services/
+
 ├── healthcare-api/
 │   └── app.py                 ✅ Flask service (intentionally vulnerable)
 ├── parking-system/
 │   └── app.py                 ✅ Flask service (intentionally vulnerable)
 └── traffic-camera/
     └── app.py                 ✅ Flask service (intentionally vulnerable)
-```
+```bash
 
-### Infrastructure & Configuration
-```
+```bash
 k8s-manifests/
+
 ├── namespace.yaml             ✅ Kubernetes namespace
 ├── services-no-build.yaml     ✅ Service deployments
 └── [other manifests]          ✅ Network policies, RBAC
@@ -56,12 +61,12 @@ scripts/
 ├── start-everything.sh        ✅ Full system setup
 ├── import-to-k3s.sh          ✅ ConfigMap deployment
 └── [utility scripts]          ✅ System tools
-```
-
----
+```bash
 
 ## ✅ Python Code Quality
+
 ### IDS API Modules
+
 - **Syntax Check:** ✅ PASS (all 9 Python files compile without errors)
 - **Imports:** ✅ Valid (FastAPI, Groq, Kubernetes clients functional)
 - **Config Validation:** ✅ PASS
@@ -70,6 +75,7 @@ scripts/
   - K8S_NAMESPACE: smart-city ✅
 
 ### Smart City IoT Services
+
 - **Syntax Check:** ✅ PASS (all 3 Flask services compile)
 - **Compatibility:** ✅ PASS (Python 3.9-compatible for K8s deployment)
 - **Purpose:** Intentionally vulnerable for demo attacks (expected)
@@ -77,6 +83,7 @@ scripts/
 ---
 
 ## ☸️ Kubernetes Status
+
 ✅ **FULLY OPERATIONAL**
 
 - **Cluster:** Available
@@ -86,8 +93,10 @@ scripts/
 - **Namespace:** `smart-city` exists and active
 
 - **Current Deployments:**
+
   ```
   ids-api-6f6df4fff7-mxp6n       1/1 Running
+
   iot-devices-6b67c8fb7-2zq62    1/1 Running
   iot-devices-6b67c8fb7-bsmtk    1/1 Running
   iot-devices-6b67c8fb7-bsv4k    1/1 Running
@@ -95,11 +104,14 @@ scripts/
   iot-devices-6b67c8fb7-vljhx    1/1 Running
   mqtt-broker-5d8cdbc5f9-fl7lb   1/1 Running
   ```
+
+
   **Total: 7/7 pods running** ✅
 
 ---
 
 ## 🤖 LLM Integration
+
 ✅ **CONFIGURED AND FUNCTIONAL**
 
 - **Groq Integration:** ✅
@@ -122,6 +134,7 @@ scripts/
 ## 📊 Key Findings
 
 ### ✅ What's Working
+
 1. **Python Environment:** Fully functional, all dependencies installed
 2. **Project Organization:** Well-structured, all files in correct locations
 3. **Code Quality:** All Python modules syntactically valid
@@ -131,11 +144,13 @@ scripts/
 7. **Directory Structure:** Matches documentation, organized by component
 
 ### ⚠️ Minor Notes
+
 - K3s API server had temporary unavailability during check (normal during restarts)
 - Some kubectl calls got ServiceUnavailable (transient API server issue)
 - zsh history corruption during testing (cleared, no impact)
 
 ### 🔧 Compatibility Notes
+
 - **Python Versions:** Code is compatible with 3.9-3.12 (tested on 3.12.3)
 - **K8s Versions:** Works with K3s v1.x (lightweight Kubernetes)
 - **Container Runtime:** containerd (via K3s default)
@@ -160,17 +175,20 @@ scripts/
 ## 📝 Next Steps (Recommendations)
 
 ### Immediate (Safe)
+
 1. ✅ IDS API local testing: `uvicorn main:app --host 0.0.0.0 --port 8000`
 2. ✅ Attack simulation: Use `attack-simulator/` tools
 3. ✅ Log monitoring: `kubectl logs -f -n smart-city ids-api-...`
 
 ### Optional Enhancements
+
 1. Add unit tests for LLM parsing (template in `tests/`)
 2. Expand Prometheus metrics scraping config
 3. Add CI/CD pipeline (GitHub Actions template)
 4. Document deployment on WSL2 or cloud platforms
 
 ### Not Needed Right Now
+
 - Infrastructure fixes (all working)
 - Dependency updates (locked versions stable)
 - Code refactoring (follows conventions)
@@ -184,16 +202,16 @@ scripts/
 - `docs/PROJECT_CONTEXT.md` — Architecture & recovery commands
 - `docs/README.md` — Full system documentation
 
-**Quick Health Check Command:**
+### Quick Health Check Command
+
 ```bash
 cd /home/aka/smart-city-ids
+
 source venv/bin/activate
 kubectl cluster-info
 kubectl get pods -n smart-city
 python3 -c "from services.ids-api.src.config import Config; Config.validate()"
-```
-
----
+```bash
 
 ## ✅ Conclusion
 
@@ -203,5 +221,6 @@ The **Smart City IDS project is fully organized, compatible, and ready for devel
 
 ---
 
-*Report Generated: 2026-01-10 04:15 UTC*  
-*Checked By: Automated Health Diagnostics*
+## Report Generated: 2026-01-10 04:15 UTC
+
+## Checked By: Automated Health Diagnostics

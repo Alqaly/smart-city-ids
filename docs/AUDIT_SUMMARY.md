@@ -1,5 +1,6 @@
 # Smart City IDS - Complete Security & Architecture Review
-**Executive Summary & Action Items**
+
+### Executive Summary & Action Items
 
 ---
 
@@ -19,9 +20,13 @@
 ## 🎯 Key Findings Summary
 
 ### Critical Issues Found: 10
+
 ### High Priority Issues: 5
+
 ### Medium Priority Issues: 10+
+
 ### Code Quality Issues: 15+
+
 ### Structural Issues: 40% duplicate files
 
 ---
@@ -29,6 +34,7 @@
 ## 📁 Generated Documents
 
 ### 1. **SECURITY_AUDIT_AND_RECOMMENDATIONS.md** (18 sections)
+
 Complete vulnerability assessment with:
 - 18 specific vulnerabilities (Critical to Medium priority)
 - Code examples for each issue
@@ -36,7 +42,8 @@ Complete vulnerability assessment with:
 - Compliance checklist (OWASP, HIPAA, NIST)
 - Quick wins (5 can be done immediately)
 
-**Key Vulnerabilities:**
+### Key Vulnerabilities
+
 1. ❌ Missing API authentication
 2. ❌ Unencrypted in-memory storage
 3. ❌ No input validation
@@ -49,6 +56,7 @@ Complete vulnerability assessment with:
 10. ❌ Metrics endpoint public
 
 ### 2. **CAPSTONE_2_BLUEPRINT.md** (30 sections)
+
 Complete Capstone 2 architecture with:
 - Recommended project structure (organized)
 - Security layer implementation
@@ -59,9 +67,11 @@ Complete Capstone 2 architecture with:
 - 5-week migration timeline (195 hours)
 - Success criteria
 
-**Recommended Structure:**
-```
+### Recommended Structure
+
+```bash
 src/
+
   ├── ids-api/ (main API service)
   ├── alert-processor/ (async worker)
   ├── llm-analyzer/ (async worker)
@@ -83,9 +93,8 @@ tests/
   ├── unit/ (60% coverage)
   ├── integration/ (20% coverage)
   └── e2e/ (10% coverage)
-```
+```bash
 
-### 3. **scripts/cleanup-and-organize.sh** (Executable)
 Automated cleanup script that:
 - Removes 16 redundant root-level scripts
 - Removes backup files
@@ -93,7 +102,8 @@ Automated cleanup script that:
 - Creates backup of changes
 - Safe and reversible
 
-**Files Removed:**
+### Files Removed
+
 - DEPLOY-COMPLETE-SYSTEM.sh
 - DEPLOY-FROM-ORIGINALS.sh
 - FINAL-DEMO.sh
@@ -105,49 +115,62 @@ Automated cleanup script that:
 ## 🚀 IMMEDIATE ACTIONS (Do This Week)
 
 ### Priority 1: Security (4 hours)
+
 ```bash
-# 1. Add API authentication
+
 # File: services/ids-api/src/main.py
+
 # Add: from fastapi.security import HTTPBearer
+
 # Wrap endpoints with auth check
 
 # 2. Add input validation
+
 # File: services/ids-api/src/main.py
+
 # Add: Pydantic validators for all fields
 
 # 3. Add LLM timeout
+
 # File: services/ids-api/src/llm_engine_groq.py
+
 # Add: timeout=10.0, max_retries=2
 
 # 4. Encrypt alert storage
-# File: services/ids-api/src/main.py
-# Replace: in-memory list → SQLAlchemy + encryption
-```
 
-### Priority 2: Organization (2 hours)
+# File: services/ids-api/src/main.py
+
+# Replace: in-memory list → SQLAlchemy + encryption
+
 ```bash
-# Run cleanup script
+
+```bash
+
 cd /home/aka/smart-city-ids
 ./scripts/cleanup-and-organize.sh
 
-# This will:
+# This will
+
 # - Remove redundant scripts
+
 # - Create backup (cleanup-backup-YYYYMMDD/)
+
 # - Generate CLEANUP_REPORT.md
-```
 
-### Priority 3: Documentation (1 hour)
 ```bash
-# 1. Review SECURITY_AUDIT_AND_RECOMMENDATIONS.md
-# 2. Review CAPSTONE_2_BLUEPRINT.md
-# 3. Update README.md with migration plan
-```
 
----
+```bash
+
+# 2. Review CAPSTONE_2_BLUEPRINT.md
+
+# 3. Update README.md with migration plan
+
+```bash
 
 ## 📊 QUICK REFERENCE
 
 ### What's Good ✅
+
 | Area | Status | Notes |
 |------|--------|-------|
 | Kubernetes cluster | ✅ Working | 7 pods running, responsive |
@@ -159,8 +182,10 @@ cd /home/aka/smart-city-ids
 | Testing | ❌ Missing | <5% coverage |
 
 ### Vulnerability Risk Matrix
-```
+
+```bash
          LIKELIHOOD
+
          ┌─────────────────────────────┐
          │ Critical │ High    │ Medium │
     ─────┼──────────┼─────────┼────────┤
@@ -173,13 +198,12 @@ cd /home/aka/smart-city-ids
     M │ No Rate  │ No       │ Dead   │
       │ Limit    │ Testing  │ Code   │
       └──────────┴─────────┴────────┘
-```
-
----
+```bash
 
 ## 📈 CAPSTONE 2 ROADMAP
 
 ### Phase 1: Security Hardening (Week 1-2)
+
 - [ ] Add API authentication (JWT)
 - [ ] Implement input validation
 - [ ] Encrypt database storage
@@ -189,6 +213,7 @@ cd /home/aka/smart-city-ids
 **Effort:** 40 hours | **Risk Reduction:** 70%
 
 ### Phase 2: Code Quality (Week 2-3)
+
 - [ ] Refactor monolithic code
 - [ ] Add error handling
 - [ ] Remove dead code
@@ -197,6 +222,7 @@ cd /home/aka/smart-city-ids
 **Effort:** 50 hours | **Improvement:** +40% maintainability
 
 ### Phase 3: Testing (Week 3-4)
+
 - [ ] Unit tests (60%)
 - [ ] Integration tests (20%)
 - [ ] E2E tests (10%)
@@ -205,6 +231,7 @@ cd /home/aka/smart-city-ids
 **Effort:** 30 hours | **Coverage:** 80%+
 
 ### Phase 4: Architecture (Week 4-5)
+
 - [ ] Message queue (RabbitMQ)
 - [ ] Async workers
 - [ ] Event sourcing
@@ -213,6 +240,7 @@ cd /home/aka/smart-city-ids
 **Effort:** 60 hours | **Scalability:** 10x
 
 ### Phase 5: Finalization (Week 5)
+
 - [ ] Documentation
 - [ ] Cleanup
 - [ ] Production deployment
@@ -248,19 +276,19 @@ cd /home/aka/smart-city-ids
    - Remediation code examples
    - Compliance checklist
 
-2. **[CAPSTONE_2_BLUEPRINT.md](./CAPSTONE_2_BLUEPRINT.md)** (12 KB)
+1. **[CAPSTONE_2_BLUEPRINT.md](./CAPSTONE_2_BLUEPRINT.md)** (12 KB)
    - Recommended architecture
    - Code examples
    - Testing strategy
    - Migration timeline
 
-3. **[scripts/cleanup-and-organize.sh](./scripts/cleanup-and-organize.sh)** (Executable)
+1. **[scripts/cleanup-and-organize.sh](./scripts/cleanup-and-organize.sh)** (Executable)
    - Automated project cleanup
    - Removes 16 redundant files
    - Creates backups
    - Generates report
 
-4. **[HEALTH_CHECK_REPORT.md](./HEALTH_CHECK_REPORT.md)** (Existing)
+1. **[HEALTH_CHECK_REPORT.md](./HEALTH_CHECK_REPORT.md)** (Existing)
    - Project status verification
    - Deployment readiness checklist
    - Component status matrix
@@ -270,18 +298,21 @@ cd /home/aka/smart-city-ids
 ## 📞 HOW TO PROCEED
 
 ### Option A: Quick Wins First (Recommended)
+
 1. Run: `./scripts/cleanup-and-organize.sh`
 2. Review: `SECURITY_AUDIT_AND_RECOMMENDATIONS.md`
 3. Implement: 4 quick security fixes (8 hours)
 4. Plan: Capstone 2 using `CAPSTONE_2_BLUEPRINT.md`
 
 ### Option B: Full Refactor Now
+
 1. Start with `CAPSTONE_2_BLUEPRINT.md` architecture
 2. Create new directory structure
 3. Migrate code incrementally
 4. Parallel run Capstone 1 + 2 for validation
 
 ### Option C: Security-First
+
 1. Focus on `SECURITY_AUDIT_AND_RECOMMENDATIONS.md`
 2. Implement all critical fixes first
 3. Add auth, encryption, policies
@@ -294,6 +325,7 @@ cd /home/aka/smart-city-ids
 Before submitting Capstone 2:
 
 ### Security ✅
+
 - [ ] All critical vulnerabilities fixed
 - [ ] JWT authentication implemented
 - [ ] Database encryption enabled
@@ -303,6 +335,7 @@ Before submitting Capstone 2:
 - [ ] Secrets never committed
 
 ### Quality ✅
+
 - [ ] 80%+ test coverage
 - [ ] 0 code smells (SonarQube)
 - [ ] Type hints throughout
@@ -311,6 +344,7 @@ Before submitting Capstone 2:
 - [ ] Logging structured
 
 ### Architecture ✅
+
 - [ ] Event-driven design
 - [ ] Async/await throughout
 - [ ] Separation of concerns
@@ -319,6 +353,7 @@ Before submitting Capstone 2:
 - [ ] Scalable to 1000 alerts/min
 
 ### Documentation ✅
+
 - [ ] README.md complete
 - [ ] API documentation
 - [ ] Architecture diagram
@@ -327,6 +362,7 @@ Before submitting Capstone 2:
 - [ ] Migration guide
 
 ### Operations ✅
+
 - [ ] CI/CD pipeline working
 - [ ] Container scanning enabled
 - [ ] Prometheus metrics
@@ -338,46 +374,53 @@ Before submitting Capstone 2:
 
 ## 📚 REFERENCE MATERIALS
 
-**Security Standards:**
-- OWASP Top 10 (2021): https://owasp.org/www-project-top-ten/
-- CIS Kubernetes Benchmarks: https://www.cisecurity.org/cis-benchmarks/
-- NIST Cybersecurity Framework: https://www.nist.gov/cyberframework/
+### Security Standards
 
-**Technology Documentation:**
-- FastAPI Security: https://fastapi.tiangolo.com/advanced/security/
-- Kubernetes Security: https://kubernetes.io/docs/concepts/security/
-- PostgreSQL Encryption: https://www.postgresql.org/docs/current/pgcrypto.html
-- RabbitMQ Guide: https://www.rabbitmq.com/documentation.html
+- OWASP Top 10 (2021): <https://owasp.org/www-project-top-ten/>
+- CIS Kubernetes Benchmarks: <https://www.cisecurity.org/cis-benchmarks/>
+- NIST Cybersecurity Framework: <https://www.nist.gov/cyberframework/>
+
+### Technology Documentation
+
+- FastAPI Security: <https://fastapi.tiangolo.com/advanced/security/>
+- Kubernetes Security: <https://kubernetes.io/docs/concepts/security/>
+- PostgreSQL Encryption: <https://www.postgresql.org/docs/current/pgcrypto.html>
+- RabbitMQ Guide: <https://www.rabbitmq.com/documentation.html>
 
 ---
 
 ## 🎓 CAPSTONE GRADING CRITERIA (Suggested)
 
 ### Security & Compliance (30%)
+
 - Authentication/Authorization ✅
 - Data encryption ✅
 - Input validation ✅
 - Network security ✅
 
 ### Architecture & Design (25%)
+
 - Separation of concerns ✅
 - Scalability ✅
 - Event-driven patterns ✅
 - Error handling ✅
 
 ### Code Quality (20%)
+
 - Test coverage (80%+) ✅
 - Documentation ✅
 - Type safety ✅
 - Performance ✅
 
 ### Operations (15%)
+
 - CI/CD pipeline ✅
 - Monitoring & logging ✅
 - Deployment automation ✅
 - Rollback procedures ✅
 
 ### Presentation (10%)
+
 - Clear documentation ✅
 - Demo effectiveness ✅
 - Design decisions explained ✅
@@ -388,7 +431,8 @@ Before submitting Capstone 2:
 
 The Smart City IDS project provides a **solid foundation** for a capstone system with working Kubernetes integration, LLM analysis, and IoT simulation. However, it requires **significant security hardening and architectural improvements** for production readiness.
 
-**Capstone 2 should focus on:**
+### Capstone 2 should focus on
+
 1. ✅ Eliminating all critical vulnerabilities
 2. ✅ Implementing proper authentication/authorization
 3. ✅ Adding encrypted persistent storage

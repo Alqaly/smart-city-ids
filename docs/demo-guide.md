@@ -14,16 +14,17 @@ This guide explains how to run a compelling demonstration of the Smart City IDS 
 
 ### Part 1: System Overview (2 minutes)
 
-**What to show:**
+### What to show
+
 ```bash
-# Show the project structure
+
 ls -la smart-city-ids/
 
 # Show the architecture diagram from README
-cat README.md | head -50
-```
 
-**Talking points:**
+cat README.md | head -50
+```bash
+
 - Smart Cities have thousands of vulnerable IoT devices
 - Traditional IDS creates alert fatigue
 - Our solution: AI-powered threat detection and response
@@ -33,20 +34,21 @@ cat README.md | head -50
 
 ### Part 2: Start the Cluster (3 minutes)
 
-**What to do:**
+### What to do
+
 ```bash
-# Start everything
+
 cd smart-city-ids
 ./scripts/start-everything.sh
-```
+```bash
 
-**Show:**
 - K3s installation
 - Kubernetes cluster starting
 - Services deploying
 - Pods becoming ready
 
-**Talking points:**
+### Talking points
+
 - K3s is lightweight Kubernetes for edge computing
 - Services are automatically load-balanced
 - ConfigMaps allow easy code deployment without Docker
@@ -55,17 +57,19 @@ cd smart-city-ids
 
 ### Part 3: Verify Services Running (2 minutes)
 
-**What to show:**
+### What to show
+
 ```bash
-# Terminal 1: Watch pods
+
 kubectl get pods -n smart-city -w
 
 # Terminal 2: Check pod count
+
 kubectl get pods -n smart-city
 # Should show 6 running pods (2 of each service)
-```
 
-**Talking points:**
+```bash
+
 - 3 smart city services running
 - Each with 2 replicas for high availability
 - All isolated in the smart-city namespace
@@ -74,21 +78,22 @@ kubectl get pods -n smart-city
 
 ### Part 4: Access Services (2 minutes)
 
-**Terminal 3: Port forward and test**
+### Terminal 3: Port forward and test
 
 ```bash
-# Start port forwards in background
+
 kubectl port-forward -n smart-city svc/traffic-camera-service 8001:80 &
 
 # Test service
-curl http://localhost:8001/health
+
+curl <http://localhost:8001/health>
 # Response: {"status": "healthy", "service": "traffic-camera"}
 
-curl http://localhost:8001/api/cameras
+curl <http://localhost:8001/api/cameras>
 # Response: Camera data exposed without authentication!
-```
 
-**Talking points:**
+```bash
+
 - Services are running and accessible
 - Note the lack of authentication (intentional for demo!)
 - This is what attackers would exploit
@@ -97,24 +102,25 @@ curl http://localhost:8001/api/cameras
 
 ### Part 5: Run Attack Scenario (5-7 minutes)
 
-**Choose one attack scenario:**
+### Choose one attack scenario
 
 #### Option A: Quick Data Exfiltration (3 minutes)
 
 ```bash
-# Port forward healthcare service
+
 kubectl port-forward -n smart-city svc/healthcare-api-service 8002:80 &
 
 # Run extraction attack
-python3 attack-simulator/data_exfiltration.py http://localhost:8002
-```
 
-**What happens:**
+python3 attack-simulator/data_exfiltration.py <http://localhost:8002>
+```bash
+
 - Successfully extracts patient data (HIPAA violation!)
 - Modifies admin configuration
 - Steals payment information
 
-**Talking points:**
+### Talking points
+
 - Attackers can easily extract sensitive data
 - No authentication on critical endpoints
 - Patient and payment data exposed
@@ -123,20 +129,21 @@ python3 attack-simulator/data_exfiltration.py http://localhost:8002
 #### Option B: DDoS Attack (5 minutes)
 
 ```bash
-# Port forward service
+
 kubectl port-forward -n smart-city svc/traffic-camera-service 8001:80 &
 
 # Run DDoS simulation
-python3 attack-simulator/ddos_simulator.py http://localhost:8001/api/cameras 20 20
-```
 
-**What happens:**
+python3 attack-simulator/ddos_simulator.py <http://localhost:8001/api/cameras> 20 20
+```bash
+
 - Flood of requests hit the service
 - Shows RPS (Requests Per Second)
 - Simulates real DDoS attack
 - Service becomes overwhelmed
 
-**Talking points:**
+### Talking points
+
 - Service is vulnerable to resource exhaustion
 - No rate limiting in place
 - Attackers can disrupt traffic monitoring
@@ -146,20 +153,21 @@ python3 attack-simulator/ddos_simulator.py http://localhost:8001/api/cameras 20 
 
 ### Part 6: Show IDS Analysis (2 minutes)
 
-**Terminal 4: Check IDS (when ready)**
+### Terminal 4: Check IDS (when ready)
 
 ```bash
-# Port forward IDS
+
 kubectl port-forward -n smart-city svc/ids-api-service 8004:5003 &
 
 # Simulate alert
-curl -X POST http://localhost:8004/api/simulate-alert
+
+curl -X POST <http://localhost:8004/api/simulate-alert>
 
 # Get dashboard
-curl http://localhost:8004/api/dashboard
-```
 
-**Talking points:**
+curl <http://localhost:8004/api/dashboard>
+```bash
+
 - IDS captures attack alerts
 - AI analyzes threats in context
 - Provides actionable recommendations
@@ -172,49 +180,54 @@ curl http://localhost:8004/api/dashboard
 ### Pre-Demo Setup (Do Before Audience)
 
 ```bash
-cd smart-city-ids
 
 # Pre-start the system to save time
+
 ./scripts/start-everything.sh
 
 # Let it fully start while you prepare
-# This takes ~1-2 minutes
-```
 
-### Demo Execution
+# This takes ~1-2 minutes
 
 ```bash
-# Terminal 1: Show project structure
+
+```bash
+
 cd smart-city-ids
 ls -la
 echo "This is our Smart City IDS project"
 
 # Terminal 2: Show cluster status
+
 kubectl get pods -n smart-city
 # Say: "All 6 pods are running - 2 traffic cameras, 2 healthcare APIs, 2 parking systems"
 
 # Terminal 3: Port forward and test services
+
 kubectl port-forward -n smart-city svc/traffic-camera-service 8001:80 &
 sleep 2
-curl http://localhost:8001/health
+curl <http://localhost:8001/health>
 echo ""
 echo "Service is running and accessible."
 echo ""
-curl http://localhost:8001/api/cameras
+curl <http://localhost:8001/api/cameras>
 echo ""
 echo "Notice: Camera data is exposed without any authentication!"
 
 # Terminal 4: Show pod logs
+
 kubectl logs -f -l app=traffic-camera -n smart-city &
 echo ""
 echo "In the background, you can see pod logs"
 
 # Terminal 3: Run attack
+
 echo ""
 echo "Now, let's simulate an attack..."
-python3 attack-simulator/data_exfiltration.py http://localhost:8001
+python3 attack-simulator/data_exfiltration.py <http://localhost:8001>
 
 # Terminal 2: Show impact
+
 echo ""
 echo "As you can see, attackers successfully:"
 echo "- Extracted camera locations"
@@ -224,27 +237,28 @@ echo ""
 echo "This is where the IDS comes in..."
 
 # Terminal 3: Show IDS
+
 kubectl port-forward -n smart-city svc/ids-api-service 8004:5003 &
 sleep 2
-curl http://localhost:8004/api/dashboard
+curl <http://localhost:8004/api/dashboard>
 echo ""
 echo "The IDS has detected and logged these attacks"
 echo "With Groq LLM, it would provide AI analysis of threats"
-```
-
----
+```bash
 
 ## 📈 Talking Points for Different Audiences
 
 ### For Technical Audience
 
-**Architecture & Implementation:**
+### Architecture & Implementation
+
 - Kubernetes (K3s) for container orchestration
 - ConfigMaps for zero-Docker deployment
 - LLM integration via Groq API
 - Automated response systems with kubectl
 
-**Challenges Solved:**
+### Challenges Solved
+
 - Edge computing with low latency
 - Kubernetes on resource-constrained devices
 - Python microservices with Flask
@@ -254,18 +268,21 @@ echo "With Groq LLM, it would provide AI analysis of threats"
 
 ### For Business Audience
 
-**Problem & Solution:**
+### Problem & Solution
+
 - Smart Cities: Connected but Vulnerable
 - Traditional IDS: Too many alerts, missed threats
 - Our Solution: AI understands context, responds automatically
 
-**ROI:**
+### ROI
+
 - Reduced security team workload
 - Faster threat response time
 - Fewer breaches through early detection
 - Cost-effective edge processing
 
-**Market Opportunity:**
+### Market Opportunity
+
 - Global smart city market: $X billion
 - Growing IoT security concerns
 - Enterprise demand for intelligent security
@@ -275,13 +292,15 @@ echo "With Groq LLM, it would provide AI analysis of threats"
 
 ### For Academic Audience
 
-**Innovation:**
+### Innovation
+
 - Novel application of LLMs in cybersecurity
 - Edge computing architecture
 - Kubernetes for IoT deployments
 - Automated threat response systems
 
-**Research Contributions:**
+### Research Contributions
+
 - Alert fatigue reduction metrics
 - LLM threat analysis accuracy
 - System response latency measurements
@@ -292,18 +311,21 @@ echo "With Groq LLM, it would provide AI analysis of threats"
 ## 🎯 Demo Variations
 
 ### Demo 1: System Capabilities (5 minutes)
+
 - Show cluster starting
 - Display running services
 - Port-forward and test endpoints
 - Show IDS dashboard
 
 ### Demo 2: Attack & Response (10 minutes)
+
 - Part 1: Show system starting
 - Part 2: Run attack simulation
 - Part 3: Show IDS detecting attacks
 - Part 4: Demonstrate automated responses
 
 ### Demo 3: Deep Dive (15 minutes)
+
 - Full system setup
 - Multiple attack scenarios
 - LLM threat analysis
@@ -317,17 +339,17 @@ echo "With Groq LLM, it would provide AI analysis of threats"
 ### Performance
 
 ```bash
-# Check pod resource usage
+
 kubectl top pods -n smart-city
 
 # Show response times
-curl -w "@curl-format.txt" -o /dev/null -s http://localhost:8001/api/cameras
+
+curl -w "@curl-format.txt" -o /dev/null -s <http://localhost:8001/api/cameras>
 
 # Monitor cluster status
-watch kubectl get nodes
-```
 
-### Metrics to Highlight
+watch kubectl get nodes
+```bash
 
 - **Detection Time**: <1 second for threat detection
 - **Analysis Time**: <2 seconds for LLM analysis
@@ -367,40 +389,39 @@ watch kubectl get nodes
 ### Pods Won't Start
 
 ```bash
-# Check what's wrong
+
 kubectl describe pod <pod-name> -n smart-city
 
 # Check logs
+
 kubectl logs <pod-name> -n smart-city
 
 # Force restart
-kubectl delete pod <pod-name> -n smart-city
-```
 
-### Service Not Accessible
+kubectl delete pod <pod-name> -n smart-city
+```bash
 
 ```bash
-# Verify service exists
+
 kubectl get svc -n smart-city
 
 # Check endpoints
+
 kubectl get endpoints -n smart-city
 
 # Test with exec
-kubectl exec -it <pod-name> -n smart-city -- curl http://localhost:5000/health
-```
 
-### Port Forward Not Working
+kubectl exec -it <pod-name> -n smart-city -- curl <http://localhost:5000/health>
+```bash
 
 ```bash
-# Kill stuck port forwards
+
 pkill -f "kubectl port-forward"
 
 # Start fresh
-kubectl port-forward -n smart-city svc/<service> <port>:80 &
-```
 
----
+kubectl port-forward -n smart-city svc/<service> <port>:80 &
+```bash
 
 ## 💡 Pro Tips
 
@@ -419,32 +440,38 @@ kubectl port-forward -n smart-city svc/<service> <port>:80 &
 
 ### Expected Questions
 
-**Q: Why Kubernetes?**
+### Q: Why Kubernetes?
+
 A: K3s is lightweight, perfect for edge computing in smart cities. Provides orchestration, scaling, and automated management of services.
 
-**Q: How does LLM help?**
+### Q: How does LLM help?
+
 A: Traditional IDS generates thousands of alerts. LLM understands context, explains threats in business terms, and suggests appropriate responses.
 
-**Q: What's the latency?**
+### Q: What's the latency?
+
 A: Detection: <1s, Analysis: <2s, Response: <3s total. Much faster than manual operators.
 
-**Q: Can it scale?**
+### Q: Can it scale?
+
 A: Yes, from one city to hundreds. Each city runs its own K3s cluster, reporting to central control.
 
-**Q: What about false positives?**
+### Q: What about false positives?
+
 A: LLM helps reduce them by understanding context. System learns over time with feedback.
 
-**Q: Cost?**
+### Q: Cost?
+
 A: Groq LLM is cost-effective. Edge processing saves bandwidth. Much cheaper than 24/7 security staff.
 
 ---
 
 ## 📚 Additional Resources
 
-- Kubernetes docs: https://kubernetes.io/docs/
-- K3s documentation: https://k3s.io/
-- Groq API docs: https://console.groq.com/docs
-- Smart City security research: https://nist.gov
+- Kubernetes docs: <https://kubernetes.io/docs/>
+- K3s documentation: <https://k3s.io/>
+- Groq API docs: <https://console.groq.com/docs>
+- Smart City security research: <https://nist.gov>
 
 ---
 

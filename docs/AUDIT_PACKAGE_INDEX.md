@@ -1,11 +1,13 @@
 # Smart City IDS - Complete Audit Package
-**Contents & Quick Navigation**
+
+### Contents & Quick Navigation
 
 ---
 
 ## 📋 DOCUMENTS GENERATED (5 Files)
 
 ### 1. 🔥 **[QUICK_FIXES.md](./QUICK_FIXES.md)** ← START HERE
+
 **Read Time:** 10 minutes | **Implementation:** 8 hours
 
 Immediate actions to fix 5 critical vulnerabilities:
@@ -20,6 +22,7 @@ Immediate actions to fix 5 critical vulnerabilities:
 ---
 
 ### 2. 🔒 **[SECURITY_AUDIT_AND_RECOMMENDATIONS.md](./SECURITY_AUDIT_AND_RECOMMENDATIONS.md)**
+
 **Read Time:** 30 minutes | **Reference:** Complete vulnerability catalog
 
 Complete security audit with:
@@ -34,7 +37,8 @@ Each vulnerability includes:
 - Risk assessment
 - Specific remediation code
 
-**Compliance Checklist:**
+### Compliance Checklist
+
 - ❌ 7/10 OWASP Top 10 vulnerabilities present
 - ❌ HIPAA non-compliant (if handling patient data)
 - ~40% NIST Cybersecurity Framework
@@ -45,6 +49,7 @@ Each vulnerability includes:
 ---
 
 ### 3. 🏗️ **[CAPSTONE_2_BLUEPRINT.md](./CAPSTONE_2_BLUEPRINT.md)**
+
 **Read Time:** 45 minutes | **Reference:** Implementation guide
 
 Complete architecture redesign with:
@@ -60,7 +65,8 @@ Complete architecture redesign with:
 - **5-week migration plan** with daily tasks
 - **Success criteria** (18-point checklist)
 
-**Effort Breakdown:**
+### Effort Breakdown
+
 - Week 1: Security Foundation (40 hours)
 - Week 2: API Hardening (40 hours)
 - Week 3: Event-Driven Arch (40 hours)
@@ -73,6 +79,7 @@ Complete architecture redesign with:
 ---
 
 ### 4. 📊 **[AUDIT_SUMMARY.md](./AUDIT_SUMMARY.md)**
+
 **Read Time:** 15 minutes | **Reference:** Executive overview
 
 High-level summary including:
@@ -91,6 +98,7 @@ High-level summary including:
 ---
 
 ### 5. 🧹 **[scripts/cleanup-and-organize.sh](./scripts/cleanup-and-organize.sh)**
+
 **Run Time:** 5 minutes | **Action:** Automated cleanup
 
 Executable script that:
@@ -100,9 +108,11 @@ Executable script that:
 - Generates cleanup report
 - Safe and reversible
 
-**What it removes:**
-```
+### What it removes
+
+```bash
 DEPLOY-COMPLETE-SYSTEM.sh
+
 DEPLOY-FROM-ORIGINALS.sh
 FINAL-DEMO.sh
 complete-setup.sh
@@ -117,20 +127,17 @@ use-existing-metrics.sh
 k3s-auto-detect-ip.sh
 attack.sh
 attack-simulation.sh.backup
-```
-
-**Usage:**
 ```bash
-./scripts/cleanup-and-organize.sh
-```
 
-**Best for:** Getting project organized before starting Capstone 2
+```bash
+```bash
 
 ---
 
 ## 🗂️ EXISTING DOCUMENTS (Complementary)
 
 ### Supporting Files
+
 - **[HEALTH_CHECK_REPORT.md](./HEALTH_CHECK_REPORT.md)** - System status verification
 - **[.github/copilot-instructions.md](./.github/copilot-instructions.md)** - AI agent guidance
 - **[SECURITY_AUDIT_AND_RECOMMENDATIONS.md](./SECURITY_AUDIT_AND_RECOMMENDATIONS.md)** - Full audit report
@@ -140,6 +147,7 @@ attack-simulation.sh.backup
 ## 🎯 READING PATHS BY ROLE
 
 ### 👨‍💻 For Developers (Building Capstone 2)
+
 1. Start: **QUICK_FIXES.md** (implement 5 fixes today)
 2. Then: **CAPSTONE_2_BLUEPRINT.md** (understand new architecture)
 3. Reference: **SECURITY_AUDIT_AND_RECOMMENDATIONS.md** (when implementing features)
@@ -150,6 +158,7 @@ attack-simulation.sh.backup
 ---
 
 ### 👨‍🏫 For Instructors (Grading Capstone 2)
+
 1. Start: **AUDIT_SUMMARY.md** (project health overview)
 2. Then: **SECURITY_AUDIT_AND_RECOMMENDATIONS.md** (understand vulnerabilities)
 3. Use: **Suggested grading criteria** from AUDIT_SUMMARY.md
@@ -160,6 +169,7 @@ attack-simulation.sh.backup
 ---
 
 ### 🏢 For Project Managers
+
 1. Start: **AUDIT_SUMMARY.md** (executive overview)
 2. Then: **CAPSTONE_2_BLUEPRINT.md** - Section: "Effort Estimates" & "Timeline"
 3. Key: **Risk matrix** (understand what matters most)
@@ -170,6 +180,7 @@ attack-simulation.sh.backup
 ---
 
 ### 🔒 For Security Review
+
 1. Start: **SECURITY_AUDIT_AND_RECOMMENDATIONS.md** (complete vulnerability list)
 2. Then: **CAPSTONE_2_BLUEPRINT.md** - "Security Layer" section
 3. Check: **Compliance Checklist** from SECURITY_AUDIT_AND_RECOMMENDATIONS.md
@@ -182,11 +193,13 @@ attack-simulation.sh.backup
 ## 🚀 THREE WAYS TO PROCEED
 
 ### Option A: Quick Wins First (Recommended) ⭐
+
 **Timeline:** 2 weeks  
 **Effort:** 50 hours
 
-```
+```bash
 Week 1:
+
   - Implement QUICK_FIXES.md (8 hours)
   - Run cleanup script (1 hour)
   - Review audit documents (3 hours)
@@ -195,19 +208,22 @@ Week 2:
   - Implement remaining high-priority fixes
   - Start Capstone 2 planning
   - Begin phase 1 (security)
-```
 
+```bash
 **Pros:** Fast wins, builds momentum, security improved immediately  
+
 **Cons:** Interrupted later by architecture refactoring
 
 ---
 
 ### Option B: Security-First Approach
+
 **Timeline:** 4 weeks  
 **Effort:** 120 hours
 
-```
+```bash
 Week 1-2: Security Hardening (Phase 1)
+
   - All critical/high vulnerabilities fixed
   - API authentication added
   - Encryption implemented
@@ -220,27 +236,31 @@ Week 3: Code Quality (Phase 2)
 Week 4: Testing (Phase 3)
   - Comprehensive test suite
   - Security scanning
-```
 
+```bash
 **Pros:** Produces hardened system, clear security posture  
+
 **Cons:** Requires substantial refactoring before architecture changes
 
 ---
 
 ### Option C: Full Refactor Immediately
+
 **Timeline:** 5 weeks  
 **Effort:** 195 hours
 
-```
+```bash
 Follow CAPSTONE_2_BLUEPRINT.md exactly:
+
   - Week 1: Security foundation
   - Week 2: API hardening
   - Week 3: Event-driven architecture
   - Week 4: Testing & CI/CD
   - Week 5: Finalization
-```
 
+```bash
 **Pros:** Clean architecture from ground up, best long-term outcome  
+
 **Cons:** Takes longest, highest upfront cost
 
 ---
@@ -248,11 +268,13 @@ Follow CAPSTONE_2_BLUEPRINT.md exactly:
 ## ✅ WHAT TO DO RIGHT NOW
 
 ### Today (2 hours)
+
 - [ ] Read **QUICK_FIXES.md** completely
 - [ ] Read **AUDIT_SUMMARY.md** completely
 - [ ] Review **SECURITY_AUDIT_AND_RECOMMENDATIONS.md** (sections 1-6)
 
 ### This Week (20 hours)
+
 - [ ] Implement **QUICK_FIXES.md** (5 fixes, 8 hours)
 - [ ] Run **cleanup-and-organize.sh** (1 hour)
 - [ ] Review and organize project structure (2 hours)
@@ -261,6 +283,7 @@ Follow CAPSTONE_2_BLUEPRINT.md exactly:
 - [ ] Document all changes (2 hours)
 
 ### Next Week (40 hours)
+
 - [ ] Implement remaining high-priority fixes
 - [ ] Begin Phase 1 or Phase 2 depending on approach
 - [ ] Setup testing framework
@@ -288,7 +311,8 @@ Follow CAPSTONE_2_BLUEPRINT.md exactly:
 
 ## 🎓 LEARNING OUTCOMES (By Completing)
 
-**Students will:**
+### Students will
+
 - ✅ Understand OWASP Top 10 vulnerabilities (hands-on)
 - ✅ Implement proper authentication/authorization
 - ✅ Design secure microservices architecture
@@ -300,7 +324,8 @@ Follow CAPSTONE_2_BLUEPRINT.md exactly:
 - ✅ Understand performance/scalability tradeoffs
 - ✅ Document production systems
 
-**Demonstrates competency in:**
+### Demonstrates competency in
+
 - Application Security (OWASP, NIST, CIS)
 - Software Architecture
 - Cloud-Native Development (Kubernetes)
@@ -312,19 +337,24 @@ Follow CAPSTONE_2_BLUEPRINT.md exactly:
 
 ## 📞 FREQUENTLY ASKED QUESTIONS
 
-**Q: How critical are these vulnerabilities?**  
+### Q: How critical are these vulnerabilities?
+
 A: 4 are critical (could cause system compromise). Others are important for production but less immediately dangerous in isolated demo environment.
 
-**Q: Can I fix vulnerabilities while maintaining Capstone 1 functionality?**  
+### Q: Can I fix vulnerabilities while maintaining Capstone 1 functionality?
+
 A: Yes! QUICK_FIXES.md can be implemented without breaking existing features. Full architectural changes (CAPSTONE_2_BLUEPRINT.md) require refactoring.
 
-**Q: How long will Capstone 2 take?**  
+### Q: How long will Capstone 2 take?
+
 A: 195 hours of work (5 weeks full-time, 8 weeks part-time at 24 hours/week, 13 weeks at 15 hours/week).
 
-**Q: Can I use these fixes as-is or do I need to modify?**  
+### Q: Can I use these fixes as-is or do I need to modify?
+
 A: All code examples are templates. You'll need to customize for your specific needs (tokens, database URLs, etc.).
 
-**Q: Should I deploy to production with these fixes?**  
+### Q: Should I deploy to production with these fixes?
+
 A: After Phase 1 + 2 (Weeks 1-2), yes. After Phase 3 + 4 (Weeks 3-4), definitely. As-is: definitely not.
 
 ---
@@ -333,14 +363,16 @@ A: After Phase 1 + 2 (Weeks 1-2), yes. After Phase 3 + 4 (Weeks 3-4), definitely
 
 **Project Root:** `/home/aka/smart-city-ids/`
 
-**Key Directories:**
+### Key Directories
+
 - `src/ids-api/src/` - Main application code
 - `smart-city-services/` - Demo IoT services
 - `k8s-manifests/` - Kubernetes configurations
 - `scripts/` - Utility scripts
 - `docs/` - Documentation
 
-**Generated Audit Files:**
+### Generated Audit Files
+
 - `QUICK_FIXES.md` - Immediate action items
 - `SECURITY_AUDIT_AND_RECOMMENDATIONS.md` - Full vulnerability report
 - `CAPSTONE_2_BLUEPRINT.md` - Architecture design

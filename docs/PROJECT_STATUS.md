@@ -4,9 +4,11 @@
 **Status:** Core IDS API functional; setup & testing infrastructure added; docs organized.
 
 ## Elevator pitch
+
 Smart City IDS is an LLM-driven Intrusion Detection System for a Smart City demo. It ingests security alerts (via Falco), analyzes them using Groq/OpenAI LLMs, and executes automated Kubernetes actions (pod isolation, service scaling). Recent work focused on making setup reproducible, adding safe DB migrations, docs validation, and smoke tests.
 
 ## Architecture snapshot
+
 - **Core service:** `services/ids-api/src/main.py` (FastAPI) — alert ingestion, LLM analysis, K8s automation.
 - **LLM analyzers:** `llm_engine_groq.py`, `llm_engine_openai.py` — parse alerts, call LLM, extract JSON.
 - **K8s automation:** `k8s_automation.py` — scale deployments, evict pods based on severity thresholds.
@@ -16,6 +18,7 @@ Smart City IDS is an LLM-driven Intrusion Detection System for a Smart City demo
 - **Database:** PostgreSQL with encrypted alert storage, audit logs, and analysis results (migrations in `infrastructure/database/migrations/`).
 
 ## Recent changes (last sprint)
+
 - ✅ Wrapped DB migrations in transaction; made pgcrypto creation non-fatal (handles missing superuser).
 - ✅ Added migration runner script: `scripts/db/run_migrations.sh`.
 - ✅ Added docs validation script: `scripts/docs/check-docs.sh` (markdownlint + link checks).
@@ -26,6 +29,7 @@ Smart City IDS is an LLM-driven Intrusion Detection System for a Smart City demo
 - ✅ Organized all docs with INDEX.md.
 
 ## Key files to show instructor / LLM
+
 1. **docs/PROJECT_STATUS.md** (this file) — current progress snapshot.
 2. **docs/INDEX.md** — entry point for all documentation.
 3. **docs/QUICK_START.md** — step-by-step local setup.
@@ -38,18 +42,22 @@ Smart City IDS is an LLM-driven Intrusion Detection System for a Smart City demo
 10. **services/ids-api/src/k8s_automation.py** — Kubernetes automation methods.
 
 ## How to reproduce / quick commands
+
 ```bash
-# Validate environment
+
 make check
 
 # Validate docs
+
 make docs-check
 
 # Apply DB migrations (to a test DB)
+
 export DATABASE_URL="postgres://user:pass@localhost:5432/smartcity_test"
 make db-migrate
 
 # Run IDS API locally
+
 cd services/ids-api/src
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
@@ -57,20 +65,22 @@ export GROQ_API_KEY="gsk_..." # or OPENAI_API_KEY
 uvicorn main:app --host 0.0.0.0 --port 8000
 
 # Run smoke tests
+
 make smoke-test
 
 # Run full demo (K3s + all services)
+
 ./scripts/start-everything.sh
 kubectl get pods -n smart-city -w
-```
+```bash
 
-## Pipeline overview
 1. **Developer** makes change → runs `make check`, `make docs-check`, local tests.
 2. **Push** → GitHub Actions runs `docs.yml` (docs validation) and `smoke-tests.yml` (API smoke tests).
 3. **If CI passes** → merge and deploy to demo environment via `./scripts/start-everything.sh`.
 4. **Demo** → Falco detects attacks, forwards alerts to IDS API, LLM analyzes, K8s automation executes.
 
 ## Current capabilities
+
 - ✅ Alert ingestion via HTTP POST (`/api/alerts`).
 - ✅ LLM analysis via Groq or OpenAI (JSON extraction + fallback parsing).
 - ✅ Severity-based automation: isolate pod (severity >= 8), scale service (severity >= 6).
@@ -82,6 +92,7 @@ kubectl get pods -n smart-city -w
 - ✅ Docs validation (markdown lint + link checks).
 
 ## Next steps / Recommendations
+
 - [ ] Expand unit tests for LLM parsing (test edge cases, malformed JSON).
 - [ ] Add integration test that starts a real K3s cluster and posts alerts.
 - [ ] Add monitoring dashboard (Prometheus + Grafana for alerts, latencies, automation outcomes).
@@ -90,6 +101,7 @@ kubectl get pods -n smart-city -w
 - [ ] Expand automated actions (e.g., update firewall rules, send alerts to SIEM).
 
 ## Blockers / Known issues
+
 - **pgcrypto extension:** Requires DB superuser; migration now skips it gracefully if privileges are absent. Manual setup may be needed for encryption at rest.
 - **K8s automation mock:** Smoke tests mock K8s calls; validate with real K3s cluster before demo.
 - **Prometheus:** Referenced in some manifests but not fully wired; skip for now unless adding metrics.
