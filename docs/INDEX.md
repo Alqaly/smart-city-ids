@@ -14,6 +14,11 @@ Quick reference for all documentation in this repo. **Start here** to find what 
 
 ## All docs (organized by purpose)
 
+### Capstone II (Kubernetes Operator)
+
+- **CAPSTONE_II_KUBERNETES_OPERATOR.md** — 10-page design doc: framework selection (Kopf), CRD schema, architecture diagrams, RBAC, error handling, testing strategy.
+- **CAPSTONE_II_IMPLEMENTATION_CHECKLIST.md** — step-by-step tasks for OPS-2 through OPS-5 (implementation, testing, observability, documentation). Critical path timeline.
+
 ### Project overview & status
 
 - **PROJECT_STATUS.md** — snapshot of current progress, recent changes, next steps. **Show this to instructors.**
