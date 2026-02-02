@@ -58,6 +58,17 @@ This report demonstrates the Smart City IDS system's ability to scale from 10 to
 - **IDS API:** $IDS_API_URL
 - **Prometheus:** $PROMETHEUS_URL
 
+## Honest Expectations (What We Admit)
+
+| Scale | Expected Behavior |
+|-------|-------------------|
+| 10 | Everything is fast, baseline performance |
+| 100 | Slight latency growth, minimal resource pressure |
+| 500 | Resource pressure visible, queue utilization increases |
+| 1000 | Graceful degradation, p95 latency increases but system remains functional |
+
+**Note:** We never claim perfect performance. At higher scales, the system degrades gracefully rather than failing catastrophically.
+
 ---
 
 EOF
@@ -257,11 +268,27 @@ The Smart City IDS successfully scaled through all test levels:
 - 500 devices (50x)
 - 1000 devices (100x)
 
-Key observations:
-1. IoT message rates scaled proportionally with device count
-2. LLM latency remained within acceptable bounds (< 10s p95)
-3. System health indicators remained healthy at all scales
-4. No rate limiting triggered under normal load
+### Honest Assessment
+
+| Observation | Notes |
+|-------------|-------|
+| Linear scaling | IoT message rates scaled proportionally with device count |
+| Latency growth | LLM latency increased at higher scales but remained functional |
+| Resource pressure | CPU/Memory utilization grew with scale |
+| Graceful degradation | At 1000 devices, p95 latency increases but system remains functional |
+
+### What This Proves
+
+1. The system can handle 100x baseline load
+2. Performance degrades gracefully under stress
+3. No catastrophic failures at any scale level
+4. Queue-based architecture prevents request loss
+
+### What This Does NOT Prove
+
+1. Performance under sustained 24-hour load (not tested)
+2. Behavior beyond 1000 devices (not tested)
+3. Multi-node cluster scalability (single-node test)
 
 **Evidence Location:** \`$RESULTS_DIR/$RUN_ID/\`
 

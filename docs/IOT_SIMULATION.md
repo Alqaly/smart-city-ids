@@ -1,14 +1,59 @@
 # IoT Simulation Realism - Technical Specification
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Status:** Capstone II Integration  
-**Last Updated:** 2025-01-20
+**Last Updated:** 2026-02-02
+
+---
+
+## Academic Disclaimer
+
+> **"All traffic and attacks are emulated but statistically grounded, reproducible, and mapped to real-world threat behaviors. The objective is not to mirror a specific city, but to evaluate system behavior under realistic operational stress."**
+
+This document provides IEEE-defensible justification for the IoT simulation model used in this project.
+
+---
+
+## Data Classification
+
+This project explicitly distinguishes three types of data:
+
+| Category | Description | Source |
+|----------|-------------|--------|
+| **A. Synthetic IoT Traffic** | Statistically modeled sensor data | Poisson process generator |
+| **B. Emulated Attacks** | Mapped to real threat techniques | Attack simulator → Falco/Suricata |
+| **C. Measured System Behavior** | Actual latency, throughput, actions | Prometheus metrics |
+
+**We do not claim "real city data."**  
+**We claim realistic, research-grade emulation.**
+
+---
 
 ## Overview
 
 This document describes the enhanced IoT device simulation system implementing IEEE-defensible traffic patterns for the Smart City IDS project.
 
-## Features
+---
+
+## Statistical Model
+
+### Assumption
+
+> Sensor events are modeled as a **non-homogeneous Poisson process**.
+
+### Justification
+
+This model is widely used in network traffic and IoT literature to represent independent event-driven systems with time-varying intensity:
+
+1. **Independence**: Each sensor reports independently
+2. **Stationarity within intervals**: Rate is constant within short time windows
+3. **No simultaneous events**: Continuous-time approximation is valid
+4. **Memoryless property**: Inter-arrival times are exponentially distributed
+
+**Why Poisson?**  
+Because independent sensor reporting with varying intensity converges to a Poisson process. Bursts are injected to violate the baseline and test system robustness.
+
+### Mathematical Model
 
 ### 1. Poisson Arrival Process
 
@@ -18,27 +63,34 @@ Messages are generated following a **Poisson arrival process** with time-varying
 λ(t) = λ_base × multiplier_rush(hour) × multiplier_weekday(day)
 ```
 
-**Mathematical Model:**
-- Inter-arrival times follow an exponential distribution
+**Mathematical Properties:**
+- Inter-arrival times follow an exponential distribution: `T ~ Exp(λ)`
 - `interval = random.expovariate(λ/60)` (converted from msg/min to msg/sec)
 - Clamped to [0.1s, 300s] for stability
+- **Expected variance**: High variability is intentional and realistic
 
-### 2. Device Classes
+---
 
-| Class | Base Rate (λ) | Use Case |
-|-------|---------------|----------|
-| `high` | 60 msg/min (1/sec) | Continuous sensors (traffic cameras, flow meters) |
-| `medium` | 6 msg/min (1/10sec) | Standard sensors (environment, parking) |
-| `burst` | 0.5 msg/min | Event-driven (motion detection, alarms) |
+## Device Classes with Justification
+
+| Class | Base Rate (λ) | Real-World Analog | Justification |
+|-------|---------------|-------------------|---------------|
+| `high` | 60 msg/min (1/sec) | Traffic cameras, flow meters | Typical telemetry sensors sending continuous updates |
+| `medium` | 6 msg/min (1/10sec) | Environmental monitors, parking sensors | Standard IoT polling intervals for non-critical data |
+| `burst` | 0.5 msg/min baseline, 100 msg/sec during events | Motion detectors, alarms | Event-driven sensors with sparse baseline and burst activity |
 
 Configure via environment variable:
 ```bash
 DEVICE_CLASS=high|medium|burst
 ```
 
+---
+
+## Rush Hour Multipliers (Time-Varying λ)
+
 ### 3. Rush Hour Multipliers
 
-Traffic patterns reflect real-world urban activity:
+Traffic patterns reflect real-world urban activity based on observed human mobility patterns:
 
 | Hour | Multiplier | Description |
 |------|------------|-------------|
@@ -52,6 +104,10 @@ Traffic patterns reflect real-world urban activity:
 | 18 | 5.0x | Post-rush |
 | 19-23 | 1.0x | Evening baseline |
 
+**Justification**: Rush hour peaks (08:00, 17:00) match observed urban traffic patterns where sensor activity correlates with human commute times.
+
+---
+
 ### 4. Weekday Patterns
 
 | Day | Multiplier |
@@ -59,6 +115,10 @@ Traffic patterns reflect real-world urban activity:
 | Monday-Friday | 1.0x |
 | Saturday | 0.3x |
 | Sunday | 0.2x |
+
+**Justification**: Weekend traffic reduction reflects observed patterns in urban mobility studies.
+
+---
 
 ### 5. Failure Injection
 
@@ -76,6 +136,10 @@ FAILURE_DISCONNECT_DURATION=30
 FAILURE_LATENCY_SPIKE_PROB=0.02
 FAILURE_LATENCY_SPIKE_MAX=5.0
 ```
+
+**Justification**: Real IoT networks experience transient failures. Failure injection tests system resilience without masking normal operation.
+
+---
 
 ## Prometheus Metrics
 
@@ -178,18 +242,32 @@ kubectl scale deployment/iot-simulator-environment -n smart-city --replicas=300
 
 ## Observable Outcomes
 
+### Falsifiability Tests
+
+The following behaviors can be verified and falsified:
+
 1. **Poisson Arrival Validation**
    - Message inter-arrival times follow exponential distribution
    - Visible in `iot_message_latency_seconds` histogram
+   - **Test**: Chi-squared goodness-of-fit test on inter-arrival times
 
 2. **Rush Hour Bursts**
    - 10x message rate increase at 08:00 and 17:00
    - Visible in `iot_current_message_rate` and `iot_burst_factor` metrics
+   - **Test**: Compare metrics at 03:00 vs 08:00 → expect 10x difference
 
 3. **Failure Injection**
    - Random disconnects visible in `iot_device_disconnects_total`
    - Latency spikes visible in histogram tail
    - Device status toggles in `iot_device_active`
+   - **Test**: Over 1000 messages, expect ~10 disconnects (1%) and ~20 latency spikes (2%)
+
+4. **Cause-Effect Correlation**
+   - When IoT message rate increases, detection latency increases slightly
+   - When attacks stop, alert rate decreases
+   - **Test**: Overlay `iot_message_rate` with `llm_reasoning_latency_seconds` in Grafana
+
+---
 
 ## HTTP Endpoints
 
@@ -228,3 +306,18 @@ curl http://<pod-ip>:5000/metrics | grep iot_messages_sent_total
 - IEEE IoT Journal: "Traffic Pattern Modeling in Smart Cities"
 - Poisson Process Theory: https://en.wikipedia.org/wiki/Poisson_point_process
 - MQTT Protocol: https://mqtt.org/mqtt-specification/
+- Kingman, J.F.C. "Poisson Processes" (1993) - Theoretical foundation
+- Harchol-Balter, M. "Performance Modeling and Design of Computer Systems" - Queuing theory
+
+---
+
+## Examiner FAQ
+
+**Q: Why Poisson?**  
+A: Because independent sensor reporting with varying intensity converges to a Poisson process. Bursts are injected to violate the baseline and test system robustness.
+
+**Q: Is this real city data?**  
+A: No. This is statistically modeled synthetic data designed to be reproducible and falsifiable. The goal is to evaluate system behavior, not replicate a specific city.
+
+**Q: How do you know the data is realistic?**  
+A: The model parameters (rates, multipliers, failure probabilities) are configurable and can be calibrated against real-world datasets if available. The structure (Poisson arrivals, diurnal patterns, failure injection) matches established IoT traffic models.
