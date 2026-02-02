@@ -3,8 +3,8 @@
 Short, targeted guidance to help AI coding agents be productive immediately in this repo.
 
 ## Big picture (what matters)
-- This project is an LLM-driven Intrusion Detection System for a Smart City demo (intentionally vulnerable IoT services + Falco + K3s + Groq/OpenAI).
-- Core service: `services/ids-api/src/main.py` (FastAPI). It ingests security alerts, calls an LLM analyzer (`llm_engine_groq.py` / `llm_engine_openai.py`) and executes Kubernetes actions via `k8s_automation.py`.
+- This project is an LLM-driven Intrusion Detection System for a Smart City demo (intentionally vulnerable IoT services + Falco + K3s + xAI Grok-4/OpenAI).
+- Core service: `services/ids-api/src/main.py` (FastAPI). It ingests security alerts, calls an LLM analyzer (`llm_engine_xai.py` / `llm_engine_openai.py`) and executes Kubernetes actions via `k8s_automation.py`.
 - Demo IoT services live in `smart-city-services/*` (Flask apps mounted into K8s via `k8s-manifests/services-no-build.yaml`).
 - Falco forwards alerts (see `services/forwarders/falco/src/main.py`) in JSON form. Analyzer expects `output`, `rule`, `output_fields` and `container.name`.
 
@@ -13,7 +13,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
   - ./scripts/start-everything.sh
   - Follow up: `kubectl get pods -n smart-city -w`
 - Run only IDS API locally:
-  - export GROQ_API_KEY="..." (or OPENAI_API_KEY)
+  - export XAI_API_KEY="..." (or OPENAI_API_KEY)
   - cd services/ids-api/src && python -m venv venv && source venv/bin/activate
   - pip install -r requirements.txt
   - uvicorn main:app --host 0.0.0.0 --port 8000
@@ -23,7 +23,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
 - Quick fixes for common infra issues (K3s permissions / kubeconfig): see `docs/PROJECT_CONTEXT.md` (KUBECONFIG export, `sudo systemctl restart k3s`).
 
 ## Project-specific conventions & patterns
-- LLM integration: `llm_engine_groq.py` expects LLM output to be valid JSON with keys: `severity` (1-10), `summary`, `threat_type`, `recommendations`, `automated_actions`.
+- LLM integration: `llm_engine_xai.py` expects LLM output to be valid JSON with keys: `severity` (1-10), `summary`, `threat_type`, `recommendations`, `automated_actions`.
   - Example: analyzer returns `{"status":"success","analysis":{...}}`
 - Automated actions in `main.py` are threshold-driven:
   - severity >= 8 → isolate pod (uses `container.name` from `alert.output_fields`)
@@ -33,7 +33,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
 - Falco alerts are parsed and mapped to a 1-10 severity using `_map_priority` in `services/forwarders/falco/src/main.py`.
 
 ## Integration points & required secrets
-- LLM API keys required: `GROQ_API_KEY` or `OPENAI_API_KEY` (at least one) — set in env or ~/.bashrc before running (see `docs/PROJECT_CONTEXT.md`).
+- LLM API keys required: `XAI_API_KEY` or `OPENAI_API_KEY` (at least one) — set in env or ~/.bashrc before running (see `docs/PROJECT_CONTEXT.md`).
 - KUBECONFIG: the project uses `/etc/rancher/k3s/k3s.yaml` by default; export `KUBECONFIG` if different.
 - Monitoring: Falco (runtime), Prometheus & Grafana are referenced but Prometheus may be incomplete — be careful when adding metrics.
 
@@ -47,7 +47,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
 
 ## Helpful files to inspect
 - `services/ids-api/src/main.py` — alert processing + automation logic
-- `services/ids-api/src/llm_engine_groq.py` — Groq prompt & JSON contract
+- `services/ids-api/src/llm_engine_xai.py` — xAI Grok-4 prompt & JSON contract
 - `services/ids-api/src/k8s_automation.py` — how automated K8s actions are applied
 - `services/forwarders/falco/src/main.py` — Falco alert shaping
 - `k8s-manifests/services-no-build.yaml` and `scripts/start-everything.sh` — deployment pattern and configmap workflow
@@ -56,7 +56,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
 ## Small examples (copy/paste)
 - Start IDS API locally:
 
-  export GROQ_API_KEY="gsk_..."
+  export XAI_API_KEY="xai-..."
   cd services/ids-api/src
   python -m venv venv && source venv/bin/activate
   pip install -r requirements.txt
@@ -75,9 +75,9 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
 ---
 ## Troubleshooting & common fixes
 - K3s not starting: restart and fix permissions: `sudo systemctl restart k3s && sleep 15 && sudo chmod 644 /etc/rancher/k3s/k3s.yaml` then `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`.
-- IDS API fails to start with config error: ensure at least one LLM key is set (`GROQ_API_KEY` or `OPENAI_API_KEY`) and that `Config.validate()` passes; run inside a virtualenv and `pip install -r requirements.txt`.
+- IDS API fails to start with config error: ensure at least one LLM key is set (`XAI_API_KEY` or `OPENAI_API_KEY`) and that `Config.validate()` passes; run inside a virtualenv and `pip install -r requirements.txt`.
 - Falco not emitting alerts: check Falco pods and logs: `kubectl get pods -n falco-system` and `kubectl logs -n falco-system -l app=falco --tail=50`.
-- Groq/OpenAI output not parsing: `services/ids-api/src/llm_engine_groq.py` attempts to extract JSON inside ```json fences and falls back to a conservative analysis object — add unit tests for parsing if you change the prompt.
+- xAI/OpenAI output not parsing: `services/ids-api/src/llm_engine_xai.py` attempts to extract JSON inside ```json fences and falls back to a conservative analysis object — add unit tests for parsing if you change the prompt.
 - Kubernetes automation appears no-op: ensure `KUBECONFIG` is correct and the caller has RBAC permissions to scale/evict pods; see `services/ids-api/src/k8s_automation.py`.
 
 ## Contributor checklist (quick)
@@ -112,7 +112,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
   }
 
 Notes:
-- `llm_engine_groq.py` builds a system prompt (see file) and prefers JSON fenced responses. If parsing fails it returns a fallback analysis object to keep processing safe.
+- `llm_engine_xai.py` builds a system prompt (see file) and prefers JSON fenced responses. If parsing fails it returns a fallback analysis object to keep processing safe.
 - When adding tests for LLM parsing, assert both successful JSON extraction and the fallback behavior to avoid regressions.
 
 ---

@@ -1,6 +1,6 @@
 """
 Unified LLM Engine - Auto-detects available API
-Tries: Claude > Groq > OpenAI
+Tries: xAI Grok-4 > OpenAI > Claude
 """
 import os
 from dotenv import load_dotenv
@@ -12,29 +12,18 @@ class LLMSecurityAnalyzer:
         self.engine = None
         self.provider = None
         
-        # Try Claude first
-        if os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
+        # Try xAI Grok-4 first (primary)
+        if os.getenv("XAI_API_KEY"):
             try:
-                from llm_engine_claude import LLMSecurityAnalyzer as ClaudeAnalyzer
-                self.engine = ClaudeAnalyzer()
-                self.provider = "Claude"
-                print("✅ Using Claude AI")
+                from llm_engine_xai import XAIAnalyzer
+                self.engine = XAIAnalyzer()
+                self.provider = "xAI Grok-4"
+                print("✅ Using xAI Grok-4")
                 return
             except Exception as e:
-                print(f"⚠️ Claude failed: {e}")
+                print(f"⚠️ xAI failed: {e}")
         
-        # Try Groq
-        if os.getenv("GROQ_API_KEY"):
-            try:
-                from llm_engine_groq import LLMSecurityAnalyzer as GroqAnalyzer
-                self.engine = GroqAnalyzer()
-                self.provider = "Groq"
-                print("✅ Using Groq AI")
-                return
-            except Exception as e:
-                print(f"⚠️ Groq failed: {e}")
-        
-        # Try OpenAI
+        # Try OpenAI (fallback)
         if os.getenv("OPENAI_API_KEY"):
             try:
                 from llm_engine_openai import LLMSecurityAnalyzer as OpenAIAnalyzer
@@ -45,7 +34,18 @@ class LLMSecurityAnalyzer:
             except Exception as e:
                 print(f"⚠️ OpenAI failed: {e}")
         
-        raise ValueError("❌ No LLM API key found! Set CLAUDE_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY in .env")
+        # Try Claude (tertiary)
+        if os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
+            try:
+                from llm_engine_claude import LLMSecurityAnalyzer as ClaudeAnalyzer
+                self.engine = ClaudeAnalyzer()
+                self.provider = "Claude"
+                print("✅ Using Claude AI")
+                return
+            except Exception as e:
+                print(f"⚠️ Claude failed: {e}")
+        
+        raise ValueError("❌ No LLM API key found! Set XAI_API_KEY, OPENAI_API_KEY, or CLAUDE_API_KEY in .env")
     
     def analyze_alert(self, alert_data):
         """Forward to the active engine"""

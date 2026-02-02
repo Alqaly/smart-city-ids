@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ids-operator
+  namespace: smart-city
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ids-operator
+rules:
+  - apiGroups: ["kopf.dev"]
+    resources: ["kopfpeerings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["ids.smartcity.local"]
+    resources: ["threatresponses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["ids.smartcity.local"]
+    resources: ["threatresponses/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods", "namespaces"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ids-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ids-operator
+subjects:
+  - kind: ServiceAccount
+    name: ids-operator
+    namespace: smart-city

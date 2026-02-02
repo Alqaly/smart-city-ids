@@ -1,0 +1,4 @@
+# Raspberry Pi Motion Sensor Requirements
+# Install with: pip3 install -r requirements.txt
+
+requests>=2.28.0

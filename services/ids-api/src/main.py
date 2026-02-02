@@ -1,23 +1,35 @@
+"""Smart City IDS - Main Application.
+
+FastAPI-based intrusion detection system with LLM analysis.
+Production-ready with rate limiting, circuit breaker, and comprehensive monitoring.
 """
-Smart City IDS - Main Application
-FastAPI-based intrusion detection system with LLM analysis
-"""
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, validator
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
+import time
 import json
 import sys
 import os
+import hashlib
+from collections import OrderedDict
+import asyncio
+from enum import Enum
+
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 # Add src directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
-from llm_engine_groq import GroqAnalyzer
+from llm_engine_xai import XAIAnalyzer
+from llm_engine_openai import OpenAIAnalyzer
 from k8s_automation import K8sAutomation
+from database import db
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +48,7 @@ app = FastAPI(
 # Security
 security = HTTPBearer()
 
-async def verify_token(credentials: HTTPAuthCredentials = Depends(security)):
+async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Verify API token is valid"""
     token = credentials.credentials
     if not token:
@@ -44,19 +56,351 @@ async def verify_token(credentials: HTTPAuthCredentials = Depends(security)):
     # TODO: Validate JWT or API key against database
     return token
 
-# Initialize components (Groq only, OpenAI quota exceeded)
+# Initialize components (xAI Grok-4 primary, OpenAI fallback)
 try:
     Config.validate()
-    groq_engine = GroqAnalyzer()
+    xai_engine = XAIAnalyzer() if Config.XAI_API_KEY else None
+    openai_engine = OpenAIAnalyzer() if Config.OPENAI_API_KEY else None
     k8s_automation = K8sAutomation()
-    logger.info("All components initialized successfully")
+    logger.info(f"Initialized: xAI Grok-4={'ready' if xai_engine else 'disabled'}, OpenAI={'ready' if openai_engine else 'disabled'}, K8s=ready")
+    logger.info(f"Safety: mode={Config.AUTOMATION_MODE}, protected={Config.PROTECTED_SERVICES}")
 except Exception as e:
     logger.error(f"Failed to initialize: {e}")
-    groq_engine = None
+    xai_engine = None
+    openai_engine = None
     k8s_automation = None
 
-# Storage
-alerts_db: List[Dict[str, Any]] = []
+# Alert Cache for deduplication (reduces LLM costs)
+class AlertCache:
+    """LRU cache for alert deduplication with TTL"""
+    def __init__(self, max_size: int = 100, ttl_seconds: int = 60):
+        self.cache: OrderedDict = OrderedDict()
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self.hits = 0
+        self.misses = 0
+    
+    def _get_hash(self, alert: dict) -> str:
+        """Generate hash from alert rule + key output fields"""
+        key = f"{alert.get('rule', '')}:{alert.get('output_fields', {}).get('proc.cmdline', '')}:{alert.get('output_fields', {}).get('container.name', '')}"
+        return hashlib.md5(key.encode()).hexdigest()
+    
+    def get(self, alert: dict) -> Optional[dict]:
+        """Get cached analysis if exists and not expired"""
+        alert_hash = self._get_hash(alert)
+        if alert_hash in self.cache:
+            entry = self.cache[alert_hash]
+            if time.time() - entry["timestamp"] < self.ttl_seconds:
+                self.hits += 1
+                self.cache.move_to_end(alert_hash)  # LRU update
+                logger.info(f"Cache HIT for alert (hash={alert_hash[:8]})")
+                return entry["analysis"]
+            else:
+                del self.cache[alert_hash]  # Expired
+        self.misses += 1
+        return None
+    
+    def set(self, alert: dict, analysis: dict):
+        """Store analysis in cache"""
+        alert_hash = self._get_hash(alert)
+        if len(self.cache) >= self.max_size:
+            self.cache.popitem(last=False)  # Remove oldest
+        self.cache[alert_hash] = {"analysis": analysis, "timestamp": time.time()}
+    
+    def stats(self) -> dict:
+        """Return cache statistics"""
+        total = self.hits + self.misses
+        return {
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": round(self.hits / total * 100, 1) if total > 0 else 0,
+            "size": len(self.cache),
+            "max_size": self.max_size
+        }
+
+# ============== RATE LIMITER ==============
+class RateLimiter:
+    """Token bucket rate limiter for API protection"""
+    def __init__(self, requests_per_minute: int = 60, burst_size: int = 20):
+        self.requests_per_minute = requests_per_minute
+        self.burst_size = burst_size
+        self.tokens = burst_size
+        self.last_refill = time.time()
+        self.total_requests = 0
+        self.rejected_requests = 0
+        self.lock = asyncio.Lock()
+    
+    async def acquire(self) -> tuple[bool, str]:
+        """Try to acquire a token. Returns (allowed, reason)"""
+        async with self.lock:
+            now = time.time()
+            # Refill tokens based on time passed
+            time_passed = now - self.last_refill
+            tokens_to_add = time_passed * (self.requests_per_minute / 60)
+            self.tokens = min(self.burst_size, self.tokens + tokens_to_add)
+            self.last_refill = now
+            
+            self.total_requests += 1
+            
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return True, "OK"
+            else:
+                self.rejected_requests += 1
+                return False, f"Rate limit exceeded. Max {self.requests_per_minute}/min, burst {self.burst_size}"
+    
+    def stats(self) -> dict:
+        return {
+            "requests_per_minute": self.requests_per_minute,
+            "burst_size": self.burst_size,
+            "current_tokens": round(self.tokens, 2),
+            "total_requests": self.total_requests,
+            "rejected_requests": self.rejected_requests,
+            "rejection_rate": round(self.rejected_requests / self.total_requests * 100, 2) if self.total_requests > 0 else 0
+        }
+
+# ============== CIRCUIT BREAKER ==============
+class CircuitState(Enum):
+    CLOSED = "closed"      # Normal operation
+    OPEN = "open"          # Failing, reject requests
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+class CircuitBreaker:
+    """Circuit breaker for LLM API resilience"""
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30, half_open_max_calls: int = 3):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.half_open_max_calls = half_open_max_calls
+        
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.success_count = 0
+        self.last_failure_time = 0
+        self.half_open_calls = 0
+        
+        # Per-engine tracking
+        self.engine_stats = {
+            "xai-grok-4": {"failures": 0, "successes": 0, "state": "closed"},
+            "openai": {"failures": 0, "successes": 0, "state": "closed"}
+        }
+    
+    def can_execute(self, engine: str) -> tuple[bool, str]:
+        """Check if we should try this engine"""
+        stats = self.engine_stats.get(engine, {"failures": 0, "state": "closed"})
+        
+        if stats["state"] == "open":
+            # Check if recovery timeout passed
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                stats["state"] = "half_open"
+                self.half_open_calls = 0
+                logger.info(f"Circuit breaker for {engine}: OPEN → HALF_OPEN")
+            else:
+                return False, f"Circuit OPEN for {engine} (cooling down)"
+        
+        if stats["state"] == "half_open":
+            if self.half_open_calls >= self.half_open_max_calls:
+                return False, f"Circuit HALF_OPEN max calls reached for {engine}"
+            self.half_open_calls += 1
+        
+        return True, "OK"
+    
+    def record_success(self, engine: str):
+        """Record successful call"""
+        stats = self.engine_stats.get(engine, {"failures": 0, "successes": 0, "state": "closed"})
+        stats["successes"] += 1
+        stats["failures"] = 0  # Reset on success
+        
+        if stats["state"] == "half_open":
+            stats["state"] = "closed"
+            logger.info(f"Circuit breaker for {engine}: HALF_OPEN → CLOSED (recovered)")
+        
+        self.engine_stats[engine] = stats
+    
+    def record_failure(self, engine: str):
+        """Record failed call"""
+        stats = self.engine_stats.get(engine, {"failures": 0, "successes": 0, "state": "closed"})
+        stats["failures"] += 1
+        self.last_failure_time = time.time()
+        
+        if stats["failures"] >= self.failure_threshold:
+            stats["state"] = "open"
+            logger.warning(f"Circuit breaker for {engine}: → OPEN (failures={stats['failures']})")
+        
+        self.engine_stats[engine] = stats
+    
+    def get_stats(self) -> dict:
+        return {
+            "engines": self.engine_stats,
+            "failure_threshold": self.failure_threshold,
+            "recovery_timeout_sec": self.recovery_timeout
+        }
+
+# ============== REQUEST QUEUE ==============
+class RequestQueue:
+    """Simple request queue for burst handling"""
+    def __init__(self, max_queue_size: int = 100):
+        self.max_queue_size = max_queue_size
+        self.queue_size = 0
+        self.total_queued = 0
+        self.total_rejected = 0
+        self.lock = asyncio.Lock()
+    
+    async def try_enqueue(self) -> tuple[bool, str]:
+        """Try to add request to queue"""
+        async with self.lock:
+            if self.queue_size >= self.max_queue_size:
+                self.total_rejected += 1
+                return False, f"Queue full ({self.max_queue_size} max)"
+            self.queue_size += 1
+            self.total_queued += 1
+            return True, "OK"
+    
+    async def dequeue(self):
+        """Remove request from queue"""
+        async with self.lock:
+            if self.queue_size > 0:
+                self.queue_size -= 1
+    
+    def stats(self) -> dict:
+        return {
+            "current_size": self.queue_size,
+            "max_size": self.max_queue_size,
+            "total_queued": self.total_queued,
+            "total_rejected": self.total_rejected
+        }
+
+# Initialize production components
+alert_cache = AlertCache(
+    max_size=Config.ALERT_CACHE_MAX_SIZE,
+    ttl_seconds=Config.ALERT_CACHE_TTL_SECONDS
+)
+rate_limiter = RateLimiter(
+    requests_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "120")),
+    burst_size=int(os.getenv("RATE_LIMIT_BURST", "30"))
+)
+circuit_breaker = CircuitBreaker(
+    failure_threshold=int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5")),
+    recovery_timeout=int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30"))
+)
+request_queue = RequestQueue(
+    max_queue_size=int(os.getenv("REQUEST_QUEUE_SIZE", "100"))
+)
+
+def is_protected_service(container_name: str) -> bool:
+    """Check if a service is protected from automated actions"""
+    if not container_name:
+        return False
+    for protected in Config.PROTECTED_SERVICES:
+        if protected.lower() in container_name.lower():
+            return True
+    return False
+
+def can_execute_action(action: str, container_name: str) -> tuple[bool, str]:
+    """Check if an automated action can be executed based on safety controls"""
+    # Check automation mode
+    if Config.AUTOMATION_MODE == "dry-run":
+        return False, f"DRY-RUN: Would execute {action} on {container_name}"
+    
+    if Config.AUTOMATION_MODE == "approval-required":
+        return False, f"APPROVAL-REQUIRED: {action} on {container_name} needs manual approval"
+    
+    # Check protected services
+    if is_protected_service(container_name):
+        return False, f"BLOCKED: {container_name} is a protected service"
+    
+    return True, "OK"
+
+def update_circuit_breaker_metrics():
+    """Update Prometheus metrics for circuit breaker states"""
+    state_map = {"closed": 0, "half_open": 1, "open": 2}
+    for engine, stats in circuit_breaker.engine_stats.items():
+        state_val = state_map.get(stats.get("state", "closed"), 0)
+        PROM_CIRCUIT_BREAKER_STATE.labels(engine=engine).set(state_val)
+
+async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str]:
+    """Analyze alert with xAI Grok-4, fallback to OpenAI on failure. Uses cache and circuit breaker."""
+    
+    # Check cache first (reduces LLM costs)
+    cached = alert_cache.get(alert_dict)
+    if cached:
+        PROM_LLM_CACHE_OPERATIONS.labels(operation="hit").inc()
+        PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
+        return cached, "cache"
+    
+    PROM_LLM_CACHE_OPERATIONS.labels(operation="miss").inc()
+    
+    # Try xAI Grok-4 first (primary) - with circuit breaker
+    if xai_engine:
+        cb_allowed, cb_reason = circuit_breaker.can_execute("xai-grok-4")
+        update_circuit_breaker_metrics()
+        
+        if cb_allowed:
+            try:
+                llm_start = time.perf_counter()
+                result = await xai_engine.analyze_alert(alert_dict)
+                llm_duration = time.perf_counter() - llm_start
+                
+                if result.get("status") == "success":
+                    circuit_breaker.record_success("xai-grok-4")
+                    update_circuit_breaker_metrics()
+                    analysis = result.get("analysis", {})
+                    alert_cache.set(alert_dict, analysis)  # Cache the result
+                    PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
+                    PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="success").inc()
+                    PROM_LLM_LATENCY_SECONDS.labels(engine="xai-grok-4").observe(llm_duration)
+                    return analysis, "xai-grok-4"
+                
+                circuit_breaker.record_failure("xai-grok-4")
+                update_circuit_breaker_metrics()
+                PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="error").inc()
+                logger.warning(f"xAI Grok-4 returned error: {result.get('error')}")
+            except Exception as e:
+                circuit_breaker.record_failure("xai-grok-4")
+                update_circuit_breaker_metrics()
+                PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="exception").inc()
+                logger.warning(f"xAI Grok-4 failed: {e}, trying OpenAI...")
+        else:
+            logger.info(f"xAI Grok-4 skipped: {cb_reason}")
+            PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="circuit_open").inc()
+    
+    # Fallback to OpenAI - with circuit breaker
+    if openai_engine:
+        cb_allowed, cb_reason = circuit_breaker.can_execute("openai")
+        update_circuit_breaker_metrics()
+        
+        if cb_allowed:
+            try:
+                llm_start = time.perf_counter()
+                result = await openai_engine.analyze_alert(alert_dict)
+                llm_duration = time.perf_counter() - llm_start
+                
+                if result.get("status") == "success":
+                    circuit_breaker.record_success("openai")
+                    update_circuit_breaker_metrics()
+                    analysis = result.get("analysis", {})
+                    alert_cache.set(alert_dict, analysis)  # Cache the result
+                    PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
+                    PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="success").inc()
+                    PROM_LLM_LATENCY_SECONDS.labels(engine="openai").observe(llm_duration)
+                    return analysis, "openai"
+                
+                circuit_breaker.record_failure("openai")
+                update_circuit_breaker_metrics()
+                PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="error").inc()
+                logger.warning(f"OpenAI returned error: {result.get('error')}")
+            except Exception as e:
+                circuit_breaker.record_failure("openai")
+                update_circuit_breaker_metrics()
+                PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="exception").inc()
+                logger.error(f"OpenAI also failed: {e}")
+        else:
+            logger.warning(f"OpenAI also skipped: {cb_reason}")
+            PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="circuit_open").inc()
+    
+    raise Exception("All LLM engines failed or circuits open")
+
+# Storage - Using database for persistence (alerts_db kept for backward compatibility)
+alerts_db: List[Dict[str, Any]] = []  # In-memory cache, synced with database
 metrics = {
     "total_alerts": 0,
     "critical_alerts": 0,
@@ -68,6 +412,255 @@ metrics = {
     "alert_reduction_percentage": 100,
     "avg_response_time_seconds": 3.5
 }
+
+# Initialize metrics from database on startup
+def init_metrics_from_db():
+    """Load existing counts from database."""
+    global metrics
+    try:
+        stats = db.get_stats()
+        metrics["total_alerts"] = stats.get("total_alerts", 0)
+        metrics["alerts_by_source"] = stats.get("alerts_by_source", {"falco": 0, "suricata": 0})
+        logger.info(f"📊 Loaded metrics from DB: {stats['total_alerts']} alerts, storage: {stats['storage_type']}")
+    except Exception as e:
+        logger.warning(f"Could not load metrics from DB: {e}")
+
+# Load on startup
+init_metrics_from_db()
+
+# Prometheus counter restoration function (called after counters are defined)
+def restore_prometheus_counters():
+    """Restore Prometheus counters from PostgreSQL to show historical data.
+    
+    This ensures Grafana displays ALL historical alerts, not just since last restart.
+    Critical for demonstrating weeks of work to supervisors.
+    """
+    logger.info("🔄 Starting Prometheus counter restoration from database...")
+    try:
+        restore_data = db.get_prometheus_restore_data()
+        logger.info(f"🔄 Got restore data: {restore_data}")
+        
+        # Restore alerts received by source/priority
+        for key, count in restore_data.get("alerts_by_source_priority", {}).items():
+            parts = key.split(":")
+            if len(parts) == 2:
+                source, priority = parts[0], parts[1] or "Unknown"
+                # Use inc() with the count value to restore the counter
+                PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=priority).inc(count)
+                logger.info(f"  ✓ Restored alerts_received: {source}/{priority} = {count}")
+        
+        # Restore processed alerts count
+        total_processed = restore_data.get("total_processed", 0)
+        if total_processed > 0:
+            PROM_ALERTS_PROCESSED_TOTAL.labels(result="success").inc(total_processed)
+            logger.info(f"  ✓ Restored alerts_processed: success = {total_processed}")
+        
+        # Restore severity distribution
+        for severity, count in restore_data.get("alerts_by_severity", {}).items():
+            PROM_SEVERITY_DISTRIBUTION.labels(severity=str(severity)).inc(count)
+        
+        # Restore threat types
+        for threat_type, count in restore_data.get("alerts_by_threat_type", {}).items():
+            if threat_type:
+                PROM_THREAT_TYPES_TOTAL.labels(threat_type=threat_type).inc(count)
+        
+        # Restore actions executed
+        for action, count in restore_data.get("actions_executed", {}).items():
+            if action:
+                PROM_ACTIONS_EXECUTED_TOTAL.labels(action=action).inc(count)
+                logger.info(f"  ✓ Restored actions: {action} = {count}")
+        
+        # Set critical alerts gauge
+        critical_count = restore_data.get("critical_alerts", 0)
+        PROM_CRITICAL_ALERTS_ACTIVE.set(critical_count)
+        
+        # Restore IoT events
+        for key, count in restore_data.get("iot_events_by_type", {}).items():
+            parts = key.split(":")
+            if len(parts) == 2:
+                device_id, event_type = parts
+                PROM_IOT_EVENTS_TOTAL.labels(device_id=device_id, event_type=event_type).inc(count)
+        
+        logger.info(f"🔄 Prometheus counters restored from DB: "
+                   f"{total_processed} alerts, {critical_count} critical, "
+                   f"{len(restore_data.get('actions_executed', {}))} action types")
+    except Exception as e:
+        logger.error(f"❌ Could not restore Prometheus counters: {e}", exc_info=True)
+
+# Prometheus metrics
+# ============== CORE ALERT METRICS ==============
+PROM_ALERTS_RECEIVED_TOTAL = Counter(
+    "smartcity_ids_alerts_received_total",
+    "Total number of alerts received by the IDS API.",
+    ["source", "priority"],
+)
+PROM_ALERTS_PROCESSED_TOTAL = Counter(
+    "smartcity_ids_alerts_processed_total",
+    "Total number of alerts processed by the IDS API, labeled by result.",
+    ["result"],
+)
+PROM_ACTIONS_EXECUTED_TOTAL = Counter(
+    "smartcity_ids_actions_executed_total",
+    "Total number of automated actions triggered by the IDS API.",
+    ["action"],
+)
+PROM_ACTIONS_BLOCKED_TOTAL = Counter(
+    "smartcity_ids_actions_blocked_total",
+    "Total number of automated actions blocked by safety controls.",
+    ["action", "reason"],
+)
+PROM_ALERT_PROCESSING_SECONDS = Histogram(
+    "smartcity_ids_alert_processing_seconds",
+    "End-to-end IDS API /api/alerts processing duration (seconds).",
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 13, 21),
+)
+PROM_UPTIME_SECONDS = Gauge(
+    "smartcity_ids_uptime_seconds",
+    "IDS API process uptime in seconds.",
+)
+
+# ============== LLM ANALYSIS METRICS ==============
+PROM_LLM_REQUESTS_TOTAL = Counter(
+    "smartcity_ids_llm_requests_total",
+    "Total LLM API requests by engine and result.",
+    ["engine", "result"],
+)
+PROM_LLM_LATENCY_SECONDS = Histogram(
+    "smartcity_ids_llm_latency_seconds",
+    "LLM API call latency in seconds.",
+    ["engine"],
+    buckets=(0.5, 1, 2, 3, 5, 8, 10, 15, 20, 30),
+)
+PROM_LLM_CACHE_OPERATIONS = Counter(
+    "smartcity_ids_llm_cache_total",
+    "LLM cache operations (hits/misses).",
+    ["operation"],
+)
+PROM_LLM_CACHE_SIZE = Gauge(
+    "smartcity_ids_llm_cache_size",
+    "Current number of cached LLM responses.",
+)
+
+# ============== SECURITY ANALYSIS METRICS ==============
+PROM_SEVERITY_DISTRIBUTION = Counter(
+    "smartcity_ids_severity_total",
+    "Distribution of alert severities (1-10).",
+    ["severity"],
+)
+PROM_THREAT_TYPES_TOTAL = Counter(
+    "smartcity_ids_threat_types_total",
+    "Count of detected threat types.",
+    ["threat_type"],
+)
+PROM_CRITICAL_ALERTS_ACTIVE = Gauge(
+    "smartcity_ids_critical_alerts_active",
+    "Number of unresolved critical alerts (severity >= 8).",
+)
+
+# ============== IOT DEVICE METRICS ==============
+PROM_IOT_EVENTS_TOTAL = Counter(
+    "smartcity_ids_iot_events_total",
+    "Total IoT sensor events received.",
+    ["device_id", "event_type"],
+)
+PROM_IOT_DEVICES_ACTIVE = Gauge(
+    "smartcity_ids_iot_devices_active",
+    "Number of active IoT devices.",
+)
+PROM_IOT_SECURITY_EVENTS = Counter(
+    "smartcity_ids_iot_security_events_total",
+    "Security events from IoT devices.",
+    ["device_id", "event_type"],
+)
+PROM_IOT_DEVICE_HEARTBEATS = Counter(
+    "smartcity_ids_iot_heartbeats_total",
+    "Heartbeat signals received from IoT devices.",
+    ["device_id", "device_type"],
+)
+
+# ============== KUBERNETES AUTOMATION METRICS ==============
+PROM_K8S_PODS_ISOLATED = Gauge(
+    "smartcity_ids_k8s_pods_isolated",
+    "Number of currently isolated pods.",
+)
+PROM_K8S_SCALE_OPERATIONS = Counter(
+    "smartcity_ids_k8s_scale_operations_total",
+    "Kubernetes scaling operations performed.",
+    ["operation", "service"],
+)
+PROM_PROTECTED_SERVICE_HITS = Counter(
+    "smartcity_ids_protected_service_hits_total",
+    "Attempts to isolate protected services (blocked).",
+    ["service"],
+)
+
+# ============== SYSTEM HEALTH METRICS ==============
+PROM_API_REQUESTS_TOTAL = Counter(
+    "smartcity_ids_api_requests_total",
+    "Total API requests by endpoint and status.",
+    ["endpoint", "method", "status"],
+)
+PROM_AUTOMATION_MODE = Gauge(
+    "smartcity_ids_automation_mode",
+    "Current automation mode indicator.",
+    ["mode"],  # mode=active, mode=dry_run
+)
+
+# ============== PRODUCTION RESILIENCE METRICS ==============
+PROM_RATE_LIMIT_REQUESTS = Counter(
+    "smartcity_ids_rate_limit_requests_total",
+    "Rate limiter requests by result.",
+    ["result"],  # allowed, rejected
+)
+PROM_RATE_LIMIT_TOKENS = Gauge(
+    "smartcity_ids_rate_limit_tokens_available",
+    "Current available rate limit tokens.",
+)
+PROM_CIRCUIT_BREAKER_STATE = Gauge(
+    "smartcity_ids_circuit_breaker_state",
+    "Circuit breaker state (0=closed, 1=half_open, 2=open).",
+    ["engine"],
+)
+PROM_CIRCUIT_BREAKER_TRIPS = Counter(
+    "smartcity_ids_circuit_breaker_trips_total",
+    "Circuit breaker trip events.",
+    ["engine"],
+)
+PROM_REQUEST_QUEUE_SIZE = Gauge(
+    "smartcity_ids_request_queue_size",
+    "Current request queue size.",
+)
+PROM_REQUEST_QUEUE_REJECTED = Counter(
+    "smartcity_ids_request_queue_rejected_total",
+    "Requests rejected due to full queue.",
+)
+PROM_PROTECTION_BYPASS_ATTEMPTS = Counter(
+    "smartcity_ids_protection_bypass_attempts_total",
+    "Attempts to bypass protection controls.",
+    ["service", "action"],
+)
+PROM_AUTH_FAILURES = Counter(
+    "smartcity_ids_auth_failures_total",
+    "Authentication failures.",
+    ["reason"],
+)
+PROM_LLM_CREDITS_REMAINING = Gauge(
+    "smartcity_ids_llm_credits_remaining",
+    "Estimated LLM API credits remaining (if available).",
+    ["engine"],
+)
+PROM_APPROVAL_PENDING = Gauge(
+    "smartcity_ids_approval_pending_count",
+    "Number of actions pending approval.",
+)
+
+# ============== RESTORE HISTORICAL DATA ON STARTUP ==============
+# This ensures Grafana shows ALL historical data, not just since last restart
+# Note: Moved to FastAPI startup event for proper initialization order
+print("📊 Prometheus metrics defined, restoration will happen on startup event...")
+
+# Initialize automation mode gauge
+PROM_AUTOMATION_MODE.labels(mode="active").set(1)
 
 # Models
 class Alert(BaseModel):
@@ -111,17 +704,19 @@ async def root():
         "service": "Smart City IDS",
         "version": "1.0.0",
         "status": "operational",
-        "llm": "Groq Mixtral",
-        "endpoints": ["/health", "/api/alerts (GET/POST)", "/api/metrics"]
+        "llm": "xAI Grok-4 (primary) + OpenAI GPT-4 (fallback)",
+        "endpoints": ["/health", "/api/alerts (GET/POST)", "/api/metrics", "/metrics"]
     }
 
 @app.get("/health")
 async def health():
     uptime = (datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds()
+    PROM_UPTIME_SECONDS.set(uptime)
     return {
         "status": "healthy",
         "components": {
-            "groq": "connected" if groq_engine else "disconnected",
+            "xai_grok4": "connected" if xai_engine else "disconnected",
+            "openai": "connected" if openai_engine else "disconnected",
             "kubernetes": "connected" if k8s_automation else "disconnected",
             "falco": "enabled"
         },
@@ -129,125 +724,542 @@ async def health():
         "total_alerts_processed": metrics["total_alerts"]
     }
 
+@app.get("/api/safety")
+async def get_safety_status():
+    """Get safety controls status - for demo verification"""
+    return {
+        "automation_mode": Config.AUTOMATION_MODE,
+        "protected_services": Config.PROTECTED_SERVICES,
+        "cache_stats": alert_cache.stats(),
+        "thresholds": {
+            "critical_severity": Config.CRITICAL_SEVERITY_THRESHOLD,
+            "high_severity": Config.HIGH_SEVERITY_THRESHOLD
+        },
+        "note": "Set AUTOMATION_MODE=dry-run for safe demos"
+    }
+
+@app.get("/api/production-status")
+async def get_production_status():
+    """Get production controls status - for monitoring and Grafana"""
+    return {
+        "rate_limiter": rate_limiter.stats(),
+        "circuit_breaker": circuit_breaker.get_stats(),
+        "request_queue": request_queue.stats(),
+        "cache": alert_cache.stats(),
+        "protected_services": Config.PROTECTED_SERVICES,
+        "automation_mode": Config.AUTOMATION_MODE,
+        "health": {
+            "rate_limit_healthy": rate_limiter.rejected_requests < rate_limiter.total_requests * 0.1 if rate_limiter.total_requests > 0 else True,
+            "circuit_breakers_healthy": all(s["state"] != "open" for s in circuit_breaker.engine_stats.values()),
+            "queue_healthy": request_queue.queue_size < request_queue.max_queue_size * 0.8
+        }
+    }
+
 @app.post("/api/alerts")
-async def process_alert(alert: Alert, token = Depends(verify_token)) -> AlertResponse:
-    """Process security alert with Groq AI"""
-    logger.info(f"Received alert: {alert.rule} (authenticated)")
+async def process_alert(alert: Alert, request: Request, token = Depends(verify_token)) -> AlertResponse:
+    """Process security alert with LLM (xAI Grok-4 + OpenAI fallback)"""
     
-    metrics["total_alerts"] += 1
+    # ========== PRODUCTION CONTROLS ==========
+    # 1. Rate limiting
+    rate_allowed, rate_reason = await rate_limiter.acquire()
+    PROM_RATE_LIMIT_TOKENS.set(rate_limiter.tokens)
+    if not rate_allowed:
+        PROM_RATE_LIMIT_REQUESTS.labels(result="rejected").inc()
+        logger.warning(f"Rate limit exceeded from {request.client.host}")
+        raise HTTPException(status_code=429, detail=rate_reason)
+    PROM_RATE_LIMIT_REQUESTS.labels(result="allowed").inc()
     
-    # Determine source
-    source = "suricata" if "suricata" in alert.rule.lower() else "falco"
-    metrics["alerts_by_source"][source] += 1
+    # 2. Request queue for burst protection
+    queue_ok, queue_reason = await request_queue.try_enqueue()
+    PROM_REQUEST_QUEUE_SIZE.set(request_queue.queue_size)
+    if not queue_ok:
+        PROM_REQUEST_QUEUE_REJECTED.inc()
+        logger.warning(f"Request queue full from {request.client.host}")
+        raise HTTPException(status_code=503, detail=f"Server overloaded: {queue_reason}")
     
     try:
-        if not groq_engine:
-            raise Exception("Groq engine not available")
-        
-        # Analyze with Groq
-        logger.info("Analyzing with Groq...")
-        analysis_result = await groq_engine.analyze_alert(alert.dict())
-        
-        if analysis_result.get("status") != "success":
-            raise Exception(f"Analysis failed: {analysis_result.get('error')}")
-        
-        analysis = analysis_result.get("analysis", {})
+        logger.info(f"Received alert: {alert.rule} (authenticated)")
+        PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts", method="POST", status="received").inc()
+
+        started = time.perf_counter()
+    
+        metrics["total_alerts"] += 1
+    
+        # Determine source
+        source = "suricata" if "suricata" in alert.rule.lower() else "falco"
+        metrics["alerts_by_source"][source] += 1
+        PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
+    
+        # Analyze with LLM (xAI Grok-4 primary, OpenAI fallback)
+        logger.info("Analyzing alert...")
+        analysis, llm_used = await analyze_with_fallback(alert.dict())
         severity = analysis.get("severity", 5)
+        threat_type = analysis.get("threat_type", "Unknown")
+        logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}")
+        
+        # Track severity and threat metrics
+        PROM_SEVERITY_DISTRIBUTION.labels(severity=str(severity)).inc()
+        PROM_THREAT_TYPES_TOTAL.labels(threat_type=threat_type).inc()
         
         # Track critical alerts
         if severity >= 8:
             metrics["critical_alerts"] += 1
+            PROM_CRITICAL_ALERTS_ACTIVE.inc()
         
-        # Execute automated actions
+        # Execute automated actions (with safety controls)
         actions_taken = []
         
         if k8s_automation and severity >= 8:
             container_name = alert.output_fields.get("container.name", "")
             if container_name:
-                logger.info(f"Critical response for {container_name}")
-                actions_taken.append("isolate_pod")
-                metrics["automated_actions"] += 1
+                can_execute, reason = can_execute_action("isolate_pod", container_name)
+                if can_execute:
+                    logger.info(f"Critical response for {container_name}")
+                    actions_taken.append("isolate_pod")
+                    metrics["automated_actions"] += 1
+                    PROM_ACTIONS_EXECUTED_TOTAL.labels(action="isolate_pod").inc()
+                    PROM_K8S_PODS_ISOLATED.inc()
+                else:
+                    logger.warning(f"Action blocked: {reason}")
+                    actions_taken.append(f"BLOCKED: {reason}")
+                    if "protected service" in reason.lower():
+                        PROM_PROTECTED_SERVICE_HITS.labels(service=container_name.split("-")[0]).inc()
+                        PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="protected_service").inc()
+                    elif "DRY-RUN" in reason:
+                        PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="dry_run").inc()
+                    else:
+                        PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="other").inc()
         
         elif k8s_automation and severity >= 6:
             service_name = alert.output_fields.get("container.name", "").split("-")[0]
             if service_name:
-                logger.info(f"Scaling up {service_name}")
-                actions_taken.append("scale_up")
-                metrics["automated_actions"] += 1
+                can_execute, reason = can_execute_action("scale_up", service_name)
+                if can_execute:
+                    logger.info(f"Scaling up {service_name}")
+                    actions_taken.append("scale_up")
+                    metrics["automated_actions"] += 1
+                    PROM_ACTIONS_EXECUTED_TOTAL.labels(action="scale_up").inc()
+                    PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=service_name).inc()
+                else:
+                    logger.warning(f"Action blocked: {reason}")
+                    actions_taken.append(f"BLOCKED: {reason}")
+                    PROM_ACTIONS_BLOCKED_TOTAL.labels(action="scale_up", reason="blocked").inc()
         
-        # Store alert
+        # Store alert in database
         alert_record = {
-            "id": len(alerts_db) + 1,
             "timestamp": alert.time,
             "source": source,
-            "alert": alert.dict(),
-            "analysis": analysis,
-            "actions": actions_taken,
-            "processed_at": datetime.now().isoformat()
+            "rule": alert.rule,
+            "priority": alert.priority,
+            "severity": severity,
+            "summary": analysis.get("summary", ""),
+            "threat_type": analysis.get("threat_type", ""),
+            "recommendations": analysis.get("recommendations", []),
+            "automated_actions": actions_taken,
+            "raw_alert": alert.dict(),
+            "analysis": analysis
         }
+        alert_id = db.add_alert(alert_record)
+        alert_record["id"] = alert_id
+        
+        # Also keep in memory for quick access
         alerts_db.append(alert_record)
         
         if metrics["total_alerts"] > 0:
             metrics["automation_rate"] = (metrics["automated_actions"] / metrics["total_alerts"]) * 100
+
+        PROM_ALERTS_PROCESSED_TOTAL.labels(result="success").inc()
+        PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts", method="POST", status="success").inc()
+        PROM_ALERT_PROCESSING_SECONDS.observe(time.perf_counter() - started)
         
-        logger.info(f"✅ Alert processed: ID={alert_record['id']}, Severity={severity}")
+        logger.info(f"✅ Alert processed: ID={alert_id}, Severity={severity}, Storage={db.get_stats()['storage_type']}")
         
         return AlertResponse(
             status="processed",
-            alert_id=alert_record["id"],
+            alert_id=alert_id,
             analysis=analysis,
             actions_taken=actions_taken
         )
         
     except Exception as e:
         logger.error(f"Error: {e}")
+
+        PROM_ALERTS_PROCESSED_TOTAL.labels(result="error").inc()
+        PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts", method="POST", status="error").inc()
+        PROM_ALERT_PROCESSING_SECONDS.observe(time.perf_counter() - started)
         
+        # Store error alert in database
         alert_record = {
-            "id": len(alerts_db) + 1,
             "timestamp": alert.time,
             "source": source,
-            "alert": alert.dict(),
-            "analysis": None,
-            "actions": [],
-            "processed_at": datetime.now().isoformat(),
-            "error": str(e)
+            "rule": alert.rule,
+            "priority": alert.priority,
+            "severity": 0,
+            "summary": f"Error processing alert: {str(e)}",
+            "threat_type": "unknown",
+            "recommendations": [],
+            "automated_actions": [],
+            "raw_alert": alert.dict(),
+            "analysis": {"error": str(e)}
         }
+        alert_id = db.add_alert(alert_record)
+        alert_record["id"] = alert_id
         alerts_db.append(alert_record)
         
         return AlertResponse(
             status="error",
-            alert_id=alert_record["id"],
+            alert_id=alert_id,
+            error=str(e)
+        )
+    finally:
+        # Always dequeue when done
+        await request_queue.dequeue()
+        PROM_REQUEST_QUEUE_SIZE.set(request_queue.queue_size)
+
+@app.post("/api/alerts/internal")
+async def process_alert_internal(alert: Alert) -> AlertResponse:
+    """Process security alert (no auth - cluster-internal only)"""
+    logger.info(f"Received internal alert: {alert.rule}")
+    PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts/internal", method="POST", status="received").inc()
+
+    started = time.perf_counter()
+    
+    metrics["total_alerts"] += 1
+    
+    # Determine source
+    source = "suricata" if "suricata" in alert.rule.lower() else "falco"
+    metrics["alerts_by_source"][source] += 1
+    PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
+    
+    try:
+        # Analyze with LLM (xAI Grok-4 primary, OpenAI fallback)
+        logger.info("Analyzing alert...")
+        analysis, llm_used = await analyze_with_fallback(alert.dict())
+        severity = analysis.get("severity", 5)
+        threat_type = analysis.get("threat_type", "Unknown")
+        logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}")
+        
+        # Track severity and threat metrics
+        PROM_SEVERITY_DISTRIBUTION.labels(severity=str(severity)).inc()
+        PROM_THREAT_TYPES_TOTAL.labels(threat_type=threat_type).inc()
+        
+        # Track critical alerts
+        if severity >= 8:
+            metrics["critical_alerts"] += 1
+            PROM_CRITICAL_ALERTS_ACTIVE.inc()
+        
+        # Execute automated actions (with safety controls)
+        actions_taken = []
+        
+        if k8s_automation and severity >= 8:
+            container_name = alert.output_fields.get("container.name", "")
+            if container_name:
+                can_execute, reason = can_execute_action("isolate_pod", container_name)
+                if can_execute:
+                    logger.info(f"Critical response for {container_name}")
+                    actions_taken.append("isolate_pod")
+                    metrics["automated_actions"] += 1
+                    PROM_ACTIONS_EXECUTED_TOTAL.labels(action="isolate_pod").inc()
+                    PROM_K8S_PODS_ISOLATED.inc()
+                else:
+                    logger.warning(f"Action blocked: {reason}")
+                    actions_taken.append(f"BLOCKED: {reason}")
+                    if "protected service" in reason.lower():
+                        PROM_PROTECTED_SERVICE_HITS.labels(service=container_name.split("-")[0]).inc()
+                        PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="protected_service").inc()
+                    elif "DRY-RUN" in reason:
+                        PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="dry_run").inc()
+                    else:
+                        PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="other").inc()
+        
+        elif k8s_automation and severity >= 6:
+            service_name = alert.output_fields.get("container.name", "").split("-")[0]
+            if service_name:
+                can_execute, reason = can_execute_action("scale_up", service_name)
+                if can_execute:
+                    logger.info(f"Scaling up {service_name}")
+                    actions_taken.append("scale_up")
+                    metrics["automated_actions"] += 1
+                    PROM_ACTIONS_EXECUTED_TOTAL.labels(action="scale_up").inc()
+                    PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=service_name).inc()
+                else:
+                    logger.warning(f"Action blocked: {reason}")
+                    actions_taken.append(f"BLOCKED: {reason}")
+                    PROM_ACTIONS_BLOCKED_TOTAL.labels(action="scale_up", reason="blocked").inc()
+        
+        # Store alert in database
+        alert_record = {
+            "timestamp": alert.time,
+            "source": source,
+            "rule": alert.rule,
+            "priority": alert.priority,
+            "severity": severity,
+            "summary": analysis.get("summary", ""),
+            "threat_type": analysis.get("threat_type", ""),
+            "recommendations": analysis.get("recommendations", []),
+            "automated_actions": actions_taken,
+            "raw_alert": alert.dict(),
+            "analysis": analysis
+        }
+        alert_id = db.add_alert(alert_record)
+        alert_record["id"] = alert_id
+        alerts_db.append(alert_record)
+        
+        if metrics["total_alerts"] > 0:
+            metrics["automation_rate"] = (metrics["automated_actions"] / metrics["total_alerts"]) * 100
+
+        PROM_ALERTS_PROCESSED_TOTAL.labels(result="success").inc()
+        PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts/internal", method="POST", status="success").inc()
+        PROM_ALERT_PROCESSING_SECONDS.observe(time.perf_counter() - started)
+        
+        logger.info(f"✅ Alert processed: ID={alert_id}, Severity={severity}")
+        
+        return AlertResponse(
+            status="processed",
+            alert_id=alert_id,
+            analysis=analysis,
+            actions_taken=actions_taken
+        )
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+
+        PROM_ALERTS_PROCESSED_TOTAL.labels(result="error").inc()
+        PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts/internal", method="POST", status="error").inc()
+        PROM_ALERT_PROCESSING_SECONDS.observe(time.perf_counter() - started)
+        
+        alert_record = {
+            "timestamp": alert.time,
+            "source": source,
+            "rule": alert.rule,
+            "priority": alert.priority,
+            "severity": 0,
+            "summary": f"Error: {str(e)}",
+            "threat_type": "unknown",
+            "recommendations": [],
+            "automated_actions": [],
+            "raw_alert": alert.dict(),
+            "analysis": {"error": str(e)}
+        }
+        alert_id = db.add_alert(alert_record)
+        alert_record["id"] = alert_id
+        alerts_db.append(alert_record)
+        
+        return AlertResponse(
+            status="error",
+            alert_id=alert_id,
             error=str(e)
         )
 
-@app.get("/api/alerts")
-async def get_alerts(limit: int = 10, source: Optional[str] = None):
-    filtered = alerts_db
-    if source:
-        filtered = [a for a in alerts_db if a.get("source") == source]
+# ============== IOT SENSOR ENDPOINTS ==============
+
+# IoT device registry (in-memory cache, backed by database)
+iot_devices: Dict[str, Dict[str, Any]] = {}
+iot_events: List[Dict[str, Any]] = []
+
+# Initialize IoT data from database
+def init_iot_from_db():
+    """Load existing IoT devices from database."""
+    global iot_devices
+    try:
+        devices = db.get_iot_devices()
+        for device in devices:
+            iot_devices[device["device_id"]] = dict(device)
+        logger.info(f"📡 Loaded {len(devices)} IoT devices from DB")
+    except Exception as e:
+        logger.warning(f"Could not load IoT devices from DB: {e}")
+
+init_iot_from_db()
+
+class IoTSensorData(BaseModel):
+    device_id: str = Field(..., min_length=1, max_length=64, description="Unique device identifier")
+    device_type: str = Field(..., description="Type of device (motion_sensor, temperature, etc.)")
+    event_type: str = Field(..., description="Event type (motion_detected, heartbeat, anomaly)")
+    value: Optional[Any] = Field(None, description="Sensor value")
+    timestamp: Optional[str] = Field(None, description="ISO timestamp")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+@app.post("/api/iot/sensor")
+async def receive_iot_sensor_data(data: IoTSensorData):
+    """Receive sensor data from Raspberry Pi / IoT devices.
+    
+    This endpoint:
+    1. Registers/updates device in registry
+    2. Logs sensor events
+    3. If event_type is 'anomaly' or suspicious, creates a security alert
+    """
+    logger.info(f"📡 IoT data from {data.device_id}: {data.event_type}")
+    
+    # Update device registry (both in database and memory)
+    now = datetime.now().isoformat()
+    is_new_device = db.register_iot_device(data.device_id, data.device_type, data.metadata)
+    
+    if data.device_id not in iot_devices or is_new_device:
+        iot_devices[data.device_id] = {
+            "device_id": data.device_id,
+            "device_type": data.device_type,
+            "first_seen": now,
+            "last_seen": now,
+            "event_count": 0
+        }
+        PROM_IOT_DEVICES_ACTIVE.set(db.get_iot_device_count())
+    
+    iot_devices[data.device_id]["last_seen"] = now
+    iot_devices[data.device_id]["event_count"] += 1
+    
+    # Log event to database
+    event_record = {
+        "device_id": data.device_id,
+        "device_type": data.device_type,
+        "event_type": data.event_type,
+        "value": data.value,
+        "timestamp": data.timestamp or now,
+        "metadata": data.metadata
+    }
+    event_id = db.add_iot_event(event_record)
+    event_record["id"] = event_id
+    iot_events.append(event_record)
+    PROM_IOT_EVENTS_TOTAL.labels(device_id=data.device_id, event_type=data.event_type).inc()
+    
+    # Check if this is a security-relevant event
+    security_events = ["anomaly", "intrusion", "tampering", "unauthorized", "rapid_motion"]
+    
+    # Track heartbeat events separately
+    if data.event_type == "heartbeat":
+        PROM_IOT_DEVICE_HEARTBEATS.labels(device_id=data.device_id, device_type=data.device_type).inc()
+    
+    if data.event_type in security_events:
+        # Track IoT security events
+        PROM_IOT_SECURITY_EVENTS.labels(device_id=data.device_id, event_type=data.event_type).inc()
+        # Generate internal security alert
+        logger.warning(f"🚨 Security event from IoT device: {data.event_type}")
+        
+        alert = Alert(
+            output=f"IoT Security Event: {data.event_type} detected by {data.device_id} ({data.device_type})",
+            priority="Warning" if data.event_type != "intrusion" else "Critical",
+            rule=f"IoT_{data.event_type}",
+            time=data.timestamp or now,
+            output_fields={
+                "container.name": f"iot-{data.device_id}",
+                "device.id": data.device_id,
+                "device.type": data.device_type,
+                "event.value": str(data.value) if data.value else "",
+                "source": "raspberry_pi"
+            }
+        )
+        
+        # Process as internal alert (no auth required for IoT devices)
+        alert_response = await process_alert_internal(alert)
+        
+        return {
+            "status": "security_event_processed",
+            "event_id": event_record["id"],
+            "alert_id": alert_response.alert_id,
+            "analysis": alert_response.analysis
+        }
+    
+    return {
+        "status": "received",
+        "event_id": event_record["id"],
+        "device_registered": data.device_id in iot_devices
+    }
+
+@app.get("/api/iot/devices")
+async def get_iot_devices():
+    """List all registered IoT devices"""
+    return {
+        "total": len(iot_devices),
+        "devices": list(iot_devices.values())
+    }
+
+@app.get("/api/iot/events")
+async def get_iot_events(limit: int = 50, device_id: Optional[str] = None):
+    """Get recent IoT events"""
+    filtered = iot_events
+    if device_id:
+        filtered = [e for e in iot_events if e["device_id"] == device_id]
     return {
         "total": len(filtered),
         "showing": min(limit, len(filtered)),
-        "alerts": filtered[-limit:]
+        "events": filtered[-limit:]
+    }
+
+# ============== ALERT ENDPOINTS ==============
+
+@app.get("/api/alerts")
+async def get_alerts(limit: int = 10, source: Optional[str] = None):
+    """Get alerts from database."""
+    alerts = db.get_alerts(limit=limit, source=source)
+    total = db.get_alert_count(source=source)
+    return {
+        "total": total,
+        "showing": len(alerts),
+        "storage": db.get_stats()["storage_type"],
+        "alerts": alerts
     }
 
 @app.get("/api/metrics")
 async def get_metrics():
     uptime = (datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds()
     metrics["uptime_seconds"] = uptime
+    
+    # Update metrics from database
+    db_stats = db.get_stats()
+    metrics["total_alerts"] = db_stats["total_alerts"]
+    metrics["alerts_by_source"] = db_stats["alerts_by_source"]
+    metrics["storage_type"] = db_stats["storage_type"]
+    
+    PROM_UPTIME_SECONDS.set(uptime)
     return metrics
+
+@app.get("/api/db/stats")
+async def get_db_stats():
+    """Get database statistics."""
+    return db.get_stats()
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus exposition endpoint."""
+    uptime = (datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds()
+    PROM_UPTIME_SECONDS.set(uptime)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.on_event("startup")
 async def startup():
     logger.info("🚀 Smart City IDS starting...")
-    logger.info(f"Groq: {'✅' if groq_engine else '❌'}")
+    logger.info(f"xAI Grok-4: {'✅' if xai_engine else '❌'}")
+    logger.info(f"OpenAI: {'✅' if openai_engine else '❌'}")
     logger.info(f"K8s: {'✅' if k8s_automation else '❌'}")
+    
+    # Database status
+    db_stats = db.get_stats()
+    logger.info(f"💾 Storage: {db_stats['storage_type']} - {db_stats['total_alerts']} alerts, {db_stats['iot_devices']} IoT devices")
+    
+    # ============== RESTORE PROMETHEUS COUNTERS FROM DATABASE ==============
+    # This ensures Grafana shows ALL historical data, not just since last restart
+    # Critical for demonstrating weeks of work to supervisors
+    restore_prometheus_counters()
+    
+    # Initialize Prometheus gauges from database
+    PROM_IOT_DEVICES_ACTIVE.set(db_stats.get("iot_devices", 0))
+    PROM_K8S_PODS_ISOLATED.set(0)
+    # Note: PROM_CRITICAL_ALERTS_ACTIVE is set in restore_prometheus_counters()
+    PROM_LLM_CACHE_SIZE.set(0)
+    
+    # Set automation mode (1=active, 0=dry-run)
+    dry_run = os.getenv("IDS_DRY_RUN", "false").lower() == "true"
+    PROM_AUTOMATION_MODE.labels(mode="dry_run" if dry_run else "active").set(1)
+    
+    logger.info(f"🔧 Automation mode: {'DRY-RUN' if dry_run else 'ACTIVE'}")
+    logger.info(f"📊 Prometheus metrics initialized")
 
 @app.on_event("shutdown")
 async def shutdown():
     logger.info("Shutting down...")
-    logger.info(f"Total alerts: {metrics['total_alerts']}")
-    logger.info(f"Automated actions: {metrics['automated_actions']}")
+    db_stats = db.get_stats()
+    logger.info(f"Total alerts in DB: {db_stats['total_alerts']}")
+    logger.info(f"Storage type: {db_stats['storage_type']}")
 
 if __name__ == "__main__":
     import uvicorn

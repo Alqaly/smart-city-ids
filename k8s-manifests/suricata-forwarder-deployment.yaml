@@ -31,16 +31,15 @@ spec:
       serviceAccountName: default
       containers:
       - name: suricata-forwarder
-        image: python:3.12-slim
+        image: python:3.11-slim-bookworm
         imagePullPolicy: IfNotPresent
         workingDir: /app
         command:
         - /bin/bash
         - -c
         - |
-          apt-get update && apt-get install -y curl &&
-          pip install fastapi uvicorn httpx pydantic &&
-          python main.py
+          pip install --user fastapi uvicorn httpx pydantic &&
+          ~/.local/bin/uvicorn main:app --host 0.0.0.0 --port 8100
         ports:
         - name: http-health
           containerPort: 8100
@@ -83,8 +82,6 @@ spec:
             cpu: 250m
             memory: 512Mi
         securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: false
           capabilities:
@@ -150,8 +147,8 @@ data:
     class IDSAlert(BaseModel):
         output: str = Field(..., min_length=1, max_length=2048)
         rule: str = Field(..., min_length=1, max_length=512)
-        priority: str = Field(..., pattern="^(Emergency|Alert|Critical|Error|Warning|Notice|Informational|Debug)$")
-        time: str = Field(..., regex=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+        priority: str = Field(..., pattern=r"^(Emergency|Alert|Critical|Error|Warning|Notice|Informational|Debug)$")
+        time: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
         output_fields: Dict[str, str] = Field(default_factory=dict)
     
     # FastAPI

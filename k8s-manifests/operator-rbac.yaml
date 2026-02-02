@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ids-operator
+  namespace: smart-city
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ids-operator-role
+  namespace: smart-city
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["ids.smartcity.local"]
+    resources: ["threatresponses", "threatresponses/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ids-operator-binding
+  namespace: smart-city
+subjects:
+  - kind: ServiceAccount
+    name: ids-operator
+    namespace: smart-city
+roleRef:
+  kind: Role
+  name: ids-operator-role
+  apiGroup: rbac.authorization.k8s.io

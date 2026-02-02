@@ -58,11 +58,11 @@ Be concise, accurate, and security-focused. Always respond in JSON format."""
             
             logger.info(f"OpenAI analysis complete: severity={analysis.get('severity')}")
             
-            return analysis
+            return {"status": "success", "analysis": analysis}
             
         except Exception as e:
             logger.error(f"OpenAI analysis error: {e}")
-            raise
+            return {"status": "error", "error": str(e)}
     
     def _build_prompt(self, alert: Dict[str, Any]) -> str:
         """Build analysis prompt from alert"""

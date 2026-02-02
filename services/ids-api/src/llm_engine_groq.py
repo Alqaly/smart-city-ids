@@ -46,8 +46,7 @@ Always respond in JSON format."""
                 ],
                 temperature=Config.LLM_TEMPERATURE,
                 max_tokens=Config.LLM_MAX_TOKENS,
-                timeout=10.0,
-                max_retries=2
+                timeout=10.0
             )
             
             # Parse response

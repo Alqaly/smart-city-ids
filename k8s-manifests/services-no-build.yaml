@@ -22,7 +22,7 @@ spec:
         image: python:3.9-slim
         command: ["/bin/sh", "-c"]
         args:
-          - "pip install flask==3.0.0 && python /app/app.py"
+          - "pip install --no-cache-dir flask==3.0.0 && python /app/app.py"
         ports:
         - containerPort: 5000
         env:
@@ -31,11 +31,7 @@ spec:
         - name: PORT
           value: "5000"
         securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          runAsGroup: 1000
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
           capabilities:
             drop:
               - ALL
@@ -100,7 +96,7 @@ spec:
         image: python:3.9-slim
         command: ["/bin/sh", "-c"]
         args:
-          - "pip install flask==3.0.0 && python /app/app.py"
+          - "pip install --no-cache-dir flask==3.0.0 && python /app/app.py"
         ports:
         - containerPort: 5001
         env:
@@ -109,11 +105,7 @@ spec:
         - name: PORT
           value: "5001"
         securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          runAsGroup: 1000
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
           capabilities:
             drop:
               - ALL
@@ -178,7 +170,7 @@ spec:
         image: python:3.9-slim
         command: ["/bin/sh", "-c"]
         args:
-          - "pip install flask==3.0.0 && python /app/app.py"
+          - "pip install --no-cache-dir flask==3.0.0 && python /app/app.py"
         ports:
         - containerPort: 5002
         env:
@@ -187,11 +179,7 @@ spec:
         - name: PORT
           value: "5002"
         securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-          runAsGroup: 1000
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
           capabilities:
             drop:
               - ALL

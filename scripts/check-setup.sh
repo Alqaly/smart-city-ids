@@ -20,8 +20,8 @@ else
 fi
 
 # Env vars
-if [ -z "${GROQ_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ] ; then
-  echo "⚠️  Neither GROQ_API_KEY nor OPENAI_API_KEY set. Set one to run IDS API."
+if [ -z "${XAI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ] ; then
+  echo "⚠️  Neither XAI_API_KEY nor OPENAI_API_KEY set. Set one to run IDS API."
 else
   echo "✅ LLM API key present"
 fi
