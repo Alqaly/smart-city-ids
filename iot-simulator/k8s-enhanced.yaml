@@ -1,0 +1,500 @@
+---
+# IoT Simulator Enhanced - Multi-Class Deployment
+# Implements Poisson arrival, rush-hour bursts, and device class differentiation
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smart-city
+---
+# Service for metrics scraping
+apiVersion: v1
+kind: Service
+metadata:
+  name: iot-simulator
+  namespace: smart-city
+  labels:
+    app: iot-simulator
+spec:
+  clusterIP: None
+  selector:
+    app: iot-simulator
+  ports:
+    - port: 5000
+      name: http
+      targetPort: 5000
+---
+# HIGH-FREQUENCY DEVICES (Traffic Cameras, Flow Meters)
+# Base rate: 60 msg/min (1/sec), peaks at 600 msg/min during rush hour
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-simulator-high
+  namespace: smart-city
+  labels:
+    app: iot-simulator
+    class: high
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: iot-simulator
+      class: high
+  template:
+    metadata:
+      labels:
+        app: iot-simulator
+        class: high
+        namespace: traffic
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: simulator
+        image: python:3.11-slim
+        workingDir: /app
+        command: ["python", "mqtt_device_enhanced.py"]
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: DEVICE_CLASS
+          value: "high"
+        - name: DEVICE_NAMESPACE
+          value: "traffic"
+        - name: MQTT_BROKER
+          value: "mqtt-broker.smart-city.svc.cluster.local"
+        - name: MQTT_PORT
+          value: "1883"
+        - name: FAILURE_DISCONNECT_PROB
+          value: "0.01"
+        - name: FAILURE_LATENCY_SPIKE_PROB
+          value: "0.02"
+        ports:
+        - containerPort: 5000
+          name: http
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: app-code
+        configMap:
+          name: iot-simulator-code
+---
+# MEDIUM-FREQUENCY DEVICES (Environment Sensors, Parking)
+# Base rate: 6 msg/min, peaks at 60 msg/min during rush hour
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-simulator-medium
+  namespace: smart-city
+  labels:
+    app: iot-simulator
+    class: medium
+spec:
+  replicas: 10
+  selector:
+    matchLabels:
+      app: iot-simulator
+      class: medium
+  template:
+    metadata:
+      labels:
+        app: iot-simulator
+        class: medium
+        namespace: environment
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: simulator
+        image: python:3.11-slim
+        workingDir: /app
+        command: ["python", "mqtt_device_enhanced.py"]
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: DEVICE_CLASS
+          value: "medium"
+        - name: DEVICE_NAMESPACE
+          value: "environment"
+        - name: MQTT_BROKER
+          value: "mqtt-broker.smart-city.svc.cluster.local"
+        - name: MQTT_PORT
+          value: "1883"
+        - name: FAILURE_DISCONNECT_PROB
+          value: "0.01"
+        - name: FAILURE_LATENCY_SPIKE_PROB
+          value: "0.02"
+        ports:
+        - containerPort: 5000
+          name: http
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: app-code
+        configMap:
+          name: iot-simulator-code
+---
+# BURST DEVICES (Motion Sensors, Alarms)
+# Base rate: 0.5 msg/min, event-driven bursts
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-simulator-burst
+  namespace: smart-city
+  labels:
+    app: iot-simulator
+    class: burst
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: iot-simulator
+      class: burst
+  template:
+    metadata:
+      labels:
+        app: iot-simulator
+        class: burst
+        namespace: energy
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: simulator
+        image: python:3.11-slim
+        workingDir: /app
+        command: ["python", "mqtt_device_enhanced.py"]
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: DEVICE_CLASS
+          value: "burst"
+        - name: DEVICE_NAMESPACE
+          value: "energy"
+        - name: MQTT_BROKER
+          value: "mqtt-broker.smart-city.svc.cluster.local"
+        - name: MQTT_PORT
+          value: "1883"
+        - name: FAILURE_DISCONNECT_PROB
+          value: "0.005"
+        - name: FAILURE_LATENCY_SPIKE_PROB
+          value: "0.01"
+        ports:
+        - containerPort: 5000
+          name: http
+        volumeMounts:
+        - name: app-code
+          mountPath: /app
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: app-code
+        configMap:
+          name: iot-simulator-code
+---
+# ConfigMap containing the enhanced simulator code
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iot-simulator-code
+  namespace: smart-city
+data:
+  mqtt_device_enhanced.py: |
+    #!/usr/bin/env python3
+    """Smart City IDS - Enhanced IoT Device Simulator"""
+    
+    import os
+    import subprocess
+    import sys
+    
+    # Install dependencies at startup
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q",
+                          "flask", "paho-mqtt"])
+    
+    import threading
+    import time
+    import random
+    import json
+    import math
+    from datetime import datetime
+    from flask import Flask, request, jsonify, Response
+    import paho.mqtt.client as mqtt
+    
+    app = Flask(__name__)
+    
+    POD_NAME = os.environ.get("POD_NAME", "iot-device-0")
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", "mqtt-broker")
+    MQTT_PORT = int(os.environ.get("MQTT_PORT", 1883))
+    DEVICE_CLASS = os.environ.get("DEVICE_CLASS", "medium")
+    DEVICE_NAMESPACE = os.environ.get("DEVICE_NAMESPACE", "traffic")
+    
+    DEVICE_CLASS_RATES = {"high": 60.0, "medium": 6.0, "burst": 0.5}
+    RUSH_HOUR_MULTIPLIERS = {7: 3.0, 8: 10.0, 9: 5.0, 16: 3.0, 17: 10.0, 18: 5.0}
+    WEEKDAY_MULTIPLIERS = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0, 5: 0.3, 6: 0.2}
+    
+    FAILURE_DISCONNECT_PROB = float(os.environ.get("FAILURE_DISCONNECT_PROB", 0.01))
+    FAILURE_DISCONNECT_DURATION = float(os.environ.get("FAILURE_DISCONNECT_DURATION", 30))
+    FAILURE_LATENCY_SPIKE_PROB = float(os.environ.get("FAILURE_LATENCY_SPIKE_PROB", 0.02))
+    FAILURE_LATENCY_SPIKE_MAX = float(os.environ.get("FAILURE_LATENCY_SPIKE_MAX", 5.0))
+    
+    class MetricsCollector:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.messages_sent = 0
+            self.messages_received = 0
+            self.messages_failed = 0
+            self.disconnects_total = 0
+            self.latency_spikes_total = 0
+            self.current_rate = 0.0
+            self.burst_factor = 1.0
+            self.device_active = 1
+            self.latencies = []
+            
+        def inc_sent(self):
+            with self.lock: self.messages_sent += 1
+        def inc_received(self):
+            with self.lock: self.messages_received += 1
+        def inc_failed(self):
+            with self.lock: self.messages_failed += 1
+        def inc_disconnect(self):
+            with self.lock: self.disconnects_total += 1
+        def inc_latency_spike(self):
+            with self.lock: self.latency_spikes_total += 1
+        def set_rate(self, rate):
+            with self.lock: self.current_rate = rate
+        def set_burst_factor(self, factor):
+            with self.lock: self.burst_factor = factor
+        def set_active(self, active):
+            with self.lock: self.device_active = 1 if active else 0
+        def record_latency(self, latency):
+            with self.lock:
+                self.latencies.append(latency)
+                if len(self.latencies) > 1000:
+                    self.latencies = self.latencies[-1000:]
+                    
+        def get_prometheus_metrics(self):
+            with self.lock:
+                lines = [
+                    f'iot_messages_sent_total{{device="{POD_NAME}",namespace="{DEVICE_NAMESPACE}",class="{DEVICE_CLASS}"}} {self.messages_sent}',
+                    f'iot_messages_failed_total{{device="{POD_NAME}",namespace="{DEVICE_NAMESPACE}",class="{DEVICE_CLASS}"}} {self.messages_failed}',
+                    f'iot_device_disconnects_total{{device="{POD_NAME}"}} {self.disconnects_total}',
+                    f'iot_latency_spikes_total{{device="{POD_NAME}"}} {self.latency_spikes_total}',
+                    f'iot_device_active{{device="{POD_NAME}",namespace="{DEVICE_NAMESPACE}",class="{DEVICE_CLASS}"}} {self.device_active}',
+                    f'iot_current_message_rate{{device="{POD_NAME}",class="{DEVICE_CLASS}"}} {self.current_rate:.2f}',
+                    f'iot_burst_factor{{device="{POD_NAME}"}} {self.burst_factor:.2f}',
+                ]
+                return "\n".join(lines) + "\n"
+    
+    metrics = MetricsCollector()
+    mqtt_client = mqtt.Client()
+    mqtt_connected = False
+    mqtt_paused = False
+    
+    def on_connect(client, userdata, flags, rc):
+        global mqtt_connected
+        mqtt_connected = (rc == 0)
+        if mqtt_connected:
+            print(f"[MQTT] Connected to {MQTT_BROKER}:{MQTT_PORT}")
+    
+    def on_disconnect(client, userdata, rc):
+        global mqtt_connected
+        mqtt_connected = False
+    
+    mqtt_client.on_connect = on_connect
+    mqtt_client.on_disconnect = on_disconnect
+    
+    def get_current_lambda():
+        now = datetime.now()
+        base_rate = DEVICE_CLASS_RATES.get(DEVICE_CLASS, 6.0)
+        rush_multiplier = RUSH_HOUR_MULTIPLIERS.get(now.hour, 1.0)
+        weekday_multiplier = WEEKDAY_MULTIPLIERS.get(now.weekday(), 1.0)
+        final_rate = base_rate * rush_multiplier * weekday_multiplier
+        metrics.set_rate(final_rate)
+        metrics.set_burst_factor(rush_multiplier)
+        return final_rate
+    
+    def poisson_interval(lambda_rate):
+        if lambda_rate <= 0: return 60.0
+        lambda_per_sec = lambda_rate / 60.0
+        interval = random.expovariate(lambda_per_sec)
+        return max(0.1, min(interval, 300))
+    
+    def maybe_inject_disconnect():
+        global mqtt_paused
+        if random.random() < FAILURE_DISCONNECT_PROB:
+            metrics.inc_disconnect()
+            metrics.set_active(False)
+            mqtt_paused = True
+            duration = random.uniform(5, FAILURE_DISCONNECT_DURATION)
+            print(f"[FAILURE] Simulating disconnect for {duration:.1f}s")
+            time.sleep(duration)
+            mqtt_paused = False
+            metrics.set_active(True)
+            return True
+        return False
+    
+    def maybe_inject_latency_spike():
+        if random.random() < FAILURE_LATENCY_SPIKE_PROB:
+            metrics.inc_latency_spike()
+            spike = random.uniform(1.0, FAILURE_LATENCY_SPIKE_MAX)
+            time.sleep(spike)
+            return spike
+        return 0
+    
+    def generate_sensor_data():
+        base_data = {
+            "device": POD_NAME,
+            "namespace": DEVICE_NAMESPACE,
+            "class": DEVICE_CLASS,
+            "timestamp": time.time(),
+        }
+        if DEVICE_NAMESPACE == "traffic":
+            base_data.update({"vehicle_count": random.randint(0, 50), "avg_speed_kmh": random.uniform(20, 80)})
+        elif DEVICE_NAMESPACE == "energy":
+            base_data.update({"power_kw": random.uniform(0.5, 15.0), "voltage": random.uniform(218, 242)})
+        elif DEVICE_NAMESPACE == "environment":
+            base_data.update({"temperature_c": random.uniform(15, 35), "humidity_pct": random.uniform(30, 90)})
+        return base_data
+    
+    def publish_message():
+        global mqtt_connected
+        if mqtt_paused or not mqtt_connected:
+            metrics.inc_failed()
+            return False
+        maybe_inject_latency_spike()
+        topic = f"sensors/{DEVICE_NAMESPACE}/{DEVICE_CLASS}/{POD_NAME}"
+        payload = json.dumps(generate_sensor_data())
+        try:
+            result = mqtt_client.publish(topic, payload, qos=1)
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                metrics.inc_sent()
+                return True
+            else:
+                metrics.inc_failed()
+                return False
+        except Exception as e:
+            metrics.inc_failed()
+            return False
+    
+    def mqtt_connection_loop():
+        global mqtt_connected
+        while True:
+            if not mqtt_paused and not mqtt_connected:
+                try:
+                    mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+                    mqtt_client.loop_start()
+                except: pass
+            time.sleep(5)
+    
+    def message_generator_loop():
+        print(f"[START] Device {POD_NAME} ({DEVICE_CLASS}) in {DEVICE_NAMESPACE}")
+        time.sleep(3)
+        while True:
+            if maybe_inject_disconnect(): continue
+            current_lambda = get_current_lambda()
+            interval = poisson_interval(current_lambda)
+            publish_message()
+            time.sleep(interval)
+    
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "healthy" if not mqtt_paused else "degraded", "device": POD_NAME})
+    
+    @app.route("/status")
+    def status():
+        return jsonify({"device": POD_NAME, "class": DEVICE_CLASS, "mqtt_connected": mqtt_connected,
+                       "current_rate": metrics.current_rate, "messages_sent": metrics.messages_sent})
+    
+    @app.route("/metrics")
+    def prometheus_metrics():
+        return Response(metrics.get_prometheus_metrics(), mimetype="text/plain")
+    
+    if __name__ == "__main__":
+        threading.Thread(target=mqtt_connection_loop, daemon=True).start()
+        threading.Thread(target=message_generator_loop, daemon=True).start()
+        app.run(host="0.0.0.0", port=5000)
+---
+# ServiceMonitor for Prometheus scraping
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: iot-simulator
+  namespace: smart-city
+  labels:
+    app: iot-simulator
+spec:
+  selector:
+    matchLabels:
+      app: iot-simulator
+  endpoints:
+  - port: http
+    interval: 15s
+    path: /metrics

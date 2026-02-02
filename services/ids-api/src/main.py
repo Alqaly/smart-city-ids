@@ -833,6 +833,114 @@ async def get_production_status():
         }
     }
 
+# ============== HUMAN-IN-THE-LOOP GOVERNANCE API ==============
+# Capstone II TASK 4: Autopilot / Assisted / Manual modes
+
+from governance import (
+    governance, AutomationMode,
+    get_automation_mode, set_automation_mode,
+    get_pending_actions, get_governance_status,
+    approve_pending_action, reject_pending_action
+)
+
+@app.get("/api/governance/status")
+async def governance_status():
+    """Get Human-in-the-Loop governance status.
+    
+    Returns current mode (autopilot/assisted/manual), pending actions count,
+    and metrics for IEEE-defensible audit trail.
+    """
+    return get_governance_status()
+
+@app.get("/api/governance/mode")
+async def get_mode():
+    """Get current automation mode."""
+    return {"mode": get_automation_mode()}
+
+@app.post("/api/governance/mode")
+async def change_mode(mode: str = "assisted"):
+    """Change automation mode.
+    
+    Args:
+        mode: One of 'autopilot', 'assisted', 'manual'
+        
+    - AUTOPILOT: All actions execute automatically (fastest response)
+    - ASSISTED: Severity >= 8 requires approval (balanced)
+    - MANUAL: All actions require approval (safest)
+    """
+    result = set_automation_mode(mode)
+    if result["status"] == "success":
+        logger.info(f"Automation mode changed to: {mode}")
+        PROM_AUTOMATION_MODE.labels(mode="active").set(0)
+        PROM_AUTOMATION_MODE.labels(mode=mode).set(1)
+    return result
+
+@app.get("/api/governance/pending")
+async def list_pending_actions():
+    """List actions pending human approval.
+    
+    In ASSISTED mode: only severity >= 8 actions appear here
+    In MANUAL mode: all recommended actions appear here
+    """
+    actions = get_pending_actions()
+    PROM_APPROVAL_PENDING.set(len(actions))
+    return {"pending_count": len(actions), "actions": actions}
+
+@app.post("/api/governance/approve/{action_id}")
+async def approve_action(action_id: str, operator: str = "admin"):
+    """Approve a pending action and execute it.
+    
+    Args:
+        action_id: ID from /api/governance/pending
+        operator: Who is approving (for audit trail)
+    """
+    # Find the action and get execution callback
+    action = governance._pending_actions.get(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    
+    # Build execution callback based on action type
+    def execute():
+        if k8s_automation:
+            if action.action_type == "isolate_pod":
+                return k8s_automation.isolate_pod(action.target)
+            elif action.action_type == "scale_up":
+                return k8s_automation.scale_deployment(action.target, 3)
+            elif action.action_type == "evict_pod":
+                return k8s_automation.evict_pod(action.target)
+        return {"success": False, "error": "K8s automation not available"}
+    
+    result = approve_pending_action(action_id, operator, execute)
+    
+    if result.get("status") == "approved_and_executed":
+        PROM_HUMAN_OVERRIDE_REQUESTS.labels(reason="approved").inc()
+        PROM_AUTOMATED_DECISIONS.labels(action_type=action.action_type).inc()
+    
+    return result
+
+@app.post("/api/governance/reject/{action_id}")
+async def reject_action(action_id: str, operator: str = "admin", reason: str = ""):
+    """Reject a pending action.
+    
+    Args:
+        action_id: ID from /api/governance/pending
+        operator: Who is rejecting (for audit trail)
+        reason: Why the action was rejected
+    """
+    result = reject_pending_action(action_id, operator, reason)
+    
+    if result.get("status") == "rejected":
+        PROM_HUMAN_OVERRIDE_REQUESTS.labels(reason="rejected").inc()
+    
+    return result
+
+@app.get("/api/governance/history")
+async def action_history(limit: int = 50):
+    """Get recent action history for audit trail."""
+    return {"history": governance.get_action_history(limit)}
+
+# ============== END GOVERNANCE API ==============
+
 @app.post("/api/alerts")
 async def process_alert(alert: Alert, request: Request, token = Depends(verify_token)) -> AlertResponse:
     """Process security alert with LLM (xAI Grok-4 + OpenAI fallback)"""
