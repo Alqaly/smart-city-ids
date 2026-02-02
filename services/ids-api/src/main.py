@@ -474,6 +474,28 @@ def restore_prometheus_counters():
         critical_count = restore_data.get("critical_alerts", 0)
         PROM_CRITICAL_ALERTS_ACTIVE.set(critical_count)
         
+        # Restore LLM decision outcomes based on severity
+        # Malicious: severity >= 8, Suspicious: severity 5-7, Benign: severity < 5
+        malicious = restore_data.get("alerts_by_severity", {}).get("8", 0) + \
+                    restore_data.get("alerts_by_severity", {}).get("9", 0) + \
+                    restore_data.get("alerts_by_severity", {}).get("10", 0)
+        suspicious = restore_data.get("alerts_by_severity", {}).get("5", 0) + \
+                     restore_data.get("alerts_by_severity", {}).get("6", 0) + \
+                     restore_data.get("alerts_by_severity", {}).get("7", 0)
+        benign = total_processed - malicious - suspicious
+        if malicious > 0:
+            PROM_LLM_DECISION_OUTCOME.labels(outcome="malicious").inc(malicious)
+        if suspicious > 0:
+            PROM_LLM_DECISION_OUTCOME.labels(outcome="suspicious").inc(suspicious)
+        if benign > 0:
+            PROM_LLM_DECISION_OUTCOME.labels(outcome="benign").inc(max(0, benign))
+        logger.info(f"  ✓ Restored LLM decisions: malicious={malicious}, suspicious={suspicious}, benign={max(0, benign)}")
+        
+        # Restore automated decision counts (isolate_pod + scale_up = automated)
+        auto_count = sum(restore_data.get("actions_executed", {}).values())
+        if auto_count > 0:
+            PROM_AUTOMATED_DECISIONS.labels(action_type="automated").inc(auto_count)
+        
         # Restore IoT events
         for key, count in restore_data.get("iot_events_by_type", {}).items():
             parts = key.split(":")
@@ -557,6 +579,51 @@ PROM_CRITICAL_ALERTS_ACTIVE = Gauge(
     "Number of unresolved critical alerts (severity >= 8).",
 )
 
+# ============== LLM DECISION & GOVERNANCE METRICS ==============
+PROM_LLM_DECISION_OUTCOME = Counter(
+    "smartcity_ids_llm_decision_outcome_total",
+    "LLM decision outcomes (benign, suspicious, malicious).",
+    ["outcome"],
+)
+PROM_LLM_CONFIDENCE_BUCKET = Counter(
+    "smartcity_ids_llm_confidence_bucket_total",
+    "LLM confidence score buckets (low: <0.5, medium: 0.5-0.8, high: >0.8).",
+    ["bucket"],
+)
+PROM_AUTOMATED_DECISIONS = Counter(
+    "smartcity_ids_automated_decisions_total",
+    "Decisions made automatically by the system.",
+    ["action_type"],
+)
+PROM_HUMAN_OVERRIDE_REQUESTS = Counter(
+    "smartcity_ids_human_override_requests_total",
+    "Actions flagged for human review.",
+    ["reason"],
+)
+PROM_ACTIONS_BLOCKED_POLICY = Counter(
+    "smartcity_ids_actions_blocked_policy_total",
+    "Automated actions blocked by policy rules.",
+    ["policy", "action"],
+)
+PROM_ALERT_PROCESSING_P50 = Gauge(
+    "smartcity_ids_alert_processing_p50_seconds",
+    "50th percentile alert processing time.",
+)
+PROM_ALERT_PROCESSING_P95 = Gauge(
+    "smartcity_ids_alert_processing_p95_seconds",
+    "95th percentile alert processing time.",
+)
+PROM_TIME_TO_MITIGATION = Histogram(
+    "smartcity_ids_time_to_mitigation_seconds",
+    "Time from alert detection to automated mitigation action.",
+    buckets=(0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300),
+)
+PROM_LLM_FAILOVER_COUNT = Counter(
+    "smartcity_ids_llm_failover_total",
+    "Number of times LLM failed over to backup engine.",
+    ["from_engine", "to_engine"],
+)
+
 # ============== IOT DEVICE METRICS ==============
 PROM_IOT_EVENTS_TOTAL = Counter(
     "smartcity_ids_iot_events_total",
@@ -566,6 +633,17 @@ PROM_IOT_EVENTS_TOTAL = Counter(
 PROM_IOT_DEVICES_ACTIVE = Gauge(
     "smartcity_ids_iot_devices_active",
     "Number of active IoT devices.",
+)
+PROM_IOT_LATENCY_SECONDS = Histogram(
+    "smartcity_ids_iot_latency_seconds",
+    "Latency from IoT event to IDS processing (seconds).",
+    ["device_type"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+)
+PROM_IOT_EVENTS_PER_DEVICE = Counter(
+    "smartcity_ids_iot_events_per_device_total",
+    "Event count per IoT device for bar chart visualization.",
+    ["device_id", "device_type"],
 )
 PROM_IOT_SECURITY_EVENTS = Counter(
     "smartcity_ids_iot_security_events_total",
