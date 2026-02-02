@@ -1,19 +1,25 @@
 #!/bin/bash
 # =============================================================================
 # Smart City IDS - Grafana Dashboard Loader
-# Imports dashboards from infrastructure/monitoring/grafana-dashboards/
+# Imports dashboards from infrastructure/monitoring/
 # =============================================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-DASHBOARD_DIR="${PROJECT_ROOT}/infrastructure/monitoring/grafana-dashboards"
+
+# Dashboard locations (check multiple paths)
+DASHBOARD_DIRS=(
+    "${PROJECT_ROOT}/infrastructure/monitoring/grafana-dashboards"
+    "${PROJECT_ROOT}/infrastructure/monitoring"
+)
 
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
@@ -119,21 +125,46 @@ main() {
     wait_for_grafana "$grafana_url"
     configure_datasource "$grafana_url"
     
+    # Find dashboard directory
+    local dashboard_dir=""
+    for dir in "${DASHBOARD_DIRS[@]}"; do
+        if [[ -d "$dir" ]]; then
+            dashboard_dir="$dir"
+            break
+        fi
+    done
+    
     # Find and import all dashboards
-    if [[ -d "$DASHBOARD_DIR" ]]; then
-        for dashboard in "$DASHBOARD_DIR"/*.json; do
+    local imported=0
+    if [[ -n "$dashboard_dir" ]]; then
+        log_info "Looking for dashboards in: $dashboard_dir"
+        for dashboard in "$dashboard_dir"/*.json "$dashboard_dir"/grafana-dashboard-*.json; do
             if [[ -f "$dashboard" ]]; then
                 import_dashboard "$grafana_url" "$dashboard"
+                ((imported++))
             fi
         done
-    else
-        log_warn "Dashboard directory not found: $DASHBOARD_DIR"
-        log_info "You can manually import dashboards via Grafana UI"
+    fi
+    
+    # Also check root monitoring directory
+    for dashboard in "${PROJECT_ROOT}/infrastructure/monitoring"/grafana-dashboard-*.json; do
+        if [[ -f "$dashboard" ]]; then
+            import_dashboard "$grafana_url" "$dashboard"
+            ((imported++))
+        fi
+    done
+    
+    if [[ $imported -eq 0 ]]; then
+        log_warn "No dashboards found to import"
+        log_info "Expected locations:"
+        for dir in "${DASHBOARD_DIRS[@]}"; do
+            echo "  - $dir/*.json"
+        done
     fi
     
     echo ""
     log_info "=========================================="
-    log_info "Dashboards loaded!"
+    log_info "Imported $imported dashboards"
     log_info "Access Grafana at: $grafana_url"
     log_info "Credentials: admin / admin"
     log_info "=========================================="
