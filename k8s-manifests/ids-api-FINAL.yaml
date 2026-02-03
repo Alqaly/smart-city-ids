@@ -29,11 +29,11 @@ spec:
         ports:
         - containerPort: 8000
         env:
-        - name: GROQ_API_KEY
+        - name: XAI_API_KEY
           valueFrom:
             secretKeyRef:
               name: ids-secrets
-              key: groq-api-key
+              key: xai-api-key
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:

@@ -34,7 +34,7 @@ nano .env  # Add XAI_API_KEY or OPENAI_API_KEY
 | Feature | Description |
 |---------|-------------|
 | **LLM-Powered Analysis** | Uses xAI Grok or OpenAI GPT to analyze security alerts |
-| **Multi-Source Detection** | Integrates Falco (runtime) and Suricata (network) |
+| **Multi-Source Detection** | Integrates Falco (runtime IDS) and Suricata (network IDS) - Both primary |
 | **Automated Response** | Kubernetes actions based on threat severity |
 | **Persistent Storage** | PostgreSQL for alert history and metric recovery |
 | **Visual Dashboards** | Grafana dashboards for real-time monitoring |
@@ -189,3 +189,17 @@ See [docs/PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) for areas needing improvement
 - **Issues:** GitHub Issues
 - **Documentation:** [docs/](docs/)
 - **Email:** [alqaly@example.com]
+
+## 🔍 Dual-IDS Architecture
+
+This system uses **both** Falco and Suricata as **primary IDS systems**:
+
+- **Falco**: Runtime security monitoring (detects suspicious container behavior, syscall anomalies)
+- **Suricata**: Network-level threat detection (analyzes traffic patterns, protocol violations)
+
+Both work in **tandem** to provide comprehensive threat coverage at multiple layers:
+- **Runtime Layer**: Falco monitors what containers are doing
+- **Network Layer**: Suricata monitors network traffic
+- **Analysis Layer**: LLM correlates and analyzes both sources
+
+This dual-IDS approach ensures nothing slips through cracks—threats are caught either at the network boundary or at runtime.

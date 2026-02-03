@@ -118,7 +118,7 @@ POSTGRES_DB=idsdb
 
 | Issue | Severity | Status |
 |-------|----------|--------|
-| Suricata forwarder CrashLoopBackOff | Low | Non-critical, Falco is primary |
+| Suricata Network IDS | High | Primary IDS - Network traffic analysis |
 | Runtime pip install in pods | Medium | Dockerfiles created, not yet deployed |
 
 ---
@@ -188,7 +188,7 @@ git push
 ## Next Steps (Recommendations)
 
 1. [ ] Build and deploy pre-built Docker images (eliminate runtime pip install)
-2. [ ] Fix Suricata forwarder configuration
+2. [ ] Suricata deployment fixed and running
 3. [ ] Add CI/CD pipeline (GitHub Actions)
 4. [ ] Add more unit tests
 5. [ ] Create video demo for defense

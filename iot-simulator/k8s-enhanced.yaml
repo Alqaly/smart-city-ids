@@ -79,6 +79,10 @@ spec:
           value: "0.01"
         - name: FAILURE_LATENCY_SPIKE_PROB
           value: "0.02"
+        - name: NETWORK_PACKET_LOSS
+          value: "0.05"
+        - name: ANOMALY_RATE
+          value: "0.01"
         ports:
         - containerPort: 5000
           name: http
@@ -158,6 +162,10 @@ spec:
           value: "0.01"
         - name: FAILURE_LATENCY_SPIKE_PROB
           value: "0.02"
+        - name: NETWORK_PACKET_LOSS
+          value: "0.05"
+        - name: ANOMALY_RATE
+          value: "0.01"
         ports:
         - containerPort: 5000
           name: http
@@ -237,6 +245,10 @@ spec:
           value: "0.005"
         - name: FAILURE_LATENCY_SPIKE_PROB
           value: "0.01"
+        - name: NETWORK_PACKET_LOSS
+          value: "0.03"
+        - name: ANOMALY_RATE
+          value: "0.02"
         ports:
         - containerPort: 5000
           name: http

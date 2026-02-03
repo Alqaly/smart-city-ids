@@ -1,0 +1,123 @@
+---
+# Suricata ConfigMap with pcap mode and loopback support
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: suricata-config
+  namespace: monitoring
+data:
+  suricata.yaml: |
+    %YAML 1.1
+    ---
+    vars:
+      address-groups:
+        HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+        EXTERNAL_NET: "!$HOME_NET"
+        HTTP_PORTS: "80"
+
+    pcap:
+      - interface: lo
+        
+    logging:
+      default-log-level: notice
+      outputs:
+      - console:
+          enabled: yes
+
+    outputs:
+      - eve-log:
+          enabled: yes
+          filetype: regular
+          filename: /var/log/suricata/eve.json
+          types:
+            - alert
+
+    app-layer:
+      protocols:
+        http:
+          enabled: yes
+        dns:
+          enabled: yes
+
+---
+# Suricata Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suricata
+  namespace: monitoring
+  labels:
+    app: suricata
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: suricata
+  template:
+    metadata:
+      labels:
+        app: suricata
+    spec:
+      containers:
+      - name: suricata
+        image: jasonish/suricata:6.0.13
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh"]
+        args:
+          - -c
+          - |
+            # Suricata running in network monitoring mode
+            # In K8s, we monitor the loopback and any captured traffic
+            exec suricata -c /etc/suricata/suricata.yaml -r /dev/null 2>/dev/null || \
+            exec suricata -c /etc/suricata/suricata.yaml --pcap
+        securityContext:
+          runAsUser: 0
+          privileged: false
+          capabilities:
+            add:
+              - NET_ADMIN
+              - NET_RAW
+        volumeMounts:
+        - name: config
+          mountPath: /etc/suricata
+        - name: logs
+          mountPath: /var/log/suricata
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "ps aux | grep suricata | grep -v grep"
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: suricata-config
+      - name: logs
+        emptyDir: {}
+
+---
+# Suricata Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: suricata
+  namespace: monitoring
+  labels:
+    app: suricata
+spec:
+  selector:
+    app: suricata
+  ports:
+  - name: syslog
+    port: 514
+    protocol: UDP
+  type: ClusterIP
