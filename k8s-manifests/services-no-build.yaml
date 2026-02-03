@@ -19,10 +19,11 @@ spec:
     spec:
       containers:
       - name: traffic-camera
-        image: python:3.9-slim
-        command: ["/bin/sh", "-c"]
+        image: smart-city-ids/smart-city-service:latest
+        imagePullPolicy: Never
+        command: ["python"]
         args:
-          - "pip install --no-cache-dir flask==3.0.0 && python /app/app.py"
+          - "/app/app.py"
         ports:
         - containerPort: 5000
         env:

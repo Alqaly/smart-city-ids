@@ -30,6 +30,7 @@ from llm_engine_xai import XAIAnalyzer
 from llm_engine_openai import OpenAIAnalyzer
 from k8s_automation import K8sAutomation
 from database import db
+from alert_deduplicator import AlertDeduplicator, AlertBatcher
 
 # Configure logging
 logging.basicConfig(
@@ -62,6 +63,14 @@ try:
     xai_engine = XAIAnalyzer() if Config.XAI_API_KEY else None
     openai_engine = OpenAIAnalyzer() if Config.OPENAI_API_KEY else None
     k8s_automation = K8sAutomation()
+    
+    # Initialize alert deduplicator for LLM cost reduction
+    deduplicator = AlertDeduplicator(
+        ttl_seconds=int(os.getenv("DEDUPLICATOR_TTL_SECONDS", "60")),
+        max_cache_size=int(os.getenv("DEDUPLICATOR_MAX_CACHE_SIZE", "10000"))
+    )
+    logger.info(f"Alert deduplicator initialized (TTL={deduplicator.ttl}s, max_cache={deduplicator.max_cache_size})")
+    
     logger.info(f"Initialized: xAI Grok-4={'ready' if xai_engine else 'disabled'}, OpenAI={'ready' if openai_engine else 'disabled'}, K8s=ready")
     logger.info(f"Safety: mode={Config.AUTOMATION_MODE}, protected={Config.PROTECTED_SERVICES}")
 except Exception as e:
@@ -69,6 +78,7 @@ except Exception as e:
     xai_engine = None
     openai_engine = None
     k8s_automation = None
+    deduplicator = None
 
 # Alert Cache for deduplication (reduces LLM costs)
 class AlertCache:
@@ -975,13 +985,40 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         source = "suricata" if "suricata" in alert.rule.lower() else "falco"
         metrics["alerts_by_source"][source] += 1
         PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
-    
+        
+        # ========== ALERT DEDUPLICATION (LLM COST REDUCTION) ==========
+        # Check if this alert was recently analyzed (cache hit)
+        analysis = None
+        llm_used = "none"
+        analysis_cached = False
+        
+        if deduplicator:
+            should_analyze, cached_analysis = deduplicator.should_analyze(alert.dict())
+            if not should_analyze and cached_analysis:
+                # Cache hit: use previous analysis
+                analysis = cached_analysis
+                llm_used = "cached"
+                analysis_cached = True
+                logger.info(f"✓ Alert dedup HIT (reusing recent analysis): severity={analysis.get('severity')}")
+                
+                # Log deduplication metrics
+                stats = deduplicator.get_stats()
+                logger.debug(f"Dedup stats: hit_rate={stats['hit_rate_percent']}%, cache_size={stats['cache_size']}/{stats['max_cache_size']}")
+        
         # Analyze with LLM (xAI Grok-4 primary, OpenAI fallback)
-        logger.info("Analyzing alert...")
-        analysis, llm_used = await analyze_with_fallback(alert.dict())
+        if analysis is None:
+            logger.info("Analyzing alert with LLM...")
+            analysis, llm_used = await analyze_with_fallback(alert.dict())
+            
+            # Cache the analysis for future deduplication
+            if deduplicator:
+                deduplicator.cache_analysis(alert.dict(), analysis)
+                stats = deduplicator.get_stats()
+                logger.info(f"✗ Alert dedup MISS (analyzed): severity={analysis.get('severity')}, cost_estimate=${analysis.get('llm_cost', 0):.4f}")
+        
         severity = analysis.get("severity", 5)
         threat_type = analysis.get("threat_type", "Unknown")
-        logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}")
+        logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}, cached={analysis_cached}")
         
         # Track severity and threat metrics
         PROM_SEVERITY_DISTRIBUTION.labels(severity=str(severity)).inc()
@@ -1402,6 +1439,47 @@ async def get_metrics():
 async def get_db_stats():
     """Get database statistics."""
     return db.get_stats()
+
+
+@app.get("/api/deduplicator-stats")
+async def get_dedup_stats(token = Depends(verify_token)):
+    """Get alert deduplication cache statistics."""
+    if not deduplicator:
+        return {"error": "Deduplicator not initialized"}
+    
+    stats = deduplicator.get_stats()
+    
+    # Calculate estimated cost savings
+    if stats["total_alerts"] > 0:
+        # Estimate: $0.001 per LLM call (xAI Grok-4 pricing)
+        cost_without_dedup = stats["total_alerts"] * 0.001
+        cost_with_dedup = stats["misses"] * 0.001
+        cost_saved = cost_without_dedup - cost_with_dedup
+    else:
+        cost_saved = 0
+    
+    return {
+        **stats,
+        "cost_saved_usd": round(cost_saved, 4),
+        "estimated_cost_without_dedup": round(cost_without_dedup if stats["total_alerts"] > 0 else 0, 4),
+        "estimated_cost_with_dedup": round(cost_with_dedup if stats["total_alerts"] > 0 else 0, 4),
+    }
+
+
+@app.post("/api/deduplicator/clear")
+async def clear_dedup_cache(token = Depends(verify_token)):
+    """Clear alert deduplication cache (administrative)."""
+    if not deduplicator:
+        return {"error": "Deduplicator not initialized"}
+    
+    stats_before = deduplicator.get_stats()
+    deduplicator.clear_cache()
+    
+    return {
+        "status": "success",
+        "cleared_fingerprints": stats_before["cache_size"],
+        "previous_hit_rate": f"{stats_before['hit_rate_percent']}%"
+    }
 
 
 @app.get("/metrics")

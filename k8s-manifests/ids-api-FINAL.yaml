@@ -16,18 +16,22 @@ spec:
       serviceAccountName: ids-service-account
       containers:
       - name: ids-api
-        image: python:3.11-slim
-        command: ["/bin/bash", "-c"]
+        image: smart-city-ids/ids-api:latest
+        imagePullPolicy: Never
+        command: ["uvicorn"]
         args:
-          - |
-            set -e
-            apt update >/dev/null 2>&1
-            apt install -y curl >/dev/null 2>&1
-            cd /app
-            pip install --no-cache-dir -r requirements.txt
-            exec python -m uvicorn main:app --host 0.0.0.0 --port 8000
+          - "main:app"
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "8000"
         ports:
         - containerPort: 8000
+          name: http
+          protocol: TCP
+        - containerPort: 8001
+          name: metrics
+          protocol: TCP
         env:
         - name: XAI_API_KEY
           valueFrom:

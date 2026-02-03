@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ids-api
+  namespace: smart-city
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: ids-api
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scheme: http

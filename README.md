@@ -10,22 +10,31 @@ An autonomous security monitoring system that uses Large Language Models (xAI Gr
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (5 Minutes)
 
+### Prerequisites
+- Ubuntu 20.04+ (or similar Linux)
+- 4GB RAM, 20GB disk
+- Internet (first-time only)
+- xAI or OpenAI API key
+
+### Deploy
 ```bash
-# Clone the repository
 git clone https://github.com/Alqaly/smart-city-ids.git
 cd smart-city-ids
-
-# Configure your API keys
 cp .env.example .env
-nano .env  # Add XAI_API_KEY or OPENAI_API_KEY
-
-# Deploy everything (one command!)
+nano .env  # Add your XAI_API_KEY or OPENAI_API_KEY
 ./deploy.sh
 ```
 
-**That's it!** The script installs K3s, builds images, deploys all services, and configures monitoring.
+### Check It Works
+```bash
+kubectl get pods -n smart-city          # Should see 10+ pods running
+kubectl logs -n smart-city -l app=ids-api --tail=20
+```
+
+Grafana: `http://localhost:30300`  
+IDS API: `http://localhost:30800/docs`
 
 ---
 

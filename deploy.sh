@@ -218,22 +218,32 @@ build_images() {
         return
     fi
     
-    # Check if docker is available
-    if ! command -v docker &> /dev/null; then
-        log_warn "Docker not found. Using k3s built-in containerd..."
-        
-        # Build images using k3s containerd via nerdctl or skip
-        if command -v nerdctl &> /dev/null; then
-            bash "${PROJECT_ROOT}/scripts/build-images.sh"
-        else
-            log_warn "nerdctl not found. Using base images with runtime install (slower startup)."
-            log_info "For faster deployment, install Docker: curl -fsSL https://get.docker.com | sh"
-        fi
-    else
-        bash "${PROJECT_ROOT}/scripts/build-images.sh"
+    # Check if container runtime is available
+    local has_docker=false
+    local has_nerdctl=false
+    
+    if command -v docker &> /dev/null; then
+        has_docker=true
+        log_info "Using Docker runtime"
+    elif command -v nerdctl &> /dev/null; then
+        has_nerdctl=true
+        log_info "Using nerdctl runtime"
     fi
     
-    log_info "✓ Images ready"
+    if ! $has_docker && ! $has_nerdctl && ! command -v k3s &> /dev/null; then
+        log_error "No container runtime found (Docker, nerdctl, or K3s required)"
+        exit 1
+    fi
+    
+    # Call build-images.sh - it will handle runtime detection
+    log_info "Building Docker images..."
+    if bash "${PROJECT_ROOT}/scripts/build-images.sh"; then
+        log_info "✓ Docker images built successfully"
+    else
+        log_error "Docker image build failed - images must be pre-built or Docker installed"
+        log_info "Install Docker with: curl -fsSL https://get.docker.com | sh"
+        exit 1
+    fi
 }
 
 # =============================================================================
@@ -265,9 +275,9 @@ deploy_manifests() {
         --dry-run=client -o yaml | kubectl apply -f -
     
     # Deploy PostgreSQL (if using database)
-    if [[ -f "infrastructure/database/postgres-deployment.yaml" ]]; then
+    if [[ -f "k8s-manifests/postgres-deployment.yaml" ]]; then
         log_info "Deploying PostgreSQL..."
-        kubectl apply -f infrastructure/database/postgres-deployment.yaml
+        kubectl apply -f k8s-manifests/postgres-deployment.yaml
         kubectl wait --for=condition=ready pod -l app=postgres -n $NAMESPACE_SMART_CITY --timeout=120s || true
     fi
     
@@ -335,25 +345,30 @@ deploy_monitoring() {
     # Create monitoring namespace
     kubectl create namespace $NAMESPACE_MONITORING --dry-run=client -o yaml | kubectl apply -f -
     
+    # Generate Grafana provisioning ConfigMaps with all dashboards
+    log_info "Generating Grafana provisioning ConfigMaps..."
+    bash "${PROJECT_ROOT}/scripts/generate-grafana-provisioning.sh" 2>&1 | grep -E "✅|❌|Found|Error" || true
+    
+    # Apply the auto-generated dashboard ConfigMaps
+    log_info "Deploying auto-generated Grafana dashboard ConfigMaps..."
+    kubectl apply -f k8s-manifests/grafana-provisioning-dashboards.yaml || log_warn "Failed to apply dashboard ConfigMaps"
+    
     # Deploy Prometheus
     log_info "Deploying Prometheus..."
     kubectl apply -f k8s-manifests/prometheus-deployment.yaml
     
-    # Deploy Grafana
-    log_info "Deploying Grafana..."
+    # Deploy Grafana (with provisioning volumes already mounted)
+    log_info "Deploying Grafana with auto-provisioning..."
     kubectl apply -f k8s-manifests/grafana-deployment.yaml
     
     # Wait for Grafana to be ready
-    log_info "Waiting for Grafana to be ready..."
+    log_info "Waiting for Grafana to be ready (dashboards auto-loading)..."
     kubectl wait --for=condition=ready pod -l app=grafana -n $NAMESPACE_MONITORING --timeout=120s || true
     
-    # Load Grafana dashboards
-    if [[ -f "scripts/load-dashboards.sh" ]]; then
-        log_info "Loading Grafana dashboards..."
-        bash "${PROJECT_ROOT}/scripts/load-dashboards.sh" || log_warn "Dashboard loading had issues"
-    fi
-    
-    log_info "✓ Monitoring stack deployed"
+    # Notify user about provisioning
+    log_info "✓ Monitoring stack deployed with auto-provisioned dashboards"
+    log_info "  Grafana automatically loads all dashboards on startup"
+    log_info "  No manual dashboard import scripts needed!"
 }
 
 # =============================================================================

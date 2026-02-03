@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ids-api-metrics
+  name: ids-api
   namespace: smart-city
   labels:
     app: ids-api
@@ -9,15 +9,20 @@ spec:
   selector:
     app: ids-api
   ports:
-  - name: web
+  - name: http
     port: 8000
     targetPort: 8000
+    protocol: TCP
+  - name: metrics
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: ids-monitor
-  namespace: monitoring
+  name: ids-api
+  namespace: smart-city
   labels:
     release: prometheus
 spec:
@@ -28,6 +33,7 @@ spec:
     matchNames:
       - smart-city
   endpoints:
-  - port: web
+  - port: metrics
     path: /metrics
-    interval: 10s
+    interval: 30s
+    scheme: http

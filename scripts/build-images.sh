@@ -20,11 +20,11 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Image configuration
+# Image configuration (must match K8s manifest image references)
 IMAGES=(
-    "smart-city-ids-api:latest|ids-api"
-    "smart-city-service:latest|smart-city-service"
-    "smart-city-forwarder:latest|forwarder"
+    "smart-city-ids/ids-api:latest|ids-api"
+    "smart-city-ids/smart-city-service:latest|smart-city-service"
+    "smart-city-ids/forwarder:latest|forwarder"
 )
 
 # Check for container runtime
