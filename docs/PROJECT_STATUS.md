@@ -11,9 +11,9 @@
 |------|--------|
 | **GitHub Repo** | https://github.com/Alqaly/smart-city-ids (Private) |
 | **Cluster** | K3s v1.33.5+k3s1 on Ubuntu VM |
-| **IDS API** | ✅ Healthy (http://192.168.153.129:30800) |
-| **Grafana** | ✅ Running (http://192.168.153.129:30300) |
-| **Prometheus** | ✅ Running (http://192.168.153.129:31701) |
+| **IDS API** | ✅ Healthy (http://NODE_IP:30800) |
+| **Grafana** | ✅ Running (http://NODE_IP:30300) |
+| **Prometheus** | ✅ Running (http://NODE_IP:31701) |
 | **Alerts Processed** | 157 total |
 | **LLM Provider** | xAI Grok-4 (primary), OpenAI GPT-4 (fallback) |
 
@@ -41,10 +41,10 @@
 
 | Service | URL | Port |
 |---------|-----|------|
-| IDS API | http://192.168.153.129:30800 | NodePort 30800 |
-| IDS API Docs | http://192.168.153.129:30800/docs | - |
-| Grafana | http://192.168.153.129:30300 | NodePort 30300 |
-| Prometheus | http://192.168.153.129:31701 | NodePort 31701 |
+| IDS API | http://NODE_IP:30800 | NodePort 30800 |
+| IDS API Docs | http://NODE_IP:30800/docs | - |
+| Grafana | http://NODE_IP:30300 | NodePort 30300 |
+| Prometheus | http://NODE_IP:31701 | NodePort 31701 |
 
 ---
 
@@ -96,8 +96,8 @@
 
 ### Environment (.env) - Local Only
 ```
-XAI_API_KEY=xai-...
-OPENAI_API_KEY=sk-proj-...
+XAI_API_KEY=your-xai-api-key-here
+OPENAI_API_KEY=your-openai-api-key-here
 KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 K8S_NAMESPACE=smart-city
 POSTGRES_USER=idsuser
@@ -164,7 +164,7 @@ git push
 | Resource | Value |
 |----------|-------|
 | GitHub Repo | https://github.com/Alqaly/smart-city-ids |
-| Node IP | 192.168.153.129 |
+| Node IP | NODE_IP |
 | Grafana Login | admin / admin |
 | IDS API | No auth required |
 

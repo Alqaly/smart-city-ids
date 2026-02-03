@@ -83,8 +83,8 @@ Automation:
 ### API Keys (Configured in ~/.bashrc)
 
 ```bash
-export OPENAI_API_KEY="sk-proj-NL..."
-export XAI_API_KEY="xai-..."  # Primary LLM
+export OPENAI_API_KEY="your-openai-api-key-here"
+export XAI_API_KEY="your-xai-api-key-here"  # Primary LLM
 # For this demo, prefer a localhost-only kubeconfig:
 #   ~/.kube/config should point to https://127.0.0.1:6443
 export KUBECONFIG=$HOME/.kube/config

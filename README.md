@@ -14,7 +14,7 @@ An autonomous security monitoring system that uses Large Language Models (xAI Gr
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/smart-city-ids.git
+git clone https://github.com/Alqaly/smart-city-ids.git
 cd smart-city-ids
 
 # Configure your API keys
@@ -188,4 +188,4 @@ See [docs/PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) for areas needing improvement
 
 - **Issues:** GitHub Issues
 - **Documentation:** [docs/](docs/)
-- **Email:** [your-email@example.com]
+- **Email:** [alqaly@example.com]
