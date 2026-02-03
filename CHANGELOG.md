@@ -4,6 +4,29 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [Capstone II] Monitoring & Metrics Alignment - 2026-02-03
+
+- Metrics:
+  - Unified IDS API metrics into a single `smartcity_ids_*` source and removed unused modules.
+  - Renamed misleading gauges to cumulative totals:
+    - `smartcity_ids_critical_alerts_total`
+    - `smartcity_ids_k8s_pods_isolated_total`
+  - Implemented runtime updates for:
+    - `smartcity_ids_llm_decision_outcome_total` (per alert decision)
+    - `smartcity_ids_time_to_mitigation_seconds` (alert-to-action observation)
+    - `smartcity_ids_llm_failover_total` (LLM fallback events)
+  - Removed unused per-percentile gauges in favor of histogram + Grafana quantiles.
+- Prometheus & Grafana:
+  - Corrected ServiceMonitor to scrape IDS `/metrics` on port 8000.
+  - Cleaned dashboards; updated panels to use real, emitted metrics only.
+  - Normalized IoT panels to use a single `iot_*` metric family from the enhanced simulator.
+- Database:
+  - Aligned migration schema with runtime DB (alerts, analysis_results, automation_actions, audit_logs, IoT tables).
+  - Added automation/action and governance audit persistence.
+  - Added a simple retention policy (alerts/events: 30 days; automation/audit: 180 days).
+- Documentation:
+  - Updated ARCHITECTURE, OPERATIONS, SECURITY_MODEL, SETUP, README to reflect final metrics, schema, and dashboard behavior.
+
 ## [2.3.0] - IoT Simulator Enhancements - 2026-02-03
 
 ### Summary
@@ -831,3 +854,58 @@ If upgrading from Capstone I:
 ---
 
 *For detailed documentation, see [docs/](docs/)*
+
+---
+
+### Documentation & Safety Additions - 2026-02-03
+
+To support academic defense and safe demonstrations the following documentation and safety items were added or explicitly requested for inclusion in the repo. These items are intentionally descriptive (documentation-only) and do not change runtime behaviour unless operators enable them.
+
+- **Automation Mode (configuration)**: add `AUTOMATION_MODE` environment variable with values `dry-run`, `assisted`, `autopilot`. Default recommendation for demos: `assisted`. This must be documented in `services/ids-api/README.md` and `README.md` with an example:
+
+```bash
+# Demo-safe default
+export AUTOMATION_MODE=assisted
+
+# Dry-run: log intended actions, do not execute
+export AUTOMATION_MODE=dry-run
+
+# Autopilot: execute actions automatically (use with caution)
+export AUTOMATION_MODE=autopilot
+```
+
+- **LLM Provenance & Confidence**: document the expected LLM JSON schema and logging fields. The LLM wrapper (`services/ids-api/src/llm_base.py`) should record and persist the following with each analysis for auditability:
+  - `status`: `success` | `error`
+  - `analysis`: the parsed analysis object
+  - `confidence`: a numeric or categorical confidence estimate (if available)
+  - `raw_response`: full raw LLM text (for post-hoc inspection)
+  - `llm_engine`: engine name (xai-grok-4 / openai)
+
+  Document this schema and limitations in `services/ids-api/DOCS.md` and include example log entries.
+
+- **Validation Checklist (reproducible tests)**: add `docs/VALIDATION_CHECKLIST.md` containing reproducible steps to:
+  1. Replay attack scenarios using `attack-simulations/` scripts.
+  2. Collect ground-truth labels for injected attacks.
+  3. Query Prometheus for `ids_alerts_received_total` and compare to ground-truth to compute precision/recall and AUC.
+
+  Include exact commands and expected Prometheus queries, e.g.:
+
+```text
+# Prometheus: count alerts by label in last 5m
+sum(ids_alerts_received_total{job="ids-api"} and on() vector(1))
+```
+
+- **Single-node K3s Limitations**: explicitly document in `docs/PROJECT_CONTEXT.md` and `README.md` that this testbed is single-node, intended for deterministic demos and not production. Specify known constraints:
+  - Resource contention (Prometheus + Suricata + LLM calls can saturate CPU). Recommend limiting Suricata ruleset and LLM concurrency for demo runs.
+  - Persistence: recommend enabling Prometheus PVC and Postgres PVC for longer experiments.
+  - Automation: default to `assisted` or `dry-run` for safety.
+
+- **References (academic grounding)**: add `docs/REFERENCES.md` with the following conceptual references to justify design choices:
+  - Zanella A., Bui N., Castellani A., Vangelista L., Zorzi M., "Internet of Things for Smart Cities", IEEE IoT Journal, 2014. (IoT heterogeneity and city-scale requirements)
+  - Willinger W., Paxson V., Taqqu M.S., "Self-Similarity and Heavy Tails" (Traffic modelling literature). 1997.
+  - Antonakakis M. et al., "Understanding the Mirai Botnet", USENIX Security, 2017. (IoT botnet behavior)
+  - Buczak A.L., Guven E., "A Survey of Data Mining and Machine Learning Methods for Cyber Security Intrusion Detection", JNCA, 2016.
+  - Sommer R., Paxson V., "Outside the Closed World: On Using Machine Learning for Network Intrusion Detection", IEEE S&P, 2010.
+  - NIST SP 800-82 Rev.2, "Guide to Industrial Control Systems (ICS) Security" (governance considerations).
+
+These additions should be used during the Capstone defense to explain modelling choices, safety mitigations, and evaluation methodology.
