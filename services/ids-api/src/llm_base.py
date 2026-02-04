@@ -353,6 +353,13 @@ class XAIAnalyzer(BaseLLMAnalyzer):
             
             # Parse response
             analysis = self._parse_json_response(content)
+
+            # Persist raw response and confidence if present
+            # Attach provenance fields for auditability
+            analysis_provenance = {
+                'raw_response': content,
+                'confidence': analysis.get('confidence', None)
+            }
             
             # Validate
             is_valid, error_msg = self._validate_response(analysis)
@@ -361,11 +368,17 @@ class XAIAnalyzer(BaseLLMAnalyzer):
                 analysis['severity'] = 5  # Downgrade to medium if validation fails
             
             response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+            # Log analysis plus provenance for auditing
             self._log_analysis_context(alert, analysis, response_time_ms, "success")
+            logger.debug({
+                'engine': self.ENGINE_NAME,
+                'provenance': analysis_provenance
+            })
             
             return {
                 "status": "success",
                 "analysis": analysis,
+                "provenance": analysis_provenance,
                 "llm_engine": self.ENGINE_NAME,
                 "response_time_ms": response_time_ms
             }

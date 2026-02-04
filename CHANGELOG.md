@@ -585,35 +585,15 @@ Tests system at four scale levels:
 - Cache hit rate
 - Pod counts, CPU, memory usage
 
-### Added - Grafana Dashboards (TASK 3)
+### Added - Grafana Dashboard (TASK 3)
 
-Three specialized dashboards per integration plan requirements:
+Single canonical dashboard for the demo and evaluation narrative:
 
-1. **SOC Overview** (`grafana-dashboard-soc-overview.json`)
-   - Alert counts (24h), critical alerts active, actions executed
-   - Alert rate by source (time series)
-   - Severity heatmap (hourly)
-   - Threat type distribution (donut chart)
-   - Actions blocked by safety controls
-   - Time to mitigation (p50/p95/p99)
-
-2. **LLM Performance** (`grafana-dashboard-llm-performance.json`)
-   - xAI Grok-4 & OpenAI status indicators
-   - Cache hit rate (%) and cache size
-   - Failover count (24h)
-   - Circuit breaker state
-   - Latency percentiles by engine (histogram)
-   - Request throughput (success/failure)
-
-3. **IoT Load** (`grafana-dashboard-iot-load.json`)
-   - Active devices, messages sent/failed
-   - Disconnect and latency spike totals
-   - Rush hour status indicator
-   - Poisson rate λ(t) by device class
-   - Burst factor timeline
-   - Message rate distribution histogram
-   - Device class breakdown (high/medium/burst)
-   - Scalability evidence panel
+1. **IEEE Capstone II (Improved)** (`grafana-dashboard-ieee-improved.json`)
+   - Alert rate over time, severity and threat distribution
+   - LLM latency and outcomes
+   - Automated actions and time-to-mitigation
+   - IoT load from the `iot_*` metric family
 
 ### Added - Human-in-the-Loop Governance (TASK 4)
 

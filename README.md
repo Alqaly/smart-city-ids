@@ -47,35 +47,18 @@ IDS API: `http://localhost:30800/docs`
 | **Automated Response** | Kubernetes actions based on threat severity |
 | **Persistent Storage** | PostgreSQL for alert history and metric recovery |
 | **Visual Dashboards** | Grafana dashboards for real-time monitoring |
-| **Demo Environment** | Intentionally vulnerable services for testing |
+| **High-Fidelity Emulation** | A purpose-built IIoT emulation environment with realistic, containerized services and network traffic for security testing. |
 
----
+## 🔬 System Overview: An IIoT Security Emulation
 
-## 🏗️ Architecture
+This project is an **implementation-level Industrial Internet of Things (IIoT) emulation** running on Kubernetes. It provides a high-fidelity environment for validating security monitoring strategies against realistic, containerized workloads.
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Smart City     │     │    Security     │     │    IDS API      │
-│  Services       │────►│    Monitors     │────►│  (LLM Engine)   │
-│  (IoT/Traffic)  │     │ (Falco/Suricata)│     │                 │
-└─────────────────┘     └─────────────────┘     └────────┬────────┘
-                                                         │
-                        ┌────────────────────────────────┼────────────────┐
-                        │                                ▼                │
-                        │  ┌──────────────┐    ┌─────────────────────┐   │
-                        │  │  PostgreSQL  │◄───│  Automated Actions  │   │
-                        │  │  (History)   │    │  (Isolate/Scale)    │   │
-                        │  └──────────────┘    └─────────────────────┘   │
-                        │           │                                     │
-                        │           ▼                                     │
-                        │  ┌──────────────┐    ┌─────────────────────┐   │
-                        │  │  Prometheus  │───►│      Grafana        │   │
-                        │  │  (Metrics)   │    │   (Dashboards)      │   │
-                        │  └──────────────┘    └─────────────────────┘   │
-                        └─────────────────────────────────────────────────┘
-```
+It is **not a simulation**. Instead of abstract models, it uses:
+- **Real Services**: Python applications (Flask, FastAPI) running in containers.
+- **Real Network Traffic**: Genuine HTTP and MQTT protocol interactions.
+- **Real Security Tooling**: The exact versions of Falco, Suricata, and Prometheus used in production environments.
 
----
+This emulation-based approach is critical for security research, as it exposes an implementation-accurate attack surface and allows for the evaluation of kernel-level and network-level detection tools in a controlled, interactive cyber-range. For a detailed academic justification, see [docs/ACADEMIC_CONTEXT.md](docs/ACADEMIC_CONTEXT.md).
 
 ## 📦 Components
 
@@ -108,7 +91,7 @@ IDS API: `http://localhost:30800/docs`
 | [SETUP.md](docs/SETUP.md) | Detailed installation guide |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design and data flow |
 | [OPERATIONS.md](docs/OPERATIONS.md) | Day-to-day operations and demos |
-| [PROJECT_AUDIT.md](docs/PROJECT_AUDIT.md) | Codebase assessment |
+| [SECURITY_MODEL.md](docs/SECURITY_MODEL.md) | Threat analysis decisions |
 
 ---
 
@@ -173,6 +156,21 @@ This project was developed as a Capstone project demonstrating:
 - Kubernetes-native automation
 - Real-time threat detection and response
 - Cloud-native monitoring patterns
+
+---
+
+## 📊 Monitoring Reality
+
+**Implemented and visible in Grafana (source of truth: IDS API `/metrics`):**
+- `smartcity_ids_alerts_received_total`, `smartcity_ids_severity_total`
+- `smartcity_ids_llm_latency_seconds`, `smartcity_ids_llm_requests_total`
+- `smartcity_ids_actions_executed_total`, `smartcity_ids_time_to_mitigation_seconds`
+- `smartcity_ids_llm_decision_outcome_total`, `smartcity_ids_llm_failover_total`
+- IoT simulator metrics: `iot_messages_sent_total`, `iot_device_active`, `iot_burst_factor`
+
+**Future work (not claimed as implemented):**
+- Cross-cluster correlation metrics
+- Multi-tenant SOC baselining
 
 ---
 

@@ -226,7 +226,7 @@ data:
         interval: 30s
         rules:
           - alert: HighPodIsolationRate
-            expr: increase(smartcity_ids_k8s_pods_isolated[10m]) > 5
+            expr: increase(smartcity_ids_k8s_pods_isolated_total[10m]) > 5
             for: 1m
             labels:
               severity: warning

@@ -320,6 +320,19 @@ def can_execute_action(action: str, container_name: str) -> tuple[bool, str]:
     
     return True, "OK"
 
+def classify_decision_outcome(severity: int) -> str:
+    """Map severity score to LLM decision outcome label."""
+    if severity >= 8:
+        return "malicious"
+    if severity >= 5:
+        return "suspicious"
+    return "benign"
+
+def set_automation_mode_metric(mode: str):
+    """Set automation mode gauge with normalized labels."""
+    for label in ("autopilot", "assisted", "manual"):
+        PROM_AUTOMATION_MODE.labels(mode=label).set(1 if label == mode else 0)
+
 def update_circuit_breaker_metrics():
     """Update Prometheus metrics for circuit breaker states"""
     state_map = {"closed": 0, "half_open": 1, "open": 2}
@@ -327,15 +340,16 @@ def update_circuit_breaker_metrics():
         state_val = state_map.get(stats.get("state", "closed"), 0)
         PROM_CIRCUIT_BREAKER_STATE.labels(engine=engine).set(state_val)
 
-async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str]:
+async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
     """Analyze alert with xAI Grok-4, fallback to OpenAI on failure. Uses cache and circuit breaker."""
+    fallback_triggered = False
     
     # Check cache first (reduces LLM costs)
     cached = alert_cache.get(alert_dict)
     if cached:
         PROM_LLM_CACHE_OPERATIONS.labels(operation="hit").inc()
         PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
-        return cached, "cache"
+        return cached, "cache", 0.0
     
     PROM_LLM_CACHE_OPERATIONS.labels(operation="miss").inc()
     
@@ -358,20 +372,23 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str]:
                     PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
                     PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="success").inc()
                     PROM_LLM_LATENCY_SECONDS.labels(engine="xai-grok-4").observe(llm_duration)
-                    return analysis, "xai-grok-4"
+                    return analysis, "xai-grok-4", llm_duration
                 
                 circuit_breaker.record_failure("xai-grok-4")
                 update_circuit_breaker_metrics()
                 PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="error").inc()
                 logger.warning(f"xAI Grok-4 returned error: {result.get('error')}")
+                fallback_triggered = True
             except Exception as e:
                 circuit_breaker.record_failure("xai-grok-4")
                 update_circuit_breaker_metrics()
                 PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="exception").inc()
                 logger.warning(f"xAI Grok-4 failed: {e}, trying OpenAI...")
+                fallback_triggered = True
         else:
             logger.info(f"xAI Grok-4 skipped: {cb_reason}")
             PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="circuit_open").inc()
+            fallback_triggered = True
     
     # Fallback to OpenAI - with circuit breaker
     if openai_engine:
@@ -380,6 +397,8 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str]:
         
         if cb_allowed:
             try:
+                if fallback_triggered:
+                    PROM_LLM_FAILOVER_COUNT.labels(from_engine="xai-grok-4", to_engine="openai").inc()
                 llm_start = time.perf_counter()
                 result = await openai_engine.analyze_alert(alert_dict)
                 llm_duration = time.perf_counter() - llm_start
@@ -392,7 +411,7 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str]:
                     PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
                     PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="success").inc()
                     PROM_LLM_LATENCY_SECONDS.labels(engine="openai").observe(llm_duration)
-                    return analysis, "openai"
+                    return analysis, "openai", llm_duration
                 
                 circuit_breaker.record_failure("openai")
                 update_circuit_breaker_metrics()
@@ -482,7 +501,8 @@ def restore_prometheus_counters():
         
         # Set critical alerts gauge
         critical_count = restore_data.get("critical_alerts", 0)
-        PROM_CRITICAL_ALERTS_ACTIVE.set(critical_count)
+        if critical_count > 0:
+            PROM_CRITICAL_ALERTS_TOTAL.inc(critical_count)
         
         # Restore LLM decision outcomes based on severity
         # Malicious: severity >= 8, Suspicious: severity 5-7, Benign: severity < 5
@@ -584,9 +604,9 @@ PROM_THREAT_TYPES_TOTAL = Counter(
     "Count of detected threat types.",
     ["threat_type"],
 )
-PROM_CRITICAL_ALERTS_ACTIVE = Gauge(
-    "smartcity_ids_critical_alerts_active",
-    "Number of unresolved critical alerts (severity >= 8).",
+PROM_CRITICAL_ALERTS_TOTAL = Counter(
+    "smartcity_ids_critical_alerts_total",
+    "Total number of critical alerts observed (severity >= 8).",
 )
 
 # ============== LLM DECISION & GOVERNANCE METRICS ==============
@@ -594,11 +614,6 @@ PROM_LLM_DECISION_OUTCOME = Counter(
     "smartcity_ids_llm_decision_outcome_total",
     "LLM decision outcomes (benign, suspicious, malicious).",
     ["outcome"],
-)
-PROM_LLM_CONFIDENCE_BUCKET = Counter(
-    "smartcity_ids_llm_confidence_bucket_total",
-    "LLM confidence score buckets (low: <0.5, medium: 0.5-0.8, high: >0.8).",
-    ["bucket"],
 )
 PROM_AUTOMATED_DECISIONS = Counter(
     "smartcity_ids_automated_decisions_total",
@@ -614,14 +629,6 @@ PROM_ACTIONS_BLOCKED_POLICY = Counter(
     "smartcity_ids_actions_blocked_policy_total",
     "Automated actions blocked by policy rules.",
     ["policy", "action"],
-)
-PROM_ALERT_PROCESSING_P50 = Gauge(
-    "smartcity_ids_alert_processing_p50_seconds",
-    "50th percentile alert processing time.",
-)
-PROM_ALERT_PROCESSING_P95 = Gauge(
-    "smartcity_ids_alert_processing_p95_seconds",
-    "95th percentile alert processing time.",
 )
 PROM_TIME_TO_MITIGATION = Histogram(
     "smartcity_ids_time_to_mitigation_seconds",
@@ -667,9 +674,9 @@ PROM_IOT_DEVICE_HEARTBEATS = Counter(
 )
 
 # ============== KUBERNETES AUTOMATION METRICS ==============
-PROM_K8S_PODS_ISOLATED = Gauge(
-    "smartcity_ids_k8s_pods_isolated",
-    "Number of currently isolated pods.",
+PROM_K8S_PODS_ISOLATED_TOTAL = Counter(
+    "smartcity_ids_k8s_pods_isolated_total",
+    "Total number of pod isolation actions executed.",
 )
 PROM_K8S_SCALE_OPERATIONS = Counter(
     "smartcity_ids_k8s_scale_operations_total",
@@ -747,8 +754,8 @@ PROM_APPROVAL_PENDING = Gauge(
 # Note: Moved to FastAPI startup event for proper initialization order
 print("📊 Prometheus metrics defined, restoration will happen on startup event...")
 
-# Initialize automation mode gauge
-PROM_AUTOMATION_MODE.labels(mode="active").set(1)
+# Initialize automation mode gauge (normalized labels)
+set_automation_mode_metric("assisted")
 
 # Models
 class Alert(BaseModel):
@@ -881,8 +888,7 @@ async def change_mode(mode: str = "assisted"):
     result = set_automation_mode(mode)
     if result["status"] == "success":
         logger.info(f"Automation mode changed to: {mode}")
-        PROM_AUTOMATION_MODE.labels(mode="active").set(0)
-        PROM_AUTOMATION_MODE.labels(mode=mode).set(1)
+        set_automation_mode_metric(mode)
     return result
 
 @app.get("/api/governance/pending")
@@ -925,6 +931,19 @@ async def approve_action(action_id: str, operator: str = "admin"):
     if result.get("status") == "approved_and_executed":
         PROM_HUMAN_OVERRIDE_REQUESTS.labels(reason="approved").inc()
         PROM_AUTOMATED_DECISIONS.labels(action_type=action.action_type).inc()
+        PROM_TIME_TO_MITIGATION.observe(max(0.0, time.time() - action.created_at))
+        db.add_automation_action({
+            "alert_id": action.alert_id,
+            "action_type": action.action_type,
+            "target_resource": action.target,
+            "target_namespace": Config.K8S_NAMESPACE,
+            "status": "approved_and_executed",
+            "execution_time_ms": int(max(0.0, (time.time() - action.created_at)) * 1000),
+            "mode": get_automation_mode(),
+            "triggered_by": action.recommended_by,
+            "created_at": datetime.fromtimestamp(action.created_at),
+            "completed_at": datetime.now()
+        })
     
     return result
 
@@ -941,6 +960,17 @@ async def reject_action(action_id: str, operator: str = "admin", reason: str = "
     
     if result.get("status") == "rejected":
         PROM_HUMAN_OVERRIDE_REQUESTS.labels(reason="rejected").inc()
+        db.add_automation_action({
+            "alert_id": result.get("action", {}).get("alert_id"),
+            "action_type": result.get("action", {}).get("action_type"),
+            "target_resource": result.get("action", {}).get("target"),
+            "target_namespace": Config.K8S_NAMESPACE,
+            "status": "rejected",
+            "error_message": reason,
+            "mode": get_automation_mode(),
+            "triggered_by": result.get("action", {}).get("recommended_by"),
+            "created_at": datetime.now()
+        })
     
     return result
 
@@ -991,6 +1021,7 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         analysis = None
         llm_used = "none"
         analysis_cached = False
+        llm_latency = 0.0
         
         if deduplicator:
             should_analyze, cached_analysis = deduplicator.should_analyze(alert.dict())
@@ -1008,7 +1039,7 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         # Analyze with LLM (xAI Grok-4 primary, OpenAI fallback)
         if analysis is None:
             logger.info("Analyzing alert with LLM...")
-            analysis, llm_used = await analyze_with_fallback(alert.dict())
+            analysis, llm_used, llm_latency = await analyze_with_fallback(alert.dict())
             
             # Cache the analysis for future deduplication
             if deduplicator:
@@ -1023,14 +1054,17 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         # Track severity and threat metrics
         PROM_SEVERITY_DISTRIBUTION.labels(severity=str(severity)).inc()
         PROM_THREAT_TYPES_TOTAL.labels(threat_type=threat_type).inc()
+        PROM_LLM_DECISION_OUTCOME.labels(outcome=classify_decision_outcome(severity)).inc()
         
         # Track critical alerts
         if severity >= 8:
             metrics["critical_alerts"] += 1
-            PROM_CRITICAL_ALERTS_ACTIVE.inc()
+            PROM_CRITICAL_ALERTS_TOTAL.inc()
         
         # Execute automated actions (with safety controls)
         actions_taken = []
+        action_records = []
+        action_records = []
         
         if k8s_automation and severity >= 8:
             container_name = alert.output_fields.get("container.name", "")
@@ -1041,17 +1075,55 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
                     actions_taken.append("isolate_pod")
                     metrics["automated_actions"] += 1
                     PROM_ACTIONS_EXECUTED_TOTAL.labels(action="isolate_pod").inc()
-                    PROM_K8S_PODS_ISOLATED.inc()
+                    PROM_AUTOMATED_DECISIONS.labels(action_type="isolate_pod").inc()
+                    PROM_K8S_PODS_ISOLATED_TOTAL.inc()
+                    PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
+                    action_records.append({
+                        "action_type": "isolate_pod",
+                        "target_resource": container_name,
+                        "target_namespace": Config.K8S_NAMESPACE,
+                        "status": "executed",
+                        "execution_time_ms": int((time.perf_counter() - started) * 1000),
+                        "mode": get_automation_mode(),
+                        "triggered_by": llm_used
+                    })
                 else:
                     logger.warning(f"Action blocked: {reason}")
                     actions_taken.append(f"BLOCKED: {reason}")
                     if "protected service" in reason.lower():
                         PROM_PROTECTED_SERVICE_HITS.labels(service=container_name.split("-")[0]).inc()
                         PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="protected_service").inc()
+                        action_records.append({
+                            "action_type": "isolate_pod",
+                            "target_resource": container_name,
+                            "target_namespace": Config.K8S_NAMESPACE,
+                            "status": "blocked",
+                            "error_message": reason,
+                            "mode": get_automation_mode(),
+                            "triggered_by": llm_used
+                        })
                     elif "DRY-RUN" in reason:
                         PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="dry_run").inc()
+                        action_records.append({
+                            "action_type": "isolate_pod",
+                            "target_resource": container_name,
+                            "target_namespace": Config.K8S_NAMESPACE,
+                            "status": "blocked",
+                            "error_message": reason,
+                            "mode": get_automation_mode(),
+                            "triggered_by": llm_used
+                        })
                     else:
                         PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="other").inc()
+                        action_records.append({
+                            "action_type": "isolate_pod",
+                            "target_resource": container_name,
+                            "target_namespace": Config.K8S_NAMESPACE,
+                            "status": "blocked",
+                            "error_message": reason,
+                            "mode": get_automation_mode(),
+                            "triggered_by": llm_used
+                        })
         
         elif k8s_automation and severity >= 6:
             service_name = alert.output_fields.get("container.name", "").split("-")[0]
@@ -1062,11 +1134,31 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
                     actions_taken.append("scale_up")
                     metrics["automated_actions"] += 1
                     PROM_ACTIONS_EXECUTED_TOTAL.labels(action="scale_up").inc()
+                    PROM_AUTOMATED_DECISIONS.labels(action_type="scale_up").inc()
                     PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=service_name).inc()
+                    PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
+                    action_records.append({
+                        "action_type": "scale_up",
+                        "target_resource": service_name,
+                        "target_namespace": Config.K8S_NAMESPACE,
+                        "status": "executed",
+                        "execution_time_ms": int((time.perf_counter() - started) * 1000),
+                        "mode": get_automation_mode(),
+                        "triggered_by": llm_used
+                    })
                 else:
                     logger.warning(f"Action blocked: {reason}")
                     actions_taken.append(f"BLOCKED: {reason}")
                     PROM_ACTIONS_BLOCKED_TOTAL.labels(action="scale_up", reason="blocked").inc()
+                    action_records.append({
+                        "action_type": "scale_up",
+                        "target_resource": service_name,
+                        "target_namespace": Config.K8S_NAMESPACE,
+                        "status": "blocked",
+                        "error_message": reason,
+                        "mode": get_automation_mode(),
+                        "triggered_by": llm_used
+                    })
         
         # Store alert in database
         alert_record = {
@@ -1084,6 +1176,23 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         }
         alert_id = db.add_alert(alert_record)
         alert_record["id"] = alert_id
+
+        # Persist LLM analysis results for auditability
+        db.add_analysis_result(
+            alert_id,
+            {
+                "model": llm_used,
+                "analysis": analysis,
+                "analysis_time_ms": int(llm_latency * 1000),
+                "confidence_score": analysis.get("confidence") if isinstance(analysis, dict) else None,
+                "analyzed_at": datetime.now()
+            }
+        )
+
+        # Persist automation action records
+        for action in action_records:
+            action["alert_id"] = alert_id
+            db.add_automation_action(action)
         
         # Also keep in memory for quick access
         alerts_db.append(alert_record)
@@ -1157,7 +1266,7 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
     try:
         # Analyze with LLM (xAI Grok-4 primary, OpenAI fallback)
         logger.info("Analyzing alert...")
-        analysis, llm_used = await analyze_with_fallback(alert.dict())
+        analysis, llm_used, llm_latency = await analyze_with_fallback(alert.dict())
         severity = analysis.get("severity", 5)
         threat_type = analysis.get("threat_type", "Unknown")
         logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}")
@@ -1165,11 +1274,12 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         # Track severity and threat metrics
         PROM_SEVERITY_DISTRIBUTION.labels(severity=str(severity)).inc()
         PROM_THREAT_TYPES_TOTAL.labels(threat_type=threat_type).inc()
+        PROM_LLM_DECISION_OUTCOME.labels(outcome=classify_decision_outcome(severity)).inc()
         
         # Track critical alerts
         if severity >= 8:
             metrics["critical_alerts"] += 1
-            PROM_CRITICAL_ALERTS_ACTIVE.inc()
+            PROM_CRITICAL_ALERTS_TOTAL.inc()
         
         # Execute automated actions (with safety controls)
         actions_taken = []
@@ -1183,17 +1293,55 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
                     actions_taken.append("isolate_pod")
                     metrics["automated_actions"] += 1
                     PROM_ACTIONS_EXECUTED_TOTAL.labels(action="isolate_pod").inc()
-                    PROM_K8S_PODS_ISOLATED.inc()
+                    PROM_AUTOMATED_DECISIONS.labels(action_type="isolate_pod").inc()
+                    PROM_K8S_PODS_ISOLATED_TOTAL.inc()
+                    PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
+                    action_records.append({
+                        "action_type": "isolate_pod",
+                        "target_resource": container_name,
+                        "target_namespace": Config.K8S_NAMESPACE,
+                        "status": "executed",
+                        "execution_time_ms": int((time.perf_counter() - started) * 1000),
+                        "mode": get_automation_mode(),
+                        "triggered_by": llm_used
+                    })
                 else:
                     logger.warning(f"Action blocked: {reason}")
                     actions_taken.append(f"BLOCKED: {reason}")
                     if "protected service" in reason.lower():
                         PROM_PROTECTED_SERVICE_HITS.labels(service=container_name.split("-")[0]).inc()
                         PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="protected_service").inc()
+                        action_records.append({
+                            "action_type": "isolate_pod",
+                            "target_resource": container_name,
+                            "target_namespace": Config.K8S_NAMESPACE,
+                            "status": "blocked",
+                            "error_message": reason,
+                            "mode": get_automation_mode(),
+                            "triggered_by": llm_used
+                        })
                     elif "DRY-RUN" in reason:
                         PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="dry_run").inc()
+                        action_records.append({
+                            "action_type": "isolate_pod",
+                            "target_resource": container_name,
+                            "target_namespace": Config.K8S_NAMESPACE,
+                            "status": "blocked",
+                            "error_message": reason,
+                            "mode": get_automation_mode(),
+                            "triggered_by": llm_used
+                        })
                     else:
                         PROM_ACTIONS_BLOCKED_TOTAL.labels(action="isolate_pod", reason="other").inc()
+                        action_records.append({
+                            "action_type": "isolate_pod",
+                            "target_resource": container_name,
+                            "target_namespace": Config.K8S_NAMESPACE,
+                            "status": "blocked",
+                            "error_message": reason,
+                            "mode": get_automation_mode(),
+                            "triggered_by": llm_used
+                        })
         
         elif k8s_automation and severity >= 6:
             service_name = alert.output_fields.get("container.name", "").split("-")[0]
@@ -1204,11 +1352,31 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
                     actions_taken.append("scale_up")
                     metrics["automated_actions"] += 1
                     PROM_ACTIONS_EXECUTED_TOTAL.labels(action="scale_up").inc()
+                    PROM_AUTOMATED_DECISIONS.labels(action_type="scale_up").inc()
                     PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=service_name).inc()
+                    PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
+                    action_records.append({
+                        "action_type": "scale_up",
+                        "target_resource": service_name,
+                        "target_namespace": Config.K8S_NAMESPACE,
+                        "status": "executed",
+                        "execution_time_ms": int((time.perf_counter() - started) * 1000),
+                        "mode": get_automation_mode(),
+                        "triggered_by": llm_used
+                    })
                 else:
                     logger.warning(f"Action blocked: {reason}")
                     actions_taken.append(f"BLOCKED: {reason}")
                     PROM_ACTIONS_BLOCKED_TOTAL.labels(action="scale_up", reason="blocked").inc()
+                    action_records.append({
+                        "action_type": "scale_up",
+                        "target_resource": service_name,
+                        "target_namespace": Config.K8S_NAMESPACE,
+                        "status": "blocked",
+                        "error_message": reason,
+                        "mode": get_automation_mode(),
+                        "triggered_by": llm_used
+                    })
         
         # Store alert in database
         alert_record = {
@@ -1226,6 +1394,21 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         }
         alert_id = db.add_alert(alert_record)
         alert_record["id"] = alert_id
+
+        db.add_analysis_result(
+            alert_id,
+            {
+                "model": llm_used,
+                "analysis": analysis,
+                "analysis_time_ms": int(llm_latency * 1000),
+                "confidence_score": analysis.get("confidence") if isinstance(analysis, dict) else None,
+                "analyzed_at": datetime.now()
+            }
+        )
+
+        for action in action_records:
+            action["alert_id"] = alert_id
+            db.add_automation_action(action)
         alerts_db.append(alert_record)
         
         if metrics["total_alerts"] > 0:
@@ -1499,6 +1682,10 @@ async def startup():
     # Database status
     db_stats = db.get_stats()
     logger.info(f"💾 Storage: {db_stats['storage_type']} - {db_stats['total_alerts']} alerts, {db_stats['iot_devices']} IoT devices")
+
+    # Apply retention policy (alerts/iot: 30d, automation/audit: 180d)
+    retention = db.apply_retention()
+    logger.info(f"🧹 Retention applied: {retention}")
     
     # ============== RESTORE PROMETHEUS COUNTERS FROM DATABASE ==============
     # This ensures Grafana shows ALL historical data, not just since last restart
@@ -1507,15 +1694,13 @@ async def startup():
     
     # Initialize Prometheus gauges from database
     PROM_IOT_DEVICES_ACTIVE.set(db_stats.get("iot_devices", 0))
-    PROM_K8S_PODS_ISOLATED.set(0)
-    # Note: PROM_CRITICAL_ALERTS_ACTIVE is set in restore_prometheus_counters()
+    # Note: PROM_CRITICAL_ALERTS_TOTAL is restored in restore_prometheus_counters()
     PROM_LLM_CACHE_SIZE.set(0)
     
-    # Set automation mode (1=active, 0=dry-run)
-    dry_run = os.getenv("IDS_DRY_RUN", "false").lower() == "true"
-    PROM_AUTOMATION_MODE.labels(mode="dry_run" if dry_run else "active").set(1)
+    # Set automation mode gauge from governance controller
+    set_automation_mode_metric(get_automation_mode())
     
-    logger.info(f"🔧 Automation mode: {'DRY-RUN' if dry_run else 'ACTIVE'}")
+    logger.info(f"🔧 Automation mode: {get_automation_mode()}")
     logger.info(f"📊 Prometheus metrics initialized")
 
 @app.on_event("shutdown")

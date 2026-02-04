@@ -95,7 +95,23 @@ spec:
         configMap:
           name: grafana-dashboards
       - name: storage
-        emptyDir: {}
+        persistentVolumeClaim:
+          claimName: grafana-pvc
+
+---
+# Grafana PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
 
 ---
 # Grafana Service

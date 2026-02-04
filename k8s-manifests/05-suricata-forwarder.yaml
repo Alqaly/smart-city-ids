@@ -21,7 +21,7 @@ data:
     logger = logging.getLogger(__name__)
     
     EVE_LOG = "/var/log/suricata/eve.json"
-    IDS_API = "http://ids-api-service.smart-city:8000/api/alerts/suricata"
+    IDS_API = "http://ids-api-service.smart-city:8000/api/alerts/internal"
     
     def tail_and_forward():
         """Tail eve.json and forward alerts"""

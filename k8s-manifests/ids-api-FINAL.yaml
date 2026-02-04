@@ -29,9 +29,6 @@ spec:
         - containerPort: 8000
           name: http
           protocol: TCP
-        - containerPort: 8001
-          name: metrics
-          protocol: TCP
         env:
         - name: XAI_API_KEY
           valueFrom:

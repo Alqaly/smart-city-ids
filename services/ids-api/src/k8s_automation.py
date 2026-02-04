@@ -24,6 +24,9 @@ class K8sAutomation:
                 config.load_kube_config()
                 logger.info("Loaded kubeconfig file")
             
+            # Read automation mode (dry-run | assisted | autopilot)
+            self.automation_mode = os.getenv('AUTOMATION_MODE', 'assisted').lower()
+
             # Initialize API clients
             self.apps_v1 = client.AppsV1Api()
             self.core_v1 = client.CoreV1Api()
@@ -45,6 +48,11 @@ class K8sAutomation:
     
     async def isolate_pod(self, pod_name: str, namespace: str):
         """Isolate compromised pod using NetworkPolicy"""
+        # Dry-run: log intent but do not execute
+        if self.automation_mode == 'dry-run':
+            logger.info(f"[DRY-RUN] Would isolate pod: {pod_name} in {namespace}")
+            return
+
         try:
             policy_name = f"isolate-{pod_name}"
             network_policy = client.V1NetworkPolicy(
@@ -78,6 +86,11 @@ class K8sAutomation:
     
     async def scale_deployment(self, service_name: str, replicas: int = 5, namespace: str = "smart-city"):
         """Scale deployment to handle increased load"""
+        # Dry-run: log intent but do not execute
+        if self.automation_mode == 'dry-run':
+            logger.info(f"[DRY-RUN] Would scale {service_name} to {replicas} replicas in {namespace}")
+            return
+
         try:
             deployment_name = f"{service_name}-deployment"
             deployment = self.apps_v1.read_namespaced_deployment(
@@ -100,6 +113,11 @@ class K8sAutomation:
     
     async def cordon_node(self, node_name: str):
         """Cordon node to prevent new pods"""
+        # Dry-run: log intent but do not execute
+        if self.automation_mode == 'dry-run':
+            logger.info(f"[DRY-RUN] Would cordon node: {node_name}")
+            return
+
         try:
             body = {"spec": {"unschedulable": True}}
             self.core_v1.patch_node(node_name, body)
@@ -110,6 +128,11 @@ class K8sAutomation:
     
     async def block_ip(self, ip_address: str, namespace: str = "smart-city"):
         """Block source IP using NetworkPolicy"""
+        # Dry-run: log intent but do not execute
+        if self.automation_mode == 'dry-run':
+            logger.info(f"[DRY-RUN] Would block IP: {ip_address} in {namespace}")
+            return
+
         try:
             policy_name = f"block-{ip_address.replace('.', '-')}"
             network_policy = client.V1NetworkPolicy(
@@ -151,6 +174,11 @@ class K8sAutomation:
     
     async def restart_service(self, service_name: str, namespace: str = "smart-city"):
         """Rolling restart of service"""
+        # Dry-run: log intent but do not execute
+        if self.automation_mode == 'dry-run':
+            logger.info(f"[DRY-RUN] Would restart service: {service_name} in {namespace}")
+            return
+
         try:
             pods = self.core_v1.list_namespaced_pod(
                 namespace=namespace,

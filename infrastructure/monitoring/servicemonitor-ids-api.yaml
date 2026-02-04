@@ -10,7 +10,7 @@ spec:
     matchLabels:
       app: ids-api
   endpoints:
-  - port: metrics
+  - port: http
     interval: 30s
     path: /metrics
     scheme: http

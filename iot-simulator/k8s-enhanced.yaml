@@ -23,6 +23,22 @@ spec:
       name: http
       targetPort: 5000
 ---
+# ClusterIP service for Prometheus scraping (DNS-resolvable)
+apiVersion: v1
+kind: Service
+metadata:
+  name: iot-simulator-metrics
+  namespace: smart-city
+  labels:
+    app: iot-simulator
+spec:
+  selector:
+    app: iot-simulator
+  ports:
+    - port: 5000
+      name: http
+      targetPort: 5000
+---
 # HIGH-FREQUENCY DEVICES (Traffic Cameras, Flow Meters)
 # Base rate: 60 msg/min (1/sec), peaks at 600 msg/min during rush hour
 apiVersion: apps/v1

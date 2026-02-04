@@ -7,7 +7,7 @@ Falls back to in-memory storage if database is unavailable.
 import os
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,9 @@ class Database:
         self._memory_alerts: List[Dict[str, Any]] = []
         self._memory_iot_events: List[Dict[str, Any]] = []
         self._memory_iot_devices: Dict[str, Dict[str, Any]] = {}
+        self._memory_analysis_results: List[Dict[str, Any]] = []
+        self._memory_automation_actions: List[Dict[str, Any]] = []
+        self._memory_audit_logs: List[Dict[str, Any]] = []
         
         if PSYCOPG2_AVAILABLE:
             self._connect()
@@ -98,6 +101,52 @@ class Database:
                     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Analysis results table (LLM outputs, auditability)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS analysis_results (
+                    id SERIAL PRIMARY KEY,
+                    alert_id INTEGER REFERENCES alerts(id) ON DELETE CASCADE,
+                    model VARCHAR(255),
+                    analysis JSONB,
+                    analysis_time_ms INTEGER,
+                    confidence_score NUMERIC,
+                    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Automation actions table (operational audit trail)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS automation_actions (
+                    id SERIAL PRIMARY KEY,
+                    alert_id INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
+                    action_type VARCHAR(255),
+                    target_resource VARCHAR(255),
+                    target_namespace VARCHAR(255),
+                    status VARCHAR(50),
+                    error_message TEXT,
+                    execution_time_ms INTEGER,
+                    mode VARCHAR(50),
+                    triggered_by VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                )
+            """)
+
+            # Audit logs table (governance decisions)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id SERIAL PRIMARY KEY,
+                    action VARCHAR(255) NOT NULL,
+                    resource_type VARCHAR(255),
+                    resource_id VARCHAR(255),
+                    details JSONB,
+                    status VARCHAR(50),
+                    error_message TEXT,
+                    actor VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             # IoT devices table
             cur.execute("""
@@ -130,6 +179,12 @@ class Database:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_iot_events_device ON iot_events(device_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_iot_events_type ON iot_events(event_type)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_analysis_alert_id ON analysis_results(alert_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_actions_alert_id ON automation_actions(alert_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_actions_type ON automation_actions(action_type)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_actions_status ON automation_actions(status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at)")
             
             logger.info("✅ Database tables initialized")
     
@@ -141,6 +196,111 @@ class Database:
             alert["id"] = len(self._memory_alerts) + 1
             self._memory_alerts.append(alert)
             return alert["id"]
+
+    def add_analysis_result(self, alert_id: int, result: Dict[str, Any]) -> int:
+        """Add LLM analysis result for an alert."""
+        record = {
+            "alert_id": alert_id,
+            "model": result.get("model"),
+            "analysis": result.get("analysis"),
+            "analysis_time_ms": result.get("analysis_time_ms"),
+            "confidence_score": result.get("confidence_score"),
+            "analyzed_at": result.get("analyzed_at", datetime.now())
+        }
+
+        if self.use_memory or not self._ensure_connection():
+            record["id"] = len(self._memory_analysis_results) + 1
+            self._memory_analysis_results.append(record)
+            return record["id"]
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO analysis_results (alert_id, model, analysis, analysis_time_ms,
+                                                  confidence_score, analyzed_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    record["alert_id"],
+                    record["model"],
+                    json.dumps(record["analysis"] or {}),
+                    record["analysis_time_ms"],
+                    record["confidence_score"],
+                    record["analyzed_at"]
+                ))
+                return cur.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error adding analysis result: {e}")
+            record["id"] = len(self._memory_analysis_results) + 1
+            self._memory_analysis_results.append(record)
+            return record["id"]
+
+    def add_automation_action(self, action: Dict[str, Any]) -> int:
+        """Record an automation action for auditability."""
+        if self.use_memory or not self._ensure_connection():
+            action["id"] = len(self._memory_automation_actions) + 1
+            self._memory_automation_actions.append(action)
+            return action["id"]
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO automation_actions (
+                        alert_id, action_type, target_resource, target_namespace, status,
+                        error_message, execution_time_ms, mode, triggered_by, created_at, completed_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    action.get("alert_id"),
+                    action.get("action_type"),
+                    action.get("target_resource"),
+                    action.get("target_namespace"),
+                    action.get("status"),
+                    action.get("error_message"),
+                    action.get("execution_time_ms"),
+                    action.get("mode"),
+                    action.get("triggered_by"),
+                    action.get("created_at", datetime.now()),
+                    action.get("completed_at")
+                ))
+                return cur.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error adding automation action: {e}")
+            action["id"] = len(self._memory_automation_actions) + 1
+            self._memory_automation_actions.append(action)
+            return action["id"]
+
+    def add_audit_log(self, log_entry: Dict[str, Any]) -> int:
+        """Record an audit log entry for governance decisions."""
+        if self.use_memory or not self._ensure_connection():
+            log_entry["id"] = len(self._memory_audit_logs) + 1
+            self._memory_audit_logs.append(log_entry)
+            return log_entry["id"]
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO audit_logs (action, resource_type, resource_id, details,
+                                           status, error_message, actor, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    log_entry.get("action"),
+                    log_entry.get("resource_type"),
+                    log_entry.get("resource_id"),
+                    json.dumps(log_entry.get("details", {})),
+                    log_entry.get("status"),
+                    log_entry.get("error_message"),
+                    log_entry.get("actor"),
+                    log_entry.get("created_at", datetime.now())
+                ))
+                return cur.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error adding audit log: {e}")
+            log_entry["id"] = len(self._memory_audit_logs) + 1
+            self._memory_audit_logs.append(log_entry)
+            return log_entry["id"]
         
         try:
             with self.conn.cursor() as cur:
@@ -352,7 +512,61 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting IoT events: {e}")
             return list(reversed(self._memory_iot_events[-limit:]))
-    
+
+    def apply_retention(self, alerts_days: int = 30, iot_days: int = 30,
+                        automation_days: int = 180, audit_days: int = 180) -> Dict[str, int]:
+        """Apply simple retention policy and return delete counts."""
+        def _as_datetime(value):
+            if isinstance(value, datetime):
+                return value
+            if isinstance(value, str):
+                try:
+                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError:
+                    return datetime.now()
+            return datetime.now()
+
+        cutoffs = {
+            "alerts": datetime.now() - timedelta(days=alerts_days),
+            "iot_events": datetime.now() - timedelta(days=iot_days),
+            "automation_actions": datetime.now() - timedelta(days=automation_days),
+            "audit_logs": datetime.now() - timedelta(days=audit_days),
+        }
+            deleted = {"alerts": 0, "iot_events": 0, "automation_actions": 0, "audit_logs": 0}
+
+        if self.use_memory or not self._ensure_connection():
+            before = len(self._memory_alerts)
+            self._memory_alerts = [a for a in self._memory_alerts if _as_datetime(a.get("timestamp", datetime.now())) >= cutoffs["alerts"]]
+            deleted["alerts"] = before - len(self._memory_alerts)
+
+            before = len(self._memory_iot_events)
+            self._memory_iot_events = [e for e in self._memory_iot_events if _as_datetime(e.get("timestamp", datetime.now())) >= cutoffs["iot_events"]]
+            deleted["iot_events"] = before - len(self._memory_iot_events)
+
+            before = len(self._memory_automation_actions)
+            self._memory_automation_actions = [a for a in self._memory_automation_actions if _as_datetime(a.get("created_at", datetime.now())) >= cutoffs["automation_actions"]]
+            deleted["automation_actions"] = before - len(self._memory_automation_actions)
+
+            before = len(self._memory_audit_logs)
+            self._memory_audit_logs = [a for a in self._memory_audit_logs if _as_datetime(a.get("created_at", datetime.now())) >= cutoffs["audit_logs"]]
+            deleted["audit_logs"] = before - len(self._memory_audit_logs)
+            return deleted
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("DELETE FROM alerts WHERE timestamp < %s", (cutoffs["alerts"],))
+                deleted["alerts"] = cur.rowcount
+                cur.execute("DELETE FROM iot_events WHERE timestamp < %s", (cutoffs["iot_events"],))
+                deleted["iot_events"] = cur.rowcount
+                cur.execute("DELETE FROM automation_actions WHERE created_at < %s", (cutoffs["automation_actions"],))
+                deleted["automation_actions"] = cur.rowcount
+                cur.execute("DELETE FROM audit_logs WHERE created_at < %s", (cutoffs["audit_logs"],))
+                deleted["audit_logs"] = cur.rowcount
+            return deleted
+        except Exception as e:
+            logger.error(f"Error applying retention policy: {e}")
+            return deleted
+
     def get_stats(self) -> Dict[str, Any]:
         """Get database statistics."""
         stats = {
@@ -382,8 +596,44 @@ class Database:
         This ensures Grafana shows historical data even after pod restarts.
         """
         if self.use_memory or not self._ensure_connection():
-            return {"alerts_by_source_priority": {}, "alerts_by_severity": {}, 
-                    "alerts_by_threat_type": {}, "total_processed": 0, "actions_executed": {}}
+            alerts_by_source_priority = {}
+            alerts_by_severity = {}
+            alerts_by_threat_type = {}
+            actions_executed = {}
+            iot_events_by_type = {}
+
+            for alert in self._memory_alerts:
+                key = f"{alert.get('source')}:{alert.get('priority')}"
+                alerts_by_source_priority[key] = alerts_by_source_priority.get(key, 0) + 1
+                sev = str(alert.get("severity"))
+                alerts_by_severity[sev] = alerts_by_severity.get(sev, 0) + 1
+                threat = alert.get("threat_type")
+                if threat:
+                    alerts_by_threat_type[threat] = alerts_by_threat_type.get(threat, 0) + 1
+
+            for action in self._memory_automation_actions:
+                action_type = action.get("action_type")
+                if action_type:
+                    actions_executed[action_type] = actions_executed.get(action_type, 0) + 1
+
+            for event in self._memory_iot_events:
+                key = f"{event.get('device_id')}:{event.get('event_type')}"
+                iot_events_by_type[key] = iot_events_by_type.get(key, 0) + 1
+
+            total_processed = sum(alerts_by_severity.values())
+            critical_alerts = sum(
+                count for sev, count in alerts_by_severity.items() if sev and sev.isdigit() and int(sev) >= 8
+            )
+
+            return {
+                "alerts_by_source_priority": alerts_by_source_priority,
+                "alerts_by_severity": alerts_by_severity,
+                "alerts_by_threat_type": alerts_by_threat_type,
+                "total_processed": total_processed,
+                "actions_executed": actions_executed,
+                "critical_alerts": critical_alerts,
+                "iot_events_by_type": iot_events_by_type,
+            }
         
         try:
             data = {}
@@ -415,12 +665,12 @@ class Database:
                 cur.execute("SELECT COUNT(*) FROM alerts WHERE severity IS NOT NULL")
                 data["total_processed"] = cur.fetchone()[0]
                 
-                # Actions executed (from automated_actions column)
+                # Actions executed (from automation_actions table)
                 cur.execute("""
-                    SELECT jsonb_array_elements_text(automated_actions) as action, COUNT(*)
-                    FROM alerts 
-                    WHERE automated_actions IS NOT NULL AND automated_actions != 'null'::jsonb
-                    GROUP BY action
+                    SELECT action_type, COUNT(*)
+                    FROM automation_actions
+                    WHERE action_type IS NOT NULL
+                    GROUP BY action_type
                 """)
                 data["actions_executed"] = {row[0]: row[1] for row in cur.fetchall()}
                 

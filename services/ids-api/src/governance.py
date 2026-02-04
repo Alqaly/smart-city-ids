@@ -23,6 +23,11 @@ from collections import deque
 
 logger = logging.getLogger(__name__)
 
+try:
+    from database import db
+except Exception:
+    db = None
+
 
 class AutomationMode(Enum):
     """
@@ -427,6 +432,16 @@ class GovernanceController:
             "details": details
         }
         logger.info(f"AUDIT: {json.dumps(audit_entry)}")
+        if db:
+            db.add_audit_log({
+                "action": event_type,
+                "resource_type": "governance",
+                "resource_id": details.get("id") if isinstance(details, dict) else None,
+                "details": audit_entry,
+                "status": details.get("status") if isinstance(details, dict) else None,
+                "actor": details.get("approved_by") if isinstance(details, dict) else None,
+                "created_at": datetime.now()
+            })
     
     def on_approval(self, callback: Callable):
         """Register callback for action approvals."""

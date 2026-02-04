@@ -1,139 +1,104 @@
--- Migration 001: Initial schema with encryption support
--- Created: 2026-01-10
--- Description: Creates users, API keys, alerts, and audit tables
+-- Migration 001: Unified runtime schema (alerts, analysis, automation, audit, IoT)
+-- Created: 2026-02-03
+-- Description: Aligns migration schema with runtime database.py
 
--- Run migrations as a single transaction to avoid partial schema application
 BEGIN;
 
--- Create users table
-CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(255) UNIQUE NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    hashed_password VARCHAR(255) NOT NULL,
-    role VARCHAR(50) DEFAULT 'monitor' NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE,
-    is_verified BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_login TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_username ON users (username);
-CREATE INDEX IF NOT EXISTS idx_email ON users (email);
-CREATE INDEX IF NOT EXISTS idx_role ON users (role);
-
--- Create API keys table
-CREATE TABLE IF NOT EXISTS api_keys (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key VARCHAR(255) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    description VARCHAR(1024),
-    is_active BOOLEAN DEFAULT TRUE,
-    last_used TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_key ON api_keys (key);
-CREATE INDEX IF NOT EXISTS idx_api_user_id ON api_keys (user_id);
-
--- Create alerts table with encrypted fields
+-- Core alerts table
 CREATE TABLE IF NOT EXISTS alerts (
     id SERIAL PRIMARY KEY,
-    alert_id VARCHAR(36) UNIQUE NOT NULL,
-    source VARCHAR(50),
-    rule VARCHAR(512),
+    source VARCHAR(50) NOT NULL,
+    rule VARCHAR(255),
+    priority VARCHAR(50),
     severity INTEGER,
-    encrypted_alert_data BYTEA NOT NULL,
-    encrypted_analysis BYTEA,
-    alert_source_ip VARCHAR(45),
-    alert_dest_ip VARCHAR(45),
-    container_name VARCHAR(255),
-    threat_type VARCHAR(255),
-    is_analyzed BOOLEAN DEFAULT FALSE,
-    analysis_error VARCHAR(1024),
-    actions_taken JSON DEFAULT '[]',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP,
-    created_by VARCHAR(255) DEFAULT 'system'
+    summary TEXT,
+    threat_type VARCHAR(100),
+    recommendations JSONB,
+    automated_actions JSONB,
+    raw_alert JSONB,
+    analysis JSONB,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_alert_id ON alerts (alert_id);
-CREATE INDEX IF NOT EXISTS idx_source ON alerts (source);
-CREATE INDEX IF NOT EXISTS idx_severity ON alerts (severity);
-CREATE INDEX IF NOT EXISTS idx_container_name ON alerts (container_name);
-CREATE INDEX IF NOT EXISTS idx_threat_type ON alerts (threat_type);
-CREATE INDEX IF NOT EXISTS idx_created_at ON alerts (created_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_source ON alerts(source);
+CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity);
+CREATE INDEX IF NOT EXISTS idx_alerts_threat_type ON alerts(threat_type);
 
--- Create analysis results table
+-- Analysis results (LLM outputs)
 CREATE TABLE IF NOT EXISTS analysis_results (
     id SERIAL PRIMARY KEY,
-    alert_id VARCHAR(36) NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+    alert_id INTEGER REFERENCES alerts(id) ON DELETE CASCADE,
     model VARCHAR(255),
-    encrypted_result BYTEA NOT NULL,
+    analysis JSONB,
     analysis_time_ms INTEGER,
-    confidence_score INTEGER,
+    confidence_score NUMERIC,
     analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_analysis_alert_id ON analysis_results (alert_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_alert_id ON analysis_results(alert_id);
 
--- Create automation actions table
+-- Automation actions (operational audit trail)
 CREATE TABLE IF NOT EXISTS automation_actions (
     id SERIAL PRIMARY KEY,
-    alert_id VARCHAR(36) NOT NULL REFERENCES alerts(alert_id) ON DELETE CASCADE,
+    alert_id INTEGER REFERENCES alerts(id) ON DELETE SET NULL,
     action_type VARCHAR(255),
     target_resource VARCHAR(255),
     target_namespace VARCHAR(255),
     status VARCHAR(50),
-    error_message VARCHAR(1024),
+    error_message TEXT,
     execution_time_ms INTEGER,
+    mode VARCHAR(50),
+    triggered_by VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP,
-    triggered_by VARCHAR(255)
+    completed_at TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_action_alert_id ON automation_actions (alert_id);
-CREATE INDEX IF NOT EXISTS idx_action_status ON automation_actions (status);
-CREATE INDEX IF NOT EXISTS idx_action_type ON automation_actions (action_type);
+CREATE INDEX IF NOT EXISTS idx_actions_alert_id ON automation_actions(alert_id);
+CREATE INDEX IF NOT EXISTS idx_actions_type ON automation_actions(action_type);
+CREATE INDEX IF NOT EXISTS idx_actions_status ON automation_actions(status);
 
--- Create audit logs table
+-- Audit logs (governance decisions)
 CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     action VARCHAR(255) NOT NULL,
     resource_type VARCHAR(255),
     resource_id VARCHAR(255),
-    details JSON,
+    details JSONB,
     status VARCHAR(50),
-    error_message VARCHAR(1024),
-    ip_address VARCHAR(45),
-    user_agent VARCHAR(512),
+    error_message TEXT,
+    actor VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_logs (user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action);
-CREATE INDEX IF NOT EXISTS idx_audit_resource_type ON audit_logs (resource_type);
-CREATE INDEX IF NOT EXISTS idx_audit_resource_id ON audit_logs (resource_id);
-CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs (created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at);
 
--- Attempt to enable pgcrypto extension for encryption functions.
--- NOTE: CREATE EXTENSION pgcrypto may require superuser privileges. This block will
--- skip the extension if the current DB user lacks permission and emit a NOTICE.
-DO $$
-BEGIN
-    CREATE EXTENSION IF NOT EXISTS pgcrypto;
-EXCEPTION WHEN insufficient_privilege THEN
-    RAISE NOTICE 'Skipping CREATE EXTENSION pgcrypto: insufficient privileges. Run as DB superuser to enable DB-side encryption functions.';
-END;
-$$;
+-- IoT devices table
+CREATE TABLE IF NOT EXISTS iot_devices (
+    device_id VARCHAR(64) PRIMARY KEY,
+    device_type VARCHAR(50),
+    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    event_count INTEGER DEFAULT 0,
+    metadata JSONB
+);
 
--- Create partitioning for alerts table (for large deployments)
--- ALTER TABLE alerts PARTITION BY RANGE (date_trunc('month', created_at));
+-- IoT events table
+CREATE TABLE IF NOT EXISTS iot_events (
+    id SERIAL PRIMARY KEY,
+    device_id VARCHAR(64) REFERENCES iot_devices(device_id),
+    device_type VARCHAR(50),
+    event_type VARCHAR(50),
+    value JSONB,
+    timestamp TIMESTAMP,
+    received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata JSONB
+);
 
-COMMIT;
+CREATE INDEX IF NOT EXISTS idx_iot_events_device ON iot_events(device_id);
+CREATE INDEX IF NOT EXISTS idx_iot_events_type ON iot_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_iot_events_timestamp ON iot_events(timestamp);
 
 COMMIT;
