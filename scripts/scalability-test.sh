@@ -1,33 +1,47 @@
 #!/bin/bash
 # =============================================================================
-# Smart City IDS - Scalability Test Script
-# Capstone II Integration Plan - TASK 5
-#
-# Demonstrates system scalability: 10 → 100 → 500 → 1000 IoT devices
-# Records metrics at each scale level for IEEE-defensible evidence
+# Smart City IDS - Scalability Test Suite
+# Tests system performance at increasing scales (10→100→500→1000 devices)
+# Usage: bash scripts/scalability-test.sh [--scales 10,100,500] [--duration 300] [--help]
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
 
-# Configuration
+init_script "$0" "Scalability Test Suite"
+
 NAMESPACE="smart-city"
-RESULTS_DIR="scalability-results"
+RESULTS_DIR="${PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}/scalability-results"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:31701}"
 IDS_API_URL="${IDS_API_URL:-http://localhost:30800}"
-WAIT_SECONDS=60  # Time to stabilize at each scale level
+WAIT_SECONDS=60
+SCALE_LEVELS="${SCALE_LEVELS:-10,100,500,1000}"
 
-# Scale levels to test
-SCALE_LEVELS=(10 100 500 1000)
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --scales)       SCALE_LEVELS="$2"; shift 2 ;;
+        --duration)     WAIT_SECONDS="$2"; shift 2 ;;
+        --results-dir)  RESULTS_DIR="$2"; shift 2 ;;
+        --help)         print_help "scalability-test.sh [--scales LEVELS] [--duration SECONDS]"; exit 0 ;;
+        *)              die "Unknown option: $1" ;;
+    esac
+done
 
-# Timestamp for this run
-RUN_ID=$(date +%Y%m%d_%H%M%S)
+ensure_command kubectl
+
+mkdir -p "$RESULTS_DIR"
+
+log_section "SCALABILITY TEST CONFIGURATION"
+log_info "Namespace: $NAMESPACE"
+log_info "Scale Levels: $SCALE_LEVELS"
+log_info "Duration per Scale: ${WAIT_SECONDS}s"
+log_info "Results Directory: $RESULTS_DIR"
+log_info "Prometheus URL: $PROMETHEUS_URL"
+log_info "IDS API URL: $IDS_API_URL"
+echo ""
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║     Smart City IDS - Scalability Test Suite                ║${NC}"

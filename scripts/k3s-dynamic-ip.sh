@@ -1,51 +1,63 @@
-#!/usr/bin/env bash
-# ------------------------------------------------------------
-# k3s-dynamic-ip.sh
-# Purpose: Auto-detect REAL node IP (not 127.0.0.1) and fix kubeconfig
-# Works on: Kali, Ubuntu, WSL2, laptops, WiFi changes
-# ------------------------------------------------------------
+#!/bin/bash
+# =============================================================================
+# Smart City IDS - K3s Dynamic IP Configuration
+# Auto-detects node IP and fixes kubeconfig for network changes
+# Usage: bash scripts/k3s-dynamic-ip.sh [--verbose] [--help]
+# =============================================================================
+
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
+init_script "$0" "K3s Dynamic IP Configuration"
 
 K3S_KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
 LOCAL_KUBECONFIG="$HOME/.kube/config"
 LOGFILE="/var/log/k3s-dynamic-ip.log"
-timestamp() { date '+%Y-%m-%d %H:%M:%S'; }
 
-echo "$(timestamp) - Starting k3s-dynamic-ip" >> "$LOGFILE"
+ensure_root
+ensure_file "$K3S_KUBECONFIG"
 
-# === 1. DETECT REAL IP (SKIP loopback, docker, WSL fake) ===
-NODE_IP=$(ip -4 addr show scope global up \
-  | grep -v ' lo ' \
-  | grep -v ' docker' \
-  | awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+log_section "DETECTING NODE IP"
 
-if [ -z "$NODE_IP" ]; then
-  echo "$(timestamp) - ❌ ERROR: No valid IP found" | tee -a "$LOGFILE"
-  exit 1
+# Detect real IP (exclude loopback, docker, etc)
+NODE_IP=$(ip -4 addr show scope global up 2>/dev/null | \
+    grep -v ' lo ' | grep -v ' docker' | \
+    awk '/inet / {print $2}' | cut -d/ -f1 | head -n1)
+
+if [[ -z "$NODE_IP" ]]; then
+    die "Could not detect valid node IP"
 fi
 
-echo "$(timestamp) - ✅ Detected node IP: $NODE_IP" | tee -a "$LOGFILE"
+log_info "Detected IP: $NODE_IP"
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Detected IP: $NODE_IP" >> "$LOGFILE"
+echo ""
 
-# === 2. Fix kubeconfig ===
-if [ ! -f "$K3S_KUBECONFIG" ]; then
-  echo "$(timestamp) - ❌ ERROR: $K3S_KUBECONFIG missing" | tee -a "$LOGFILE"
-  exit 1
-fi
+log_section "UPDATING KUBECONFIG"
 
 mkdir -p "$(dirname "$LOCAL_KUBECONFIG")"
-sudo cp "$K3S_KUBECONFIG" "$LOCAL_KUBECONFIG"
-sudo chown "$(id -u):$(id -g)" "$LOCAL_KUBECONFIG"
+cp "$K3S_KUBECONFIG" "$LOCAL_KUBECONFIG"
+chown "$(id -u):$(id -g)" "$LOCAL_KUBECONFIG"
 
-# Replace ANY server with correct IP
+# Update server address
 sed -i "s|server: https://.*:6443|server: https://$NODE_IP:6443|g" "$LOCAL_KUBECONFIG"
+log_info "Updated kubeconfig: https://$NODE_IP:6443"
+echo ""
 
-echo "$(timestamp) - 🔄 Updated kubeconfig → https://$NODE_IP:6443" | tee -a "$LOGFILE"
+log_section "VERIFYING CONNECTION"
 
-# === 3. Set KUBECONFIG and test ===
 export KUBECONFIG="$LOCAL_KUBECONFIG"
+
 if kubectl get nodes >/dev/null 2>&1; then
-  echo "$(timestamp) - ✅ kubectl WORKS! Cluster reachable" | tee -a "$LOGFILE"
-  kubectl get nodes -o wide | tee -a "$LOGFILE"
+    log_info "✅ Cluster is reachable"
+    kubectl get nodes -o wide
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - SUCCESS: Cluster reachable at $NODE_IP" >> "$LOGFILE"
 else
-  echo "$(timestamp) - ⚠️ kubectl FAILED → check K3s status" | tee -a "$LOGFILE"
+    log_error "Could not reach cluster"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - FAILED: Could not reach cluster" >> "$LOGFILE"
+    exit 1
+fi
+echo ""
+log_info "✅ Configuration complete"
 fi

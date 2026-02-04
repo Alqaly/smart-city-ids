@@ -1,44 +1,63 @@
 #!/bin/bash
 # =============================================================================
 # Smart City IDS - Create Grafana Provisioning ConfigMaps
-# Embeds dashboard JSON files into Kubernetes ConfigMaps for auto-loading
+# Generates Kubernetes ConfigMaps for automatic dashboard loading
+# Usage: bash scripts/create-grafana-configmaps.sh [--namespace NS] [--output FILE]
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
+init_script "$0" "Grafana ConfigMap Generator"
+
+NAMESPACE="monitoring"
+OUTPUT_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --namespace)  NAMESPACE="$2"; shift 2 ;;
+        --output)     OUTPUT_FILE="$2"; shift 2 ;;
+        --help)       print_help "create-grafana-configmaps.sh [--namespace NS]"; exit 0 ;;
+        *)            die "Unknown option: $1" ;;
+    esac
+done
+
+ensure_command kubectl
+ensure_command jq
+
+PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 DASHBOARD_DIR="${PROJECT_ROOT}/infrastructure/monitoring"
+OUTPUT_FILE="${OUTPUT_FILE:-${PROJECT_ROOT}/k8s-manifests/grafana-provisioning-configmap.yaml}"
 
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+log_section "CONFIGURATION"
+log_info "Namespace: $NAMESPACE"
+log_info "Dashboard Directory: $DASHBOARD_DIR"
+log_info "Output: $OUTPUT_FILE"
+echo ""
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# Validate namespace
+if kubectl get namespace "$NAMESPACE" &>/dev/null 2>&1; then
+    log_info "✓ Namespace exists: $NAMESPACE"
+else
+    log_warn "Namespace does not exist yet: $NAMESPACE"
+fi
 
-log_info "Creating Grafana provisioning ConfigMaps..."
+log_section "GENERATING CONFIGMAPS"
 
-# Function to escape JSON for YAML
-escape_json() {
-    local file=$1
-    # Compact JSON and escape special characters
-    jq -c . "$file" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$/\\n/' | tr -d '\n'
-}
+# Create temporary YAML
+TEMP_FILE=$(mktemp)
+trap "rm -f $TEMP_FILE" EXIT
 
-# Create temporary YAML file
-TEMP_CM="${PROJECT_ROOT}/k8s-manifests/grafana-provisioning-configmap.yaml"
-
-cat > "$TEMP_CM" << 'EOF'
+# Base provisioning config
+cat > "$TEMP_FILE" << 'EOF'
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: grafana-provisioning
   namespace: monitoring
 data:
-  # Tells Grafana where to find dashboards (auto-loaded on startup)
   dashboards.yaml: |
     apiVersion: 1
     providers:
@@ -51,7 +70,6 @@ data:
       options:
         path: /var/lib/grafana/dashboards
   
-  # Configures Prometheus datasource (auto-created on startup)
   datasources.yaml: |
     apiVersion: 1
     datasources:
@@ -60,9 +78,6 @@ data:
       url: http://prometheus.monitoring.svc.cluster.local:9090
       access: proxy
       isDefault: true
-      jsonData:
-        httpMethod: GET
-        cacheTimeout: '60'
 
 ---
 apiVersion: v1
@@ -73,24 +88,38 @@ metadata:
 data:
 EOF
 
-# Add all dashboard files
-for dashboard in "$DASHBOARD_DIR"/grafana-dashboard-*.json; do
-    if [[ -f "$dashboard" ]]; then
-        dashboard_name=$(basename "$dashboard" .json)
-        log_info "Adding dashboard: $dashboard_name"
-        
-        # Add filename and content
-        echo "  ${dashboard_name}.json: |" >> "$TEMP_CM"
-        
-        # Indent JSON content (2 spaces)
-        jq . "$dashboard" | sed 's/^/    /' >> "$TEMP_CM"
-        
-        # Add blank line between entries
-        echo "" >> "$TEMP_CM"
-    fi
-done
+# Add dashboards
+DASHBOARD_COUNT=0
+if [[ -d "$DASHBOARD_DIR" ]]; then
+    for dashboard in "$DASHBOARD_DIR"/grafana-dashboard-*.json; do
+        if [[ -f "$dashboard" ]]; then
+            dashboard_name=$(basename "$dashboard" .json)
+            log_info "Adding: $dashboard_name"
+            
+            echo "  ${dashboard_name}.json: |" >> "$TEMP_FILE"
+            jq . "$dashboard" | sed 's/^/    /' >> "$TEMP_FILE"
+            echo "" >> "$TEMP_FILE"
+            
+            ((DASHBOARD_COUNT++))
+        fi
+    done
+else
+    log_warn "Dashboard directory not found: $DASHBOARD_DIR"
+fi
 
-log_info "✓ ConfigMap created: $TEMP_CM"
-log_info "You can now deploy with: kubectl apply -f $TEMP_CM"
-log_info ""
-log_info "Or let deploy.sh do it automatically."
+# Create output directory if needed
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Save
+cp "$TEMP_FILE" "$OUTPUT_FILE"
+log_info "✓ ConfigMap generated: $OUTPUT_FILE"
+log_info "Dashboards included: $DASHBOARD_COUNT"
+echo ""
+
+log_section "NEXT STEPS"
+echo "Deploy with:"
+echo "  kubectl apply -f $OUTPUT_FILE"
+echo ""
+echo "Or verify syntax:"
+echo "  kubectl apply -f $OUTPUT_FILE --dry-run=client"
+echo ""

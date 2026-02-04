@@ -1,52 +1,59 @@
 #!/bin/bash
 # =============================================================================
 # Smart City IDS - Grafana Dashboard Loader
-# Imports dashboards from infrastructure/monitoring/
+# Loads dashboard JSON files into Grafana via API
+# Usage: bash scripts/load-dashboards.sh [--grafana-url URL] [--help]
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
 
-# Dashboard locations (check multiple paths)
+init_script "$0" "Grafana Dashboard Loader"
+
+PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
+GRAFANA_URL=""
+GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-admin}"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --grafana-url)   GRAFANA_URL="$2"; shift 2 ;;
+        --password)      GRAFANA_PASSWORD="$2"; shift 2 ;;
+        --help)          print_help "load-dashboards.sh [--grafana-url URL]"; exit 0 ;;
+        *)               die "Unknown option: $1" ;;
+    esac
+done
+
+ensure_command curl
+ensure_command jq
+
+# Dashboard locations
 DASHBOARD_DIRS=(
     "${PROJECT_ROOT}/infrastructure/monitoring/grafana-dashboards"
     "${PROJECT_ROOT}/infrastructure/monitoring"
 )
 
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+log_section "CONFIGURATION"
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# Auto-detect Grafana URL if not provided
+if [[ -z "$GRAFANA_URL" ]]; then
+    NODE_IP=$(get_node_ip)
+    GRAFANA_URL="http://${NODE_IP}:30300"
+fi
 
-# Get Grafana URL
-get_grafana_url() {
-    local NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null)
-    if [[ -z "$NODE_IP" ]]; then
-        log_error "Could not determine node IP"
-        exit 1
-    fi
-    echo "http://${NODE_IP}:30300"
-}
+log_info "Grafana URL: $GRAFANA_URL"
+echo ""
 
-# Wait for Grafana to be ready
-wait_for_grafana() {
-    local grafana_url=$1
-    local retries=30
-    
-    log_info "Waiting for Grafana at ${grafana_url}..."
-    
-    while ! curl -s "${grafana_url}/api/health" | grep -q "ok" && [[ $retries -gt 0 ]]; do
-        sleep 2
-        ((retries--))
-    done
+log_section "CONNECTING TO GRAFANA"
+
+# Wait for Grafana
+if ! wait_port_open "${GRAFANA_URL#*://}" "${GRAFANA_URL##*:}" 60; then
+    die "Grafana not responding at $GRAFANA_URL"
+fi
+
+log_info "✓ Grafana is reachable"
+echo ""
     
     if [[ $retries -eq 0 ]]; then
         log_error "Grafana not ready after 60 seconds"

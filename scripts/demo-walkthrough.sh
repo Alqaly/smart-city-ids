@@ -1,33 +1,49 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # =============================================================================
-# Smart City IDS - Academic Demo Walkthrough
+# Smart City IDS - Interactive Demo Walkthrough
+# Step-by-step guided demonstration with pause points
+# Usage: bash scripts/demo-walkthrough.sh [--auto] [--speed SECONDS] [--help]
 # =============================================================================
-# Guided demonstration for academic presentation
 
-set -u  # Exit on undefined variables (but allow commands to fail with ||)
-export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+set -euo pipefail
 
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
 
-# Configuration
-AUTO_MODE=false
+init_script "$0" "Interactive Demo Walkthrough"
+
+export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+
+AUTO_MODE=0
 PAUSE_SECONDS=5
-[[ "${1:-}" == "--auto" ]] && AUTO_MODE=true
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helper Functions
-# ─────────────────────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --auto)   AUTO_MODE=1; shift ;;
+        --speed)  PAUSE_SECONDS="$2"; shift 2 ;;
+        --help)   print_help "demo-walkthrough.sh [--auto] [--speed SECONDS]"; exit 0 ;;
+        *)        die "Unknown option: $1" ;;
+    esac
+done
 
 pause_for_demo() {
-    if [ "$AUTO_MODE" = true ]; then
-        sleep $PAUSE_SECONDS
+    if [[ $AUTO_MODE -eq 1 ]]; then
+        sleep "$PAUSE_SECONDS"
+    else
+        echo ""
+        echo -e "${YELLOW}Press Enter to continue...${NC}"
+        read -r
+    fi
+}
+
+log_section "STARTING INTERACTIVE DEMO"
+
+if [[ $AUTO_MODE -eq 1 ]]; then
+    log_info "Auto-mode enabled (${PAUSE_SECONDS}s between steps)"
+else
+    log_info "Manual mode - press Enter to advance"
+fi
+echo ""
     else
         echo -e "${YELLOW}Press ENTER to continue...${NC}"
         read -r || true
