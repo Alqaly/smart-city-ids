@@ -13,41 +13,72 @@ An autonomous security monitoring system that uses Large Language Models (xAI Gr
 ## 🚀 Quick Start (5 Minutes)
 
 ### Prerequisites
-- Ubuntu 20.04+ (or similar Linux)
-- 4GB RAM, 20GB disk
-- Internet (first-time only)
-- xAI or OpenAI API key
+- Linux (Kali, Ubuntu 22.04, Debian 12, or similar)
+- 4GB RAM minimum (8GB recommended), 20GB disk
+- Internet access (first-time K3s installation)
+- **xAI or OpenAI API key** (at least one)
 
-### Deploy
+### 1. Clone Repository
 ```bash
 git clone https://github.com/Alqaly/smart-city-ids.git
 cd smart-city-ids
-cp .env.example .env
-nano .env  # Add your XAI_API_KEY or OPENAI_API_KEY
-./deploy.sh
 ```
 
-### Check It Works
+### 2. Set API Key
 ```bash
-kubectl get pods -n smart-city          # Should see 10+ pods running
-kubectl logs -n smart-city -l app=ids-api --tail=20
+export XAI_API_KEY="your-xai-key-here"
+# OR
+export OPENAI_API_KEY="your-openai-key-here"
 ```
 
-Grafana: `http://localhost:30300`  
-IDS API: `http://localhost:30800/docs`
+### 3. Deploy (One Command)
+```bash
+sudo bash scripts/start-everything.sh
+```
+
+**That's it!** The script handles:
+- K3s installation (if needed)
+- Kubernetes cluster setup
+- Persistent storage configuration
+- All microservices deployment
+- IoT emulation (100 devices)
+- Prometheus & Grafana dashboards
+
+### Access Services
+Once running, access your system at (replacing `IP` with your machine's IP):
+
+| Service | URL | Default Creds |
+|---------|-----|----------------|
+| **Grafana** | `http://IP:30300` | admin / admin |
+| **Prometheus** | `http://IP:31106` | - |
+| **IDS API Docs** | `http://IP:30800/docs` | - |
+| **Traffic Camera** | `http://IP:30100` | - |
+| **Healthcare API** | `http://IP:30101` | - |
+| **Parking System** | `http://IP:30102` | - |
 
 ---
 
-## 📋 Features
+## ✨ What's New
+
+- **✅ Automatic Persistent Storage** - All data (Prometheus, Grafana) survives pod and K3s restarts
+- **✅ Single-Command Deployment** - Everything in one script: `sudo bash scripts/start-everything.sh`
+- **✅ Production-Ready** - Professional Kubernetes deployment with proper RBAC, resource limits, health checks
+- **✅ Comprehensive Documentation** - 20+ guides covering setup, operations, architecture, and troubleshooting
+- **✅ Conference-Ready** - Deploy live in 3-5 minutes for demos and presentations
+- **✅ Self-Contained** - Works on any Linux machine worldwide, no external dependencies
+
+---
+
+## 💡 Why Smart City IDS?
 
 | Feature | Description |
 |---------|-------------|
 | **LLM-Powered Analysis** | Uses xAI Grok or OpenAI GPT to analyze security alerts |
 | **Multi-Source Detection** | Integrates Falco (runtime IDS) and Suricata (network IDS) - Both primary |
 | **Automated Response** | Kubernetes actions based on threat severity |
-| **Persistent Storage** | PostgreSQL for alert history and metric recovery |
+| **Persistent Storage** | Prometheus and Grafana data survives pod restarts, K3s restarts, and redeployments automatically |
 | **Visual Dashboards** | Grafana dashboards for real-time monitoring |
-| **High-Fidelity Emulation** | A purpose-built IIoT emulation environment with realistic, containerized services and network traffic for security testing. |
+| **High-Fidelity Emulation** | Purpose-built IIoT environment with 30-100 realistic containerized services, network traffic, and security tooling |
 
 ## 🔬 System Overview: An IIoT Security Emulation
 
@@ -210,3 +241,38 @@ Both work in **tandem** to provide comprehensive threat coverage at multiple lay
 - **Analysis Layer**: LLM correlates and analyzes both sources
 
 This dual-IDS approach ensures nothing slips through cracks—threats are caught either at the network boundary or at runtime.
+
+---
+
+## 🎯 GitHub Repository Settings
+
+### Suggested About Section
+For your GitHub repository "About" (Settings → About):
+
+**Description:**
+```
+LLM-Driven Intrusion Detection System for Smart City Infrastructure.
+Uses AI (xAI Grok/OpenAI) to analyze security alerts, detect threats,
+and automate Kubernetes responses. Deploy in 5 minutes.
+```
+
+**Topics (Tags):**
+```
+kubernetes, security, ids, intrusion-detection, k3s, llm, ai,
+smart-city, kubernetes-security, cybersecurity, iot, automation
+```
+
+**Website:**
+```
+https://github.com/Alqaly/smart-city-ids/blob/main/docs/README.md
+```
+
+---
+
+## 🔗 Related Resources
+
+- **Documentation Index:** [docs/INDEX.md](docs/INDEX.md)
+- **Quick Start:** [docs/QUICKSTART.md](docs/QUICKSTART.md)
+- **Deployment Guide:** [docs/SETUP.md](docs/SETUP.md)
+- **Architecture Details:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- **Deployment Checklist:** [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
