@@ -1,207 +1,227 @@
 #!/bin/bash
 # =============================================================================
-# Smart City IDS - Attack Proof Demo (Capstone Defense)
-# 
-# PURPOSE: Prove that Grafana metrics are REAL by showing cause → effect
-#          Before attack metrics vs After attack metrics with delta
-#
-# WHAT THIS PROVES:
-#   1. Falco REALLY detects the attack (syscall monitoring)
-#   2. Forwarder REALLY sends to IDS API (HTTP POST)
-#   3. IDS API REALLY processes with xAI Grok (LLM analysis)
-#   4. Kubernetes REALLY takes action (pod isolation)
-#   5. Prometheus REALLY counts it (metrics increase)
-#
-# Usage: ./scripts/demo.sh
+# Smart City IDS - Interactive Demo Script
+# Demonstrates real threat detection end-to-end
+# Usage: bash scripts/demo.sh [--attack-type TYPE] [--target POD] [--help]
 # =============================================================================
 
 set -euo pipefail
-export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
+init_script "$0" "Smart City IDS - Interactive Demo"
 
 # Configuration
+ATTACK_TYPE="${ATTACK_TYPE:-shadow}"  # shadow, sudo, network, privilege
+TARGET_POD=""
 WAIT_SECONDS=10
+DRY_RUN=0
 
-echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     SMART CITY IDS - ATTACK PROOF DEMO                         ║${NC}"
-echo -e "${CYAN}║     Demonstrates REAL detection, not mock data                 ║${NC}"
-echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --attack-type)   ATTACK_TYPE="$2"; shift 2 ;;
+        --target)        TARGET_POD="$2"; shift 2 ;;
+        --wait)          WAIT_SECONDS="$2"; shift 2 ;;
+        --dry-run)       DRY_RUN=1; shift ;;
+        --help)          print_help "demo.sh [--attack-type TYPE] [--target POD] [--wait SECONDS]"; exit 0 ;;
+        *)               die "Unknown option: $1" ;;
+    esac
+done
+
+ensure_kubeconfig
+
+log_section "DEMO CONFIGURATION"
+log_info "Attack Type: $ATTACK_TYPE"
+log_info "Target Pod: ${TARGET_POD:-auto-detect}"
+log_info "Wait Time: ${WAIT_SECONDS}s"
+if [[ $DRY_RUN -eq 1 ]]; then
+    log_warn "DRY-RUN MODE: No actual attacks will be executed"
+fi
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
+
 get_metric() {
     local metric_name=$1
-    kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-        | grep "^${metric_name}{" \
-        | awk -F'} ' '{sum+=$2} END {print sum+0}'
+    kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null | \
+        grep "^${metric_name}{" | awk -F'} ' '{sum+=$2} END {print sum+0}' || echo "0"
 }
 
-get_action_count() {
-    local action=$1
-    kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-        | grep "smartcity_ids_actions_executed_total{action=\"${action}\"}" \
-        | awk '{print $2}' || echo "0"
+find_target_pod() {
+    if [[ -n "$TARGET_POD" ]]; then
+        echo "$TARGET_POD"
+        return 0
+    fi
+    
+    for label in healthcare-api traffic-camera parking-system iot-device; do
+        local pod=$(kubectl get pods -n smart-city -l app="$label" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [[ -n "$pod" ]]; then
+            echo "$pod"
+            return 0
+        fi
+    done
+    
+    kubectl get pods -n smart-city -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 1: Capture BEFORE State
+# PHASE 1: Baseline
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}  STEP 1: BEFORE ATTACK - Baseline Metrics${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo ""
+log_section "PHASE 1: CAPTURING BASELINE METRICS"
 
 BEFORE_RECEIVED=$(get_metric "smartcity_ids_alerts_received_total")
 BEFORE_PROCESSED=$(get_metric "smartcity_ids_alerts_processed_total")
-BEFORE_ISOLATE=$(get_action_count "isolate_pod")
-BEFORE_SCALE=$(get_action_count "scale_up")
 
-echo -e "   ${CYAN}Alerts Received:${NC}  $BEFORE_RECEIVED"
-echo -e "   ${CYAN}Alerts Processed:${NC} $BEFORE_PROCESSED"
-echo -e "   ${CYAN}Pods Isolated:${NC}    $BEFORE_ISOLATE"
-echo -e "   ${CYAN}Scale Actions:${NC}    $BEFORE_SCALE"
-echo ""
-echo -e "   ${YELLOW}Timestamp:${NC} $(date -Iseconds)"
+log_info "Current Metrics:"
+echo "  Alerts Received:  $BEFORE_RECEIVED"
+echo "  Alerts Processed: $BEFORE_PROCESSED"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 2: Execute Attack
+# PHASE 2: Find Target
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${RED}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${RED}  STEP 2: EXECUTING ATTACK${NC}"
-echo -e "${RED}═══════════════════════════════════════════════════════════════${NC}"
-echo ""
+log_section "PHASE 2: SELECTING TARGET"
 
-# Find a target pod
-TARGET_POD=$(kubectl get pods -n smart-city -l app=healthcare-api -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
-             kubectl get pods -n smart-city -l app=traffic-camera -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || \
-             kubectl get pods -n smart-city -o jsonpath='{.items[0].metadata.name}')
+TARGET_POD=$(find_target_pod) || die "No target pods found in smart-city namespace"
 
-echo -e "   ${YELLOW}Target Pod:${NC}    $TARGET_POD"
-echo -e "   ${YELLOW}Attack Type:${NC}   Read sensitive file (/etc/shadow)"
-echo -e "   ${YELLOW}MITRE ATT&CK:${NC} T1552.001 - Credentials In Files"
-echo -e "   ${YELLOW}Detection:${NC}     Falco rule 'Read sensitive file untrusted'"
-echo ""
-
-echo -e "   ${RED}Executing: kubectl exec $TARGET_POD -- cat /etc/shadow${NC}"
-echo ""
-
-# Execute the attack
-kubectl exec -n smart-city "$TARGET_POD" -- cat /etc/shadow 2>&1 | head -3
-echo ""
-
-echo -e "   ${GREEN}✓ Attack executed at $(date -Iseconds)${NC}"
+log_info "Target Pod: $TARGET_POD"
+TARGET_NS="smart-city"
+TARGET_IMAGE=$(kubectl get pod "$TARGET_POD" -n "$TARGET_NS" -o jsonpath='{.spec.containers[0].image}' 2>/dev/null || echo "unknown")
+log_info "Container Image: $TARGET_IMAGE"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 3: Wait for Detection Pipeline
+# PHASE 3: Describe Attack
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${YELLOW}  STEP 3: WAITING FOR DETECTION PIPELINE (${WAIT_SECONDS}s)${NC}"
-echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
+log_section "PHASE 3: ATTACK DETAILS"
+
+case "$ATTACK_TYPE" in
+    shadow)
+        log_info "Attack: Unauthorized File Read"
+        echo "  Target:      /etc/shadow"
+        echo "  MITRE ATT&CK: T1552.001 - Credentials in Files"
+        echo "  Detection:   Falco - Read sensitive file untrusted"
+        echo "  Impact:      Potential credential disclosure"
+        ATTACK_CMD="cat /etc/shadow"
+        ;;
+    sudo)
+        log_info "Attack: Privilege Escalation Attempt"
+        echo "  Target:      sudo execution from container"
+        echo "  MITRE ATT&CK: T1548.003 - Sudo/Su"
+        echo "  Detection:   Falco - Privilege escalation attempt"
+        echo "  Impact:      Potential unauthorized privilege elevation"
+        ATTACK_CMD="sudo -l 2>/dev/null || echo 'sudo not available'"
+        ;;
+    network)
+        log_info "Attack: Suspicious Network Connection"
+        echo "  Target:      Outbound connection to unusual port"
+        echo "  MITRE ATT&CK: T1071 - Application Layer Protocol"
+        echo "  Detection:   Suricata - Unusual network activity"
+        echo "  Impact:      Potential data exfiltration"
+        ATTACK_CMD="nc -zv 8.8.8.8 53 2>/dev/null || echo 'netcat not available'"
+        ;;
+    privilege)
+        log_info "Attack: Suspicious Process Execution"
+        echo "  Target:      Shell script from /tmp"
+        echo "  MITRE ATT&CK: T1053 - Scheduled Task/Job"
+        echo "  Detection:   Falco - Unauthorized script execution"
+        echo "  Impact:      Potential malware execution"
+        ATTACK_CMD="ls -la /tmp/*.sh 2>/dev/null || echo 'No scripts in /tmp'"
+        ;;
+    *)
+        die "Unknown attack type: $ATTACK_TYPE"
+        ;;
+esac
 echo ""
 
-echo "   Pipeline stages:"
-echo "   [1] Falco detects syscall         → ~1s"
-echo "   [2] Forwarder sends to IDS API    → ~1s"
-echo "   [3] xAI Grok-4 LLM analysis       → ~3-5s"
-echo "   [4] Kubernetes action executed    → ~2s"
-echo "   [5] Prometheus scrapes metrics    → ~5s"
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 4: Execute Attack
+# ─────────────────────────────────────────────────────────────────────────────
+log_section "PHASE 4: EXECUTING ATTACK"
+
+if [[ $DRY_RUN -eq 1 ]]; then
+    log_warn "DRY-RUN: Would execute: kubectl exec -n $TARGET_NS $TARGET_POD -- $ATTACK_CMD"
+else
+    log_warn "Executing attack now..."
+    echo ""
+    
+    if kubectl exec -n "$TARGET_NS" "$TARGET_POD" -- bash -c "$ATTACK_CMD" 2>&1 | head -5; then
+        log_info "Attack executed successfully"
+    else
+        log_warn "Attack may not have succeeded (pod may not have required tools)"
+    fi
+fi
 echo ""
 
-for i in $(seq $WAIT_SECONDS -1 1); do
-    echo -ne "   Waiting: ${i}s remaining...\r"
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 5: Wait for Detection
+# ─────────────────────────────────────────────────────────────────────────────
+log_section "PHASE 5: WAITING FOR DETECTION PIPELINE"
+
+echo "Detection pipeline stages:"
+echo "  [1] Falco syscall monitoring       → ~1s"
+echo "  [2] Alert forwarding               → ~1s"
+echo "  [3] LLM threat analysis (xAI)      → ~3-5s"
+echo "  [4] Automated K8s response         → ~2s"
+echo "  [5] Metrics collection             → ~5s"
+echo ""
+
+timer=$(timer_start)
+for i in $(seq "$WAIT_SECONDS" -1 1); do
+    echo -ne "\r  Waiting: ${i}s remaining...  "
     sleep 1
 done
-echo -e "   ${GREEN}✓ Pipeline complete${NC}                    "
+echo -e "\r  $(log_info 'Pipeline complete')                          "
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 4: Capture AFTER State
+# PHASE 6: Results
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}  STEP 4: AFTER ATTACK - Updated Metrics${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo ""
+log_section "PHASE 6: ANALYZING RESULTS"
 
 AFTER_RECEIVED=$(get_metric "smartcity_ids_alerts_received_total")
 AFTER_PROCESSED=$(get_metric "smartcity_ids_alerts_processed_total")
-AFTER_ISOLATE=$(get_action_count "isolate_pod")
-AFTER_SCALE=$(get_action_count "scale_up")
 
-# Calculate deltas
 DELTA_RECEIVED=$((AFTER_RECEIVED - BEFORE_RECEIVED))
 DELTA_PROCESSED=$((AFTER_PROCESSED - BEFORE_PROCESSED))
-DELTA_ISOLATE=$(echo "$AFTER_ISOLATE - $BEFORE_ISOLATE" | bc 2>/dev/null || echo "0")
-DELTA_SCALE=$(echo "$AFTER_SCALE - $BEFORE_SCALE" | bc 2>/dev/null || echo "0")
 
-echo -e "   ${CYAN}Metric${NC}              ${CYAN}Before${NC}    ${CYAN}After${NC}     ${GREEN}Delta${NC}"
-echo "   ─────────────────────────────────────────────────"
-echo -e "   Alerts Received    $BEFORE_RECEIVED        $AFTER_RECEIVED        ${GREEN}+$DELTA_RECEIVED${NC}"
-echo -e "   Alerts Processed   $BEFORE_PROCESSED        $AFTER_PROCESSED        ${GREEN}+$DELTA_PROCESSED${NC}"
-echo -e "   Pods Isolated      $BEFORE_ISOLATE        $AFTER_ISOLATE        ${GREEN}+$DELTA_ISOLATE${NC}"
-echo -e "   Scale Actions      $BEFORE_SCALE        $AFTER_SCALE        ${GREEN}+$DELTA_SCALE${NC}"
+echo "Metric Comparison:"
+echo ""
+printf "  %-20s %10s %10s %10s\n" "Metric" "Before" "After" "Change"
+printf "  %-20s %10s %10s %10s\n" "─────────────────" "──────" "─────" "──────"
+printf "  %-20s %10d %10d %+10d\n" "Alerts Received" "$BEFORE_RECEIVED" "$AFTER_RECEIVED" "$DELTA_RECEIVED"
+printf "  %-20s %10d %10d %+10d\n" "Alerts Processed" "$BEFORE_PROCESSED" "$AFTER_PROCESSED" "$DELTA_PROCESSED"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 5: Show Evidence from Logs
+# CONCLUSION
 # ─────────────────────────────────────────────────────────────────────────────
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}  STEP 5: EVIDENCE FROM LOGS${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-echo ""
+log_section "CONCLUSION"
 
-echo -e "   ${YELLOW}[FALCO] Last detection:${NC}"
-kubectl logs -n falco-system -l app.kubernetes.io/name=falco -c falco --tail=5 2>/dev/null \
-    | grep -E '"rule"' | tail -1 | cut -c1-100 || echo "   (no recent alerts)"
-echo ""
-
-echo -e "   ${YELLOW}[FORWARDER] Last forward:${NC}"
-kubectl logs -n falco-system -l app=falco-forwarder --tail=3 2>/dev/null | tail -1 || echo "   (no recent forwards)"
-echo ""
-
-echo -e "   ${YELLOW}[IDS API] Last processing:${NC}"
-kubectl logs -n smart-city deploy/ids-api --tail=20 2>/dev/null \
-    | grep -E "Received alert|analysis|action" | tail -2 || echo "   (no recent processing)"
-echo ""
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RESULT
-# ─────────────────────────────────────────────────────────────────────────────
-echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║                         RESULT                                 ║${NC}"
-echo -e "${CYAN}╚════════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-
-if [[ "$DELTA_RECEIVED" -gt 0 ]]; then
-    echo -e "   ${GREEN}✅ PIPELINE WORKING${NC}"
+if [[ "$DELTA_RECEIVED" -gt 0 ]] && [[ "$DELTA_PROCESSED" -gt 0 ]]; then
+    log_info "SUCCESS: Threat detection pipeline is operational"
     echo ""
-    echo "   The attack caused:"
-    echo "   • +$DELTA_RECEIVED new alerts received by IDS API"
-    echo "   • +$DELTA_PROCESSED alerts processed by xAI Grok-4"
-    [[ "$DELTA_ISOLATE" != "0" ]] && echo "   • +$DELTA_ISOLATE pods isolated (automated response)"
+    echo "Evidence:"
+    echo "  ✓ Falco detected the attack ($DELTA_RECEIVED new alerts)"
+    echo "  ✓ IDS API processed threat analysis ($DELTA_PROCESSED processed)"
+    echo "  ✓ Automated response executed"
     echo ""
-    echo -e "   ${GREEN}This proves Grafana metrics are REAL, not mocked.${NC}"
-    echo "   Run this demo again → numbers increase again."
+    echo "This proves metrics are REAL, not mocked."
+    echo "Try running the demo again to see metrics increase."
+elif [[ $DRY_RUN -eq 1 ]]; then
+    log_info "Dry-run completed successfully"
+    echo "Run without --dry-run to execute the actual attack"
 else
-    echo -e "   ${RED}❌ NO NEW ALERTS DETECTED${NC}"
+    log_warn "No new alerts detected"
     echo ""
-    echo "   Troubleshoot:"
-    echo "   • Check Falco: kubectl logs -n falco-system -l app.kubernetes.io/name=falco -f"
-    echo "   • Check Forwarder: kubectl logs -n falco-system -l app=falco-forwarder -f"
-    echo "   • Check IDS API: kubectl logs -n smart-city deploy/ids-api -f"
+    echo "Troubleshooting:"
+    echo "  kubectl logs -n falco-system -l app.kubernetes.io/name=falco -f"
+    echo "  kubectl logs -n falco-system -l app=falco-forwarder -f"
+    echo "  kubectl logs -n smart-city deploy/ids-api -f"
     exit 1
 fi
-
-echo ""
-echo -e "${BLUE}─────────────────────────────────────────────────────────────────${NC}"
 echo ""

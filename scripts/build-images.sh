@@ -1,123 +1,117 @@
 #!/bin/bash
 # =============================================================================
 # Smart City IDS - Docker Image Builder
-# Builds all required images with dependencies pre-installed
+# Professional-grade container image building with registry support
+# Usage: bash scripts/build-images.sh [--push] [--registry REGISTRY] [--help]
 # =============================================================================
 
-set -e
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
+init_script "$0" "Docker Image Builder"
+
+PUSH_IMAGES=0
+NO_CACHE=""
+REGISTRY="${DOCKER_REGISTRY:-localhost}"
+
+#!/bin/bash
+# =============================================================================
+# Smart City IDS - Docker Image Builder
+# Professional-grade container image building with registry support
+# Usage: bash scripts/build-images.sh [--push] [--registry REGISTRY] [--help]
+# =============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
+init_script "$0" "Docker Image Builder"
+
+PUSH_IMAGES=0
+NO_CACHE=""
+REGISTRY="${DOCKER_REGISTRY:-localhost}"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --push)       PUSH_IMAGES=1; shift ;;
+        --no-cache)   NO_CACHE="--no-cache"; shift ;;
+        --registry)   REGISTRY="$2"; shift 2 ;;
+        --help)       print_help "build-images.sh [--push] [--registry REGISTRY]"; exit 0 ;;
+        *)            die "Unknown option: $1" ;;
+    esac
+done
+
+ensure_command docker
+
+PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 DOCKER_DIR="${PROJECT_ROOT}/docker"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+log_section "BUILD CONFIGURATION"
+log_info "Docker Context: $DOCKER_DIR"
+log_info "Registry: $REGISTRY"
+if [[ $PUSH_IMAGES -eq 1 ]]; then
+    log_warn "Images will be pushed after building"
+fi
+echo ""
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-
-# Image configuration (must match K8s manifest image references)
-IMAGES=(
-    "smart-city-ids/ids-api:latest|ids-api"
-    "smart-city-ids/smart-city-service:latest|smart-city-service"
-    "smart-city-ids/forwarder:latest|forwarder"
+# Define images
+declare -a IMAGES=(
+    "ids-api:IDS API Service"
+    "forwarder:Alert Forwarder"
+    "smart-city-service:Smart City Services"
 )
 
-# Check for container runtime
-detect_runtime() {
-    if command -v nerdctl &> /dev/null; then
-        RUNTIME="nerdctl"
-        RUNTIME_OPTS="--namespace k8s.io"
-    elif command -v docker &> /dev/null; then
-        RUNTIME="docker"
-        RUNTIME_OPTS=""
+log_section "BUILDING IMAGES"
+
+BUILD_SUCCESS=0
+BUILD_FAILED=0
+
+for image_spec in "${IMAGES[@]}"; do
+    IFS=':' read -r image_name image_desc <<< "$image_spec"
+    
+    log_subsection "$image_desc"
+    DOCKERFILE="${DOCKER_DIR}/${image_name}/Dockerfile"
+    IMAGE_TAG="${REGISTRY}/smart-city-ids/${image_name}:latest"
+    
+    if [[ ! -f "$DOCKERFILE" ]]; then
+        log_error "Dockerfile not found: $DOCKERFILE"
+        ((BUILD_FAILED++))
+        continue
+    fi
+    
+    log_info "Building: $IMAGE_TAG"
+    
+    if docker build \
+        --file "$DOCKERFILE" \
+        --tag "$IMAGE_TAG" $NO_CACHE \
+        "${DOCKER_DIR}/${image_name}" >/dev/null 2>&1
+    then
+        log_info "✓ Built: $IMAGE_TAG"
+        ((BUILD_SUCCESS++))
+        
+        if [[ $PUSH_IMAGES -eq 1 ]]; then
+            log_info "Pushing to registry..."
+            docker push "$IMAGE_TAG" || log_error "Push failed"
+        fi
     else
-        log_error "No container runtime found. Install Docker or use k3s with nerdctl."
-        exit 1
+        log_error "✗ Build failed"
+        ((BUILD_FAILED++))
     fi
-    log_info "Using container runtime: $RUNTIME"
-}
-
-# Build a single image
-build_image() {
-    local image_name=$1
-    local docker_subdir=$2
-    local dockerfile="${DOCKER_DIR}/${docker_subdir}/Dockerfile"
-    
-    if [[ ! -f "$dockerfile" ]]; then
-        log_error "Dockerfile not found: $dockerfile"
-        return 1
-    fi
-    
-    log_info "Building image: $image_name"
-    cd "$PROJECT_ROOT"
-    
-    $RUNTIME build $RUNTIME_OPTS \
-        -t "$image_name" \
-        -f "$dockerfile" \
-        .
-    
-    log_info "Successfully built: $image_name"
-}
-
-# Import image to k3s containerd (if using k3s)
-import_to_k3s() {
-    local image_name=$1
-    
-    if command -v k3s &> /dev/null; then
-        log_info "Importing $image_name to k3s containerd..."
-        
-        if [[ "$RUNTIME" == "docker" ]]; then
-            # Export from docker and import to k3s
-            docker save "$image_name" | sudo k3s ctr images import -
-        elif [[ "$RUNTIME" == "nerdctl" ]]; then
-            # Already in k3s.io namespace
-            log_info "Image already available in k3s namespace"
-        fi
-    fi
-}
-
-# Main build process
-main() {
-    log_info "=========================================="
-    log_info "Smart City IDS - Image Builder"
-    log_info "=========================================="
-    
-    detect_runtime
-    
-    local failed=0
-    
-    for image_spec in "${IMAGES[@]}"; do
-        IFS='|' read -r image_name docker_subdir <<< "$image_spec"
-        
-        if build_image "$image_name" "$docker_subdir"; then
-            import_to_k3s "$image_name"
-        else
-            ((failed++))
-        fi
-    done
-    
     echo ""
-    log_info "=========================================="
-    if [[ $failed -eq 0 ]]; then
-        log_info "All images built successfully!"
-        log_info ""
-        log_info "Images created:"
-        for image_spec in "${IMAGES[@]}"; do
-            IFS='|' read -r image_name _ <<< "$image_spec"
-            echo "  - $image_name"
-        done
-    else
-        log_error "$failed image(s) failed to build"
-        exit 1
-    fi
-}
+done
 
-# Run if executed directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
+log_section "BUILD SUMMARY"
+echo "Successful: $BUILD_SUCCESS"
+echo "Failed: $BUILD_FAILED"
+echo ""
+
+if [[ $BUILD_FAILED -eq 0 ]]; then
+    log_info "✅ All images built successfully"
+    exit 0
+else
+    log_error "Some builds failed"
+    exit 1
 fi
