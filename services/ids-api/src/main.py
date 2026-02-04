@@ -6,7 +6,8 @@ Production-ready with rate limiting, circuit breaker, and comprehensive monitori
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 from typing import List, Dict, Any, Optional
 import logging
@@ -46,6 +47,12 @@ app = FastAPI(
     description="LLM-Driven Intrusion Detection System",
     version="1.0.0"
 )
+
+# Mount static files for UI
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
+if os.path.exists(static_dir):
+    app.mount("/ui/static", StaticFiles(directory=static_dir), name="static")
+    logger.info(f"Static files mounted: {static_dir}")
 
 # Security
 security = HTTPBearer()
@@ -801,8 +808,118 @@ async def root():
         "version": "1.0.0",
         "status": "operational",
         "llm": "xAI Grok-4 (primary) + OpenAI GPT-4 (fallback)",
-        "endpoints": ["/health", "/api/alerts (GET/POST)", "/api/metrics", "/metrics"]
+        "endpoints": ["/health", "/api/alerts (GET/POST)", "/api/metrics", "/metrics", "/api/auth/login", "/api/operator/*"],
+        "ui": "http://localhost:8000/ui"
     }
+
+@app.get("/ui")
+async def serve_ui():
+    """Serve the operator dashboard UI"""
+    ui_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "index.html")
+    if os.path.exists(ui_file):
+        return FileResponse(ui_file, media_type="text/html")
+    else:
+        return {
+            "message": "UI not found",
+            "path": ui_file,
+            "api_endpoints": [
+                "GET /api/operator/incidents",
+                "GET /api/operator/incident/{id}",
+                "GET /api/operator/evidence/{id}",
+                "GET /api/operator/reasoning/{id}",
+                "GET /api/operator/metrics"
+            ]
+        }
+
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
+class LoginRequest(BaseModel):
+    """Login request model"""
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    """Login response with JWT token"""
+    access_token: str
+    token_type: str = "bearer"
+    user: str
+
+def create_jwt_token(username: str) -> str:
+    """Create simple JWT token (demo purposes - use proper JWT in production)"""
+    import jwt
+    from datetime import datetime, timedelta
+    
+    payload = {
+        "user": username,
+        "iat": datetime.utcnow(),
+        "exp": datetime.utcnow() + timedelta(hours=24)
+    }
+    try:
+        token = jwt.encode(payload, Config.SECRET_KEY or "super-secret-key", algorithm="HS256")
+        return token
+    except:
+        # Fallback if PyJWT not available
+        import base64
+        return base64.b64encode(f"{username}:{int(datetime.utcnow().timestamp())}".encode()).decode()
+
+def verify_jwt_token(token: str) -> str:
+    """Verify JWT token and return username"""
+    try:
+        import jwt
+        payload = jwt.decode(token, Config.SECRET_KEY or "super-secret-key", algorithms=["HS256"])
+        return payload.get("user", "unknown")
+    except:
+        # Fallback verification
+        import base64
+        try:
+            decoded = base64.b64decode(token).decode()
+            return decoded.split(":")[0]
+        except:
+            return None
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    """
+    Authenticate operator and return JWT token.
+    
+    Demo credentials:
+    - username: operator
+    - password: operator
+    
+    For production, integrate with your authentication system.
+    """
+    # Demo authentication (in production, check against AD/LDAP/database)
+    DEMO_USERNAME = "operator"
+    DEMO_PASSWORD = "operator"
+    
+    if request.username == DEMO_USERNAME and request.password == DEMO_PASSWORD:
+        token = create_jwt_token(request.username)
+        return LoginResponse(
+            access_token=token,
+            token_type="bearer",
+            user=request.username
+        )
+    else:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    """Logout operator (invalidate token on client side)"""
+    # In production, you might want to blacklist the token
+    return {"message": "Logged out successfully"}
+
+def require_auth(token: str = None) -> str:
+    """Dependency to verify authentication token"""
+    if not token:
+        raise HTTPException(status_code=401, detail="No token provided")
+    
+    username = verify_jwt_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    return username
 
 @app.get("/health")
 async def health():

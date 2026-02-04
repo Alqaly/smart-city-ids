@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart City IDS - Operator Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+        }
+
+        .login-container {
+            display: none;
+            flex: 1;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .login-box {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-box h1 {
+            margin-bottom: 30px;
+            color: #333;
+            font-size: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .login-btn:active {
+            transform: translateY(0);
+        }
+
+        .error-msg {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .dashboard {
+            display: none;
+            flex: 1;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            background: white;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 20px;
+        }
+
+        .logout-btn {
+            padding: 8px 16px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: white;
+            border-right: 1px solid #eee;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #999;
+        }
+
+        .nav-item {
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-item:hover {
+            background: #e9ecef;
+        }
+
+        .nav-item.active {
+            background: #667eea;
+            color: white;
+            border-left-color: white;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .incidents-grid {
+            display: grid;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .incident-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            transition: all 0.3s;
+            border-left: 4px solid #ffc107;
+        }
+
+        .incident-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .incident-card.critical {
+            border-left-color: #dc3545;
+        }
+
+        .incident-card.high {
+            border-left-color: #fd7e14;
+        }
+
+        .incident-card.medium {
+            border-left-color: #ffc107;
+        }
+
+        .incident-card.low {
+            border-left-color: #28a745;
+        }
+
+        .incident-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 10px;
+        }
+
+        .incident-title {
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+        }
+
+        .severity-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .severity-critical { background: #dc3545; }
+        .severity-high { background: #fd7e14; }
+        .severity-medium { background: #ffc107; color: #333; }
+        .severity-low { background: #28a745; }
+
+        .incident-summary {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+            line-height: 1.5;
+        }
+
+        .incident-meta {
+            display: flex;
+            gap: 20px;
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 10px;
+        }
+
+        .incident-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-secondary {
+            background: #e9ecef;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #dee2e6;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .detail-view {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .detail-section {
+            margin-bottom: 25px;
+        }
+
+        .detail-section-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #667eea;
+            font-size: 15px;
+        }
+
+        .detail-row {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #666;
+            width: 200px;
+            flex-shrink: 0;
+        }
+
+        .detail-value {
+            color: #333;
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .confidence-bar {
+            background: #e9ecef;
+            border-radius: 5px;
+            height: 8px;
+            overflow: hidden;
+            margin-top: 5px;
+            width: 200px;
+        }
+
+        .confidence-fill {
+            background: #667eea;
+            height: 100%;
+            transition: width 0.3s;
+        }
+
+        .indicators-list {
+            list-style: none;
+            margin-top: 10px;
+        }
+
+        .indicators-list li {
+            padding: 8px 0;
+            color: #333;
+            font-size: 14px;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .indicators-list li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .metric-title {
+            color: #999;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        .metric-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        .metric-unit {
+            color: #999;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .back-btn {
+            margin-bottom: 20px;
+            padding: 8px 16px;
+            background: #e9ecef;
+            color: #333;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .back-btn:hover {
+            background: #dee2e6;
+        }
+
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .content { flex-direction: column; }
+            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid #eee; }
+            .sidebar { display: flex; gap: 10px; overflow-x: auto; padding: 10px; }
+            .nav-item { flex-shrink: 0; }
+            .incident-card { margin-bottom: 15px; }
+            .detail-row { flex-direction: column; }
+            .detail-label { width: auto; margin-bottom: 5px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Page -->
+    <div class="login-container" id="loginContainer">
+        <div class="login-box">
+            <h1>Smart City IDS</h1>
+            <p style="color: #999; margin-bottom: 30px; font-size: 14px;">Operator Dashboard</p>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" placeholder="operator" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" placeholder="operator" required>
+                </div>
+                <button type="submit" class="login-btn">Login</button>
+                <div class="error-msg" id="errorMsg"></div>
+            </form>
+            <p style="margin-top: 20px; text-align: center; color: #999; font-size: 13px;">
+                Demo credentials: operator / operator
+            </p>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard" id="dashboard">
+        <div class="header">
+            <h1>Smart City IDS - Operator Dashboard</h1>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="content">
+            <div class="sidebar">
+                <div class="sidebar-title">Navigation</div>
+                <div class="nav-item active" onclick="showSection('incidents')">
+                    📊 Incidents
+                </div>
+                <div class="nav-item" onclick="showSection('metrics')">
+                    📈 Metrics
+                </div>
+                <div class="nav-item" onclick="showSection('settings')">
+                    ⚙️ Settings
+                </div>
+
+                <div class="sidebar-title" style="margin-top: 30px;">System Status</div>
+                <div style="font-size: 13px; color: #666;">
+                    <div style="margin-bottom: 8px;">
+                        <span style="color: #28a745;">●</span> API: Online
+                    </div>
+                    <div>
+                        <span style="color: #28a745;">●</span> K3s: Connected
+                    </div>
+                </div>
+            </div>
+
+            <div class="main-content">
+                <!-- Incidents Section -->
+                <div class="section active" id="incidents">
+                    <h2 style="margin-bottom: 20px;">Recent Security Incidents</h2>
+                    <div id="incidentsContainer" class="incidents-grid">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            Loading incidents...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Incident Detail Section -->
+                <div class="section" id="incidentDetail">
+                    <button class="back-btn" onclick="showSection('incidents')">← Back to Incidents</button>
+                    <div id="detailContainer" class="detail-view"></div>
+                </div>
+
+                <!-- Metrics Section -->
+                <div class="section" id="metrics">
+                    <h2 style="margin-bottom: 20px;">System Metrics</h2>
+                    <div id="metricsContainer" class="metrics-grid">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            Loading metrics...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Section -->
+                <div class="section" id="settings">
+                    <h2 style="margin-bottom: 20px;">Automation Settings</h2>
+                    <div class="detail-view">
+                        <div class="detail-section">
+                            <div class="detail-section-title">Governance Mode</div>
+                            <div style="margin-top: 15px;">
+                                <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
+                                    <input type="radio" name="mode" value="manual" checked onchange="updateMode('manual')">
+                                    <span style="margin-left: 10px;"><strong>MANUAL</strong> - All actions require approval</span>
+                                </label>
+                                <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
+                                    <input type="radio" name="mode" value="assisted" onchange="updateMode('assisted')">
+                                    <span style="margin-left: 10px;"><strong>ASSISTED</strong> - Severity < 8 auto, >= 8 requires approval</span>
+                                </label>
+                                <label style="display: flex; align-items: center; cursor: pointer;">
+                                    <input type="radio" name="mode" value="autopilot" onchange="updateMode('autopilot')">
+                                    <span style="margin-left: 10px;"><strong>AUTOPILOT</strong> - All actions automatic</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="detail-section">
+                            <div class="detail-section-title">Protected Services</div>
+                            <p style="color: #666; font-size: 14px; margin-top: 10px;">
+                                The following services are protected and cannot be automated:
+                            </p>
+                            <ul style="margin-top: 10px; margin-left: 20px; color: #666; font-size: 14px;">
+                                <li>healthcare-api</li>
+                                <li>emergency-systems</li>
+                                <li>governance-database</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let token = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            token = localStorage.getItem('token');
+            if (token) {
+                showDashboard();
+                loadIncidents();
+                loadMetrics();
+            } else {
+                showLogin();
+            }
+
+            document.getElementById('loginForm').addEventListener('submit', login);
+        });
+
+        function showLogin() {
+            document.getElementById('loginContainer').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
+        }
+
+        function showDashboard() {
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'flex';
+        }
+
+        async function login(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMsg');
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    token = data.access_token;
+                    localStorage.setItem('token', token);
+                    errorMsg.style.display = 'none';
+                    showDashboard();
+                    loadIncidents();
+                    loadMetrics();
+                } else {
+                    errorMsg.textContent = 'Invalid credentials';
+                    errorMsg.style.display = 'block';
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Connection error: ' + err.message;
+                errorMsg.style.display = 'block';
+            }
+        }
+
+        function logout() {
+            token = null;
+            localStorage.removeItem('token');
+            showLogin();
+        }
+
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+            event.target.closest('.nav-item')?.classList.add('active');
+
+            if (sectionId === 'incidents') {
+                document.querySelectorAll('.nav-item')[0].classList.add('active');
+            } else if (sectionId === 'metrics') {
+                document.querySelectorAll('.nav-item')[1].classList.add('active');
+            }
+        }
+
+        async function loadIncidents() {
+            try {
+                const response = await fetch(`${API_BASE}/api/operator/incidents?limit=50`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    renderIncidents(data.incidents || []);
+                }
+            } catch (err) {
+                document.getElementById('incidentsContainer').innerHTML = `<div class="loading">Error loading incidents: ${err.message}</div>`;
+            }
+        }
+
+        function renderIncidents(incidents) {
+            const container = document.getElementById('incidentsContainer');
+            if (incidents.length === 0) {
+                container.innerHTML = '<div class="loading">No incidents reported</div>';
+                return;
+            }
+
+            container.innerHTML = incidents.map(incident => `
+                <div class="incident-card ${getSeverityClass(incident.severity)}">
+                    <div class="incident-header">
+                        <div class="incident-title">${incident.summary || 'Security Incident'}</div>
+                        <span class="severity-badge severity-${getSeverityBadge(incident.severity)}">
+                            ${incident.severity || '?'}/10
+                        </span>
+                    </div>
+                    <div class="incident-summary">${incident.threat_description || 'No description'}</div>
+                    <div class="incident-meta">
+                        <span>🎯 Type: ${incident.threat_type || 'Unknown'}</span>
+                        <span>📍 Source: ${incident.source_rule || 'Unknown'}</span>
+                        <span>⏱️ ${new Date(incident.timestamp || Date.now()).toLocaleString()}</span>
+                    </div>
+                    <div class="incident-actions">
+                        <button class="btn btn-primary" onclick="viewIncidentDetail('${incident.incident_id}')">View Details</button>
+                        <button class="btn btn-success" onclick="approveAction('${incident.incident_id}')">Approve Action</button>
+                        <button class="btn btn-secondary" onclick="reviewEvidence('${incident.incident_id}')">Review Evidence</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function viewIncidentDetail(incidentId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/operator/incident/${incidentId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const incident = await response.json();
+                    renderIncidentDetail(incident);
+                    showIncidentDetailView();
+                }
+            } catch (err) {
+                alert('Error loading incident details');
+            }
+        }
+
+        function renderIncidentDetail(incident) {
+            const detail = document.getElementById('detailContainer');
+            const severity = incident.severity || 0;
+            const confidencePercent = ((incident.confidence || 0) * 100).toFixed(0);
+
+            detail.innerHTML = `
+                <div class="detail-section">
+                    <div class="detail-section-title">Incident Summary</div>
+                    <div class="detail-row">
+                        <div class="detail-label">Threat Type</div>
+                        <div class="detail-value">${incident.threat_type || 'Unknown'}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Summary</div>
+                        <div class="detail-value">${incident.summary || 'N/A'}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Severity</div>
+                        <div class="detail-value">
+                            <span style="color: ${severity >= 8 ? '#dc3545' : severity >= 6 ? '#fd7e14' : '#28a745'};">
+                                ${severity}/10
+                            </span>
+                        </div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Confidence</div>
+                        <div class="detail-value">
+                            ${confidencePercent}%
+                            <div class="confidence-bar">
+                                <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Key Indicators</div>
+                    <ul class="indicators-list">
+                        ${(incident.key_indicators || []).map(ind => `<li>${ind}</li>`).join('')}
+                    </ul>
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Recommended Actions</div>
+                    ${(incident.recommended_actions || []).map(action => `
+                        <div style="padding: 10px; background: #f8f9fa; border-radius: 5px; margin-bottom: 8px;">
+                            <strong>${action.action_type}</strong><br>
+                            <small style="color: #666;">${action.description}</small>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="detail-section">
+                    <div class="detail-section-title">Actions</div>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-success" onclick="approveAction('${incident.incident_id}')">Approve</button>
+                        <button class="btn btn-secondary" onclick="showSection('incidents')">Dismiss</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadMetrics() {
+            try {
+                const response = await fetch(`${API_BASE}/api/operator/metrics`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    renderMetrics(data);
+                }
+            } catch (err) {
+                document.getElementById('metricsContainer').innerHTML = `<div class="loading">Error loading metrics</div>`;
+            }
+        }
+
+        function renderMetrics(metrics) {
+            const container = document.getElementById('metricsContainer');
+            container.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-title">Total Incidents</div>
+                    <div class="metric-value">${metrics.total_incidents || 0}</div>
+                    <div class="metric-unit">30 day period</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Avg Analysis Time</div>
+                    <div class="metric-value">${(metrics.avg_analysis_time || 0).toFixed(2)}</div>
+                    <div class="metric-unit">seconds</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Avg Confidence</div>
+                    <div class="metric-value">${((metrics.avg_confidence || 0) * 100).toFixed(0)}%</div>
+                    <div class="metric-unit">LLM analysis confidence</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">Operator Approval Rate</div>
+                    <div class="metric-value">${((metrics.operator_approval_rate || 0) * 100).toFixed(0)}%</div>
+                    <div class="metric-unit">recommended actions approved</div>
+                </div>
+            `;
+        }
+
+        function getSeverityClass(severity) {
+            if (severity >= 8) return 'critical';
+            if (severity >= 6) return 'high';
+            if (severity >= 4) return 'medium';
+            return 'low';
+        }
+
+        function getSeverityBadge(severity) {
+            if (severity >= 8) return 'critical';
+            if (severity >= 6) return 'high';
+            if (severity >= 4) return 'medium';
+            return 'low';
+        }
+
+        function showIncidentDetailView() {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.getElementById('incidentDetail').classList.add('active');
+        }
+
+        async function approveAction(incidentId) {
+            if (confirm('Approve recommended action for this incident?')) {
+                alert('Action approved! (This would trigger automation)');
+                loadIncidents();
+            }
+        }
+
+        async function reviewEvidence(incidentId) {
+            alert('Opening evidence review for incident ' + incidentId);
+        }
+
+        function updateMode(mode) {
+            alert(`Governance mode changed to: ${mode.toUpperCase()}`);
+        }
+    </script>
+</body>
+</html>

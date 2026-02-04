@@ -12,26 +12,39 @@ An autonomous security monitoring system that uses Large Language Models (xAI Gr
 
 ## 🚀 Quick Start (5 Minutes)
 
-### Prerequisites
+**→ [Read the QUICK_START.md for step-by-step instructions](QUICK_START.md)**
+
+### TL;DR
+```bash
+cd /home/kali/smart-city-ids
+export XAI_API_KEY="your-key"  # or OPENAI_API_KEY
+./scripts/start-everything.sh
+# Then go to: http://localhost:8000/ui
+# Login: operator / operator
+```
+
+### Full Guide
+
+#### Prerequisites
 - Linux (Kali, Ubuntu 22.04, Debian 12, or similar)
 - 4GB RAM minimum (8GB recommended), 20GB disk
 - Internet access (first-time K3s installation)
 - **xAI or OpenAI API key** (at least one)
 
-### 1. Clone Repository
+#### 1. Clone Repository
 ```bash
 git clone https://github.com/Alqaly/smart-city-ids.git
 cd smart-city-ids
 ```
 
-### 2. Set API Key
+#### 2. Set API Key
 ```bash
 export XAI_API_KEY="your-xai-key-here"
 # OR
 export OPENAI_API_KEY="your-openai-key-here"
 ```
 
-### 3. Deploy (One Command)
+#### 3. Deploy (One Command)
 ```bash
 sudo bash scripts/start-everything.sh
 ```
@@ -44,7 +57,7 @@ sudo bash scripts/start-everything.sh
 - IoT emulation (100 devices)
 - Prometheus & Grafana dashboards
 
-### Access Services
+#### Access Services
 Once running, access your system at (replacing `IP` with your machine's IP):
 
 | Service | URL | Default Creds |
