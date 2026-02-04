@@ -4,6 +4,67 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [Capstone Final] Complete Observability Stack & Multi-LLM Support - 2026-02-04
+
+### Major Changes
+
+**1. Multi-LLM Engine Support (5 Providers)**
+- Added support for 5 LLM providers: xAI Grok-4, Anthropic Claude, OpenAI GPT-4, Google Gemini, Moonshot Kimi
+- Circuit breaker pattern for each engine (automatic failover)
+- Health endpoint shows all 5 engines with circuit breaker states (HEALTHY/TESTING/FAILING)
+- Priority-based failover: xai → anthropic → openai → gemini → kimi
+
+**2. Grafana Dashboard Overhaul** (`infrastructure/monitoring/grafana-dashboard-capstone-final.json`)
+- NEW: Complete dashboard with all 5 LLM engine status panels
+- Added Suricata and Falco alert source comparison
+- Performance metrics: Alert processing latency, Time to mitigation
+- Severity distribution over time
+- Fixed metric queries to use correct engine labels (xai, anthropic, openai, gemini, kimi)
+- Available at: http://localhost:30300/d/smartcity-ids-capstone-final
+
+**3. Database Pipeline Fixes** (`services/ids-api/src/database.py`)
+- CRITICAL: Fixed `add_alert()` function - was missing PostgreSQL INSERT query entirely
+- Added proper INSERT INTO alerts with all columns
+- Made `alert_id` and `encrypted_alert_data` columns nullable
+- All alerts now properly stored in PostgreSQL with full raw_alert and analysis JSON
+
+**4. Operator Authentication Fixed**
+- Added PyJWT>=2.8.0 to requirements.txt (was missing, causing ModuleNotFoundError)
+- Login endpoint /api/auth/login now returns valid JWT tokens
+- Operator credentials: operator / operator
+
+**5. Prometheus Configuration** (`k8s-manifests/prometheus-deployment.yaml`)
+- Added Suricata forwarder scrape job (port 8100)
+- Added Falco forwarder scrape job (port 8080)
+- 5-second scrape interval for all IDS components
+
+### Files Modified
+- `services/ids-api/src/main.py` - Health endpoint shows all LLM engines
+- `services/ids-api/src/database.py` - Fixed PostgreSQL INSERT
+- `services/ids-api/src/requirements.txt` - Added PyJWT, anthropic, google-generativeai
+- `k8s-manifests/prometheus-deployment.yaml` - Added forwarder scrape configs
+- `infrastructure/monitoring/grafana-dashboard-capstone-final.json` - NEW comprehensive dashboard
+
+### Verification Commands
+```bash
+# Health check (shows all 5 LLM engines)
+curl http://localhost:30800/health | jq
+
+# Operator login
+curl -X POST http://localhost:30800/api/auth/login -H "Content-Type: application/json" -d '{"username":"operator","password":"operator"}'
+
+# Database alerts
+kubectl exec -n smart-city deploy/postgres -- psql -U postgres -d smartcity_ids -c "SELECT source, COUNT(*) FROM alerts GROUP BY source;"
+
+# Prometheus metrics
+curl "http://localhost:31106/api/v1/query?query=smartcity_ids_alerts_received_total"
+
+# Grafana dashboard
+open http://localhost:30300/d/smartcity-ids-capstone-final
+```
+
+---
+
 ## [Infrastructure] Alert Pipeline & Deployment Fixes - 2026-02-04
 
 ### Bug Fixes
