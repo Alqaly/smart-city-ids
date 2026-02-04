@@ -184,6 +184,7 @@ for manifest in \
     "$MANIFEST_DIR/prometheus-deployment.yaml" \
     "$MANIFEST_DIR/grafana-deployment.yaml" \
     "$MANIFEST_DIR/falco-forwarder.yaml" \
+    "$MANIFEST_DIR/suricata-fixed.yaml" \
     "$MANIFEST_DIR/suricata-forwarder-deployment.yaml"; do
     
     if [[ -f "$manifest" ]]; then

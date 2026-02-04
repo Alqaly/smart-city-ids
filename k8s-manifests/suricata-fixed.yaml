@@ -13,11 +13,9 @@ data:
       address-groups:
         HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
         EXTERNAL_NET: "!$HOME_NET"
+      port-groups:
         HTTP_PORTS: "80"
 
-    pcap:
-      - interface: lo
-        
     logging:
       default-log-level: notice
       outputs:
@@ -27,8 +25,11 @@ data:
     outputs:
       - eve-log:
           enabled: yes
-          filetype: regular
-          filename: /var/log/suricata/eve.json
+          filetype: syslog
+          syslog:
+            server: suricata-forwarder.monitoring.svc.cluster.local
+            port: 514
+            protocol: udp
           types:
             - alert
 
@@ -68,8 +69,7 @@ spec:
           - |
             # Suricata running in network monitoring mode
             # In K8s, we monitor the loopback and any captured traffic
-            exec suricata -c /etc/suricata/suricata.yaml -r /dev/null 2>/dev/null || \
-            exec suricata -c /etc/suricata/suricata.yaml --pcap
+            exec suricata -c /etc/suricata/suricata.yaml -i eth0
         securityContext:
           runAsUser: 0
           privileged: false
@@ -80,8 +80,6 @@ spec:
         volumeMounts:
         - name: config
           mountPath: /etc/suricata
-        - name: logs
-          mountPath: /var/log/suricata
         resources:
           requests:
             cpu: 100m
@@ -101,23 +99,7 @@ spec:
       - name: config
         configMap:
           name: suricata-config
-      - name: logs
-        emptyDir: {}
+      # No log volume needed when using syslog output
 
 ---
-# Suricata Service
-apiVersion: v1
-kind: Service
-metadata:
-  name: suricata
-  namespace: monitoring
-  labels:
-    app: suricata
-spec:
-  selector:
-    app: suricata
-  ports:
-  - name: syslog
-    port: 514
-    protocol: UDP
-  type: ClusterIP
+# No Service required for syslog-only output

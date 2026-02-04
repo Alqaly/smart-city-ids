@@ -43,6 +43,11 @@ The complete alert pipeline is now functional:
 4. **Prometheus** scrapes metrics from IDS API
 5. **Grafana** displays dashboards with live data
 
+### Suricata Alignment (Option A)
+- Suricata now sends Eve JSON via syslog to `suricata-forwarder` in the `monitoring` namespace.
+- Forwarder listens on UDP 514 and forwards alerts to `ids-api-service.smart-city:8000/api/alerts/internal`.
+- This removes hostPath dependency and is portable for GitHub/demo deployments.
+
 ---
 
 ## [Capstone III] Operator Interface & Human-in-the-Loop Governance - 2026-02-04

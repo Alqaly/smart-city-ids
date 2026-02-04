@@ -4,7 +4,7 @@ metadata:
   name: suricata-forwarder-config
   namespace: monitoring
 data:
-  ids-api-url: "http://ids-api:8000/api/alerts"
+  ids-api-url: "http://ids-api-service.smart-city:8000/api/alerts/internal"
   ids-api-token: "suricata-forwarder-token"
 ---
 apiVersion: apps/v1
@@ -101,6 +101,27 @@ spec:
           defaultMode: 0555
       - name: tmp
         emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: suricata-forwarder
+  namespace: monitoring
+  labels:
+    app: suricata-forwarder
+spec:
+  selector:
+    app: suricata-forwarder
+  ports:
+  - name: udp-syslog
+    port: 514
+    targetPort: 514
+    protocol: UDP
+  - name: http-health
+    port: 8100
+    targetPort: 8100
+    protocol: TCP
+  type: ClusterIP
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -251,24 +272,3 @@ data:
         listener_thread = threading.Thread(target=lambda: __import__("asyncio").run(udp_listener()), daemon=True)
         listener_thread.start()
         uvicorn.run(app, host="0.0.0.0", port=8100, log_level="info")
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: suricata-forwarder
-  namespace: monitoring
-  labels:
-    app: suricata-forwarder
-spec:
-  type: ClusterIP
-  ports:
-  - name: http-health
-    port: 8100
-    targetPort: http-health
-    protocol: TCP
-  - name: udp-syslog
-    port: 514
-    targetPort: udp-syslog
-    protocol: UDP
-  selector:
-    app: suricata-forwarder

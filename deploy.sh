@@ -324,6 +324,16 @@ deploy_manifests() {
     # Deploy IDS API
     log_info "Deploying IDS API..."
     kubectl apply -f k8s-manifests/ids-api-FINAL.yaml
+
+    # Deploy Suricata + Forwarder (Option A: syslog → forwarder)
+    if [[ -f "k8s-manifests/suricata-fixed.yaml" ]]; then
+        log_info "Deploying Suricata (monitoring namespace)..."
+        kubectl apply -f k8s-manifests/suricata-fixed.yaml
+    fi
+    if [[ -f "k8s-manifests/suricata-forwarder-deployment.yaml" ]]; then
+        log_info "Deploying Suricata forwarder (monitoring namespace)..."
+        kubectl apply -f k8s-manifests/suricata-forwarder-deployment.yaml
+    fi
     
     # Deploy MQTT broker
     if [[ -f "k8s-manifests/mqtt-broker.yaml" ]]; then

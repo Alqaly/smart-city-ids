@@ -29,6 +29,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import Config
 from llm_engine_xai import XAIAnalyzer
 from llm_engine_openai import OpenAIAnalyzer
+from llm_engine_anthropic import AnthropicAnalyzer
+from llm_engine_gemini import GeminiAnalyzer
+from llm_engine_kimi import KimiAnalyzer
 from k8s_automation import K8sAutomation
 from database import db
 from alert_deduplicator import AlertDeduplicator, AlertBatcher
@@ -70,11 +73,27 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
     # TODO: Validate JWT or API key against database
     return token
 
-# Initialize components (xAI Grok-4 primary, OpenAI fallback)
+# Initialize components - Multi-LLM Support for Scalability
 try:
     Config.validate()
-    xai_engine = XAIAnalyzer() if Config.XAI_API_KEY else None
-    openai_engine = OpenAIAnalyzer() if Config.OPENAI_API_KEY else None
+    
+    # Initialize all available LLM engines
+    llm_engines = {}
+    if Config.XAI_API_KEY:
+        llm_engines["xai"] = XAIAnalyzer()
+    if Config.ANTHROPIC_API_KEY:
+        llm_engines["anthropic"] = AnthropicAnalyzer()
+    if Config.OPENAI_API_KEY:
+        llm_engines["openai"] = OpenAIAnalyzer()
+    if Config.GEMINI_API_KEY:
+        llm_engines["gemini"] = GeminiAnalyzer()
+    if Config.KIMI_API_KEY:
+        llm_engines["kimi"] = KimiAnalyzer()
+    
+    # Legacy compatibility
+    xai_engine = llm_engines.get("xai")
+    openai_engine = llm_engines.get("openai")
+    
     k8s_automation = K8sAutomation()
     
     # Initialize alert deduplicator for LLM cost reduction
@@ -84,10 +103,13 @@ try:
     )
     logger.info(f"Alert deduplicator initialized (TTL={deduplicator.ttl}s, max_cache={deduplicator.max_cache_size})")
     
-    logger.info(f"Initialized: xAI Grok-4={'ready' if xai_engine else 'disabled'}, OpenAI={'ready' if openai_engine else 'disabled'}, K8s=ready")
+    engine_status = ", ".join([f"{name}=ready" for name in llm_engines.keys()]) or "no-engines"
+    logger.info(f"Initialized LLM engines: {engine_status}")
+    logger.info(f"LLM fallback priority: {Config.get_engine_priority()}")
     logger.info(f"Safety: mode={Config.AUTOMATION_MODE}, protected={Config.PROTECTED_SERVICES}")
 except Exception as e:
     logger.error(f"Failed to initialize: {e}")
+    llm_engines = {}
     xai_engine = None
     openai_engine = None
     k8s_automation = None
@@ -201,10 +223,13 @@ class CircuitBreaker:
         self.last_failure_time = 0
         self.half_open_calls = 0
         
-        # Per-engine tracking
+        # Per-engine tracking - All supported LLM engines
         self.engine_stats = {
-            "xai-grok-4": {"failures": 0, "successes": 0, "state": "closed"},
-            "openai": {"failures": 0, "successes": 0, "state": "closed"}
+            "xai": {"failures": 0, "successes": 0, "state": "closed"},
+            "anthropic": {"failures": 0, "successes": 0, "state": "closed"},
+            "openai": {"failures": 0, "successes": 0, "state": "closed"},
+            "gemini": {"failures": 0, "successes": 0, "state": "closed"},
+            "kimi": {"failures": 0, "successes": 0, "state": "closed"}
         }
     
     def can_execute(self, engine: str) -> tuple[bool, str]:
@@ -354,8 +379,7 @@ def update_circuit_breaker_metrics():
         PROM_CIRCUIT_BREAKER_STATE.labels(engine=engine).set(state_val)
 
 async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
-    """Analyze alert with xAI Grok-4, fallback to OpenAI on failure. Uses cache and circuit breaker."""
-    fallback_triggered = False
+    """Analyze alert with multiple LLM engines in priority order. Uses cache and circuit breaker."""
     
     # Check cache first (reduces LLM costs)
     cached = alert_cache.get(alert_dict)
@@ -366,80 +390,60 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
     
     PROM_LLM_CACHE_OPERATIONS.labels(operation="miss").inc()
     
-    # Try xAI Grok-4 first (primary) - with circuit breaker
-    if xai_engine:
-        cb_allowed, cb_reason = circuit_breaker.can_execute("xai-grok-4")
+    # Get prioritized list of engines to try
+    engine_priority = Config.get_engine_priority()
+    last_engine = None
+    last_error = None
+    
+    for engine_name in engine_priority:
+        engine = llm_engines.get(engine_name)
+        if not engine:
+            continue
+        
+        cb_allowed, cb_reason = circuit_breaker.can_execute(engine_name)
         update_circuit_breaker_metrics()
         
-        if cb_allowed:
-            try:
-                llm_start = time.perf_counter()
-                result = await xai_engine.analyze_alert(alert_dict)
-                llm_duration = time.perf_counter() - llm_start
-                
-                if result.get("status") == "success":
-                    circuit_breaker.record_success("xai-grok-4")
-                    update_circuit_breaker_metrics()
-                    analysis = result.get("analysis", {})
-                    alert_cache.set(alert_dict, analysis)  # Cache the result
-                    PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
-                    PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="success").inc()
-                    PROM_LLM_LATENCY_SECONDS.labels(engine="xai-grok-4").observe(llm_duration)
-                    return analysis, "xai-grok-4", llm_duration
-                
-                circuit_breaker.record_failure("xai-grok-4")
-                update_circuit_breaker_metrics()
-                PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="error").inc()
-                logger.warning(f"xAI Grok-4 returned error: {result.get('error')}")
-                fallback_triggered = True
-            except Exception as e:
-                circuit_breaker.record_failure("xai-grok-4")
-                update_circuit_breaker_metrics()
-                PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="exception").inc()
-                logger.warning(f"xAI Grok-4 failed: {e}, trying OpenAI...")
-                fallback_triggered = True
-        else:
-            logger.info(f"xAI Grok-4 skipped: {cb_reason}")
-            PROM_LLM_REQUESTS_TOTAL.labels(engine="xai-grok-4", result="circuit_open").inc()
-            fallback_triggered = True
-    
-    # Fallback to OpenAI - with circuit breaker
-    if openai_engine:
-        cb_allowed, cb_reason = circuit_breaker.can_execute("openai")
-        update_circuit_breaker_metrics()
+        if not cb_allowed:
+            logger.info(f"{engine_name} skipped: {cb_reason}")
+            PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="circuit_open").inc()
+            continue
         
-        if cb_allowed:
-            try:
-                if fallback_triggered:
-                    PROM_LLM_FAILOVER_COUNT.labels(from_engine="xai-grok-4", to_engine="openai").inc()
-                llm_start = time.perf_counter()
-                result = await openai_engine.analyze_alert(alert_dict)
-                llm_duration = time.perf_counter() - llm_start
-                
-                if result.get("status") == "success":
-                    circuit_breaker.record_success("openai")
-                    update_circuit_breaker_metrics()
-                    analysis = result.get("analysis", {})
-                    alert_cache.set(alert_dict, analysis)  # Cache the result
-                    PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
-                    PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="success").inc()
-                    PROM_LLM_LATENCY_SECONDS.labels(engine="openai").observe(llm_duration)
-                    return analysis, "openai", llm_duration
-                
-                circuit_breaker.record_failure("openai")
+        try:
+            # Record failover if this isn't the first engine
+            if last_engine:
+                PROM_LLM_FAILOVER_COUNT.labels(from_engine=last_engine, to_engine=engine_name).inc()
+            
+            llm_start = time.perf_counter()
+            result = await engine.analyze_alert(alert_dict)
+            llm_duration = time.perf_counter() - llm_start
+            
+            if result.get("status") == "success":
+                circuit_breaker.record_success(engine_name)
                 update_circuit_breaker_metrics()
-                PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="error").inc()
-                logger.warning(f"OpenAI returned error: {result.get('error')}")
-            except Exception as e:
-                circuit_breaker.record_failure("openai")
-                update_circuit_breaker_metrics()
-                PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="exception").inc()
-                logger.error(f"OpenAI also failed: {e}")
-        else:
-            logger.warning(f"OpenAI also skipped: {cb_reason}")
-            PROM_LLM_REQUESTS_TOTAL.labels(engine="openai", result="circuit_open").inc()
+                analysis = result.get("analysis", {})
+                alert_cache.set(alert_dict, analysis)  # Cache the result
+                PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
+                PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="success").inc()
+                PROM_LLM_LATENCY_SECONDS.labels(engine=engine_name).observe(llm_duration)
+                return analysis, engine_name, llm_duration
+            
+            # Engine returned error
+            circuit_breaker.record_failure(engine_name)
+            update_circuit_breaker_metrics()
+            PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="error").inc()
+            last_error = result.get("error", "Unknown error")
+            logger.warning(f"{engine_name} returned error: {last_error}")
+            last_engine = engine_name
+            
+        except Exception as e:
+            circuit_breaker.record_failure(engine_name)
+            update_circuit_breaker_metrics()
+            PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="exception").inc()
+            last_error = str(e)
+            logger.warning(f"{engine_name} failed: {e}")
+            last_engine = engine_name
     
-    raise Exception("All LLM engines failed or circuits open")
+    raise Exception(f"All LLM engines failed or circuits open. Last error: {last_error}")
 
 # Storage - Using database for persistence (alerts_db kept for backward compatibility)
 alerts_db: List[Dict[str, Any]] = []  # In-memory cache, synced with database
