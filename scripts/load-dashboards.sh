@@ -54,13 +54,28 @@ fi
 
 log_info "✓ Grafana is reachable"
 echo ""
+
+# Function to wait for Grafana (helper)
+wait_for_grafana() {
+    local grafana_url=$1
+    local retries=30
     
-    if [[ $retries -eq 0 ]]; then
-        log_error "Grafana not ready after 60 seconds"
-        exit 1
-    fi
+    while [[ $retries -gt 0 ]]; do
+        if curl -s "${grafana_url}/api/health" | grep -q "ok"; then
+            return 0
+        fi
+        sleep 2
+        ((retries--))
+    done
     
-    log_info "Grafana is ready"
+    log_error "Grafana not ready after 60 seconds"
+    return 1
+}
+
+# Get Grafana URL helper
+get_grafana_url() {
+    local node_ip=$(get_node_ip)
+    echo "http://${node_ip}:30300"
 }
 
 # Import a single dashboard
@@ -262,4 +277,6 @@ main() {
     echo ""
     
     echo -e "${CYAN}════════════════════════════════════════════════${NC}"
+}
+
 main "$@"

@@ -60,4 +60,3 @@ else
 fi
 echo ""
 log_info "✅ Configuration complete"
-fi

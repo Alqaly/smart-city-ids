@@ -194,6 +194,17 @@ done
 
 log_info "Manifests applied successfully"
 
+# Create IDS API ConfigMaps (code + operator UI)
+log_info "Creating IDS API ConfigMaps..."
+kubectl create configmap ids-app-code \
+    --namespace=smart-city \
+    --from-file=services/ids-api/src \
+    --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap ids-app-static \
+    --namespace=smart-city \
+    --from-file=services/ids-api/static \
+    --dry-run=client -o yaml | kubectl apply -f -
+
 # =============================================================================
 # Phase 5: Deploy Falco Runtime Security (with JSON output for forwarder)
 # =============================================================================

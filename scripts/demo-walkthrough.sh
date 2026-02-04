@@ -44,11 +44,9 @@ else
     log_info "Manual mode - press Enter to advance"
 fi
 echo ""
-    else
-        echo -e "${YELLOW}Press ENTER to continue...${NC}"
-        read -r || true
-    fi
-}
+
+# Additional colors needed for demo
+MAGENTA='\033[0;35m'
 
 print_header() {
     echo ""
