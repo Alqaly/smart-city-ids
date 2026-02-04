@@ -8,8 +8,8 @@ metadata:
 data:
   prometheus.yml: |
     global:
-      scrape_interval: 15s
-      evaluation_interval: 15s
+      scrape_interval: 5s
+      evaluation_interval: 5s
     
     scrape_configs:
       # Scrape IDS API metrics
@@ -17,14 +17,24 @@ data:
         static_configs:
           - targets: ['ids-api-service.smart-city.svc.cluster.local:8000']
         metrics_path: '/metrics'
-        scrape_interval: 10s
+        scrape_interval: 5s
 
       # Scrape IDS operator metrics
       - job_name: 'smart-city-ids-operator'
         static_configs:
           - targets: ['ids-operator-metrics.smart-city.svc.cluster.local:8001']
         metrics_path: '/metrics'
-        scrape_interval: 10s
+        scrape_interval: 5s
+
+      # Scrape IoT simulator pods via headless service DNS (no K8s API dependency)
+      - job_name: 'smart-city-iot'
+        dns_sd_configs:
+          - names:
+              - 'iot-simulator-metrics.smart-city.svc.cluster.local'
+            type: 'A'
+            port: 5000
+        metrics_path: '/metrics'
+        scrape_interval: 5s
 
       # Scrape Kubernetes API server
       - job_name: 'kubernetes-apiservers'
