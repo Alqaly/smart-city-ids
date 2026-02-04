@@ -130,6 +130,28 @@ kubectl create namespace smart-city --dry-run=client -o yaml | kubectl apply -f 
 kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
 kubectl create namespace falco-system --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
 
+# =============================================================================
+# Setup Persistent Storage for Prometheus and Grafana (AUTOMATIC)
+# =============================================================================
+log_info "Setting up persistent storage directories..."
+sudo mkdir -p /mnt/smart-city/prometheus
+sudo mkdir -p /mnt/smart-city/grafana
+sudo chmod -R 777 /mnt/smart-city/
+
+# Verify K3s storage class exists
+if ! kubectl get storageclass local-path &>/dev/null 2>&1; then
+    log_info "Creating K3s local-path storage class..."
+    kubectl apply -f - <<'STORAGEEOF'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-path
+provisioner: rancher.io/local-path
+allowVolumeExpansion: true
+STORAGEEOF
+fi
+log_info "Persistent storage configured (Prometheus: 50Gi, Grafana: 10Gi)"
+
 # Apply core manifests
 MANIFEST_DIR="$PROJECT_ROOT/k8s-manifests"
 
