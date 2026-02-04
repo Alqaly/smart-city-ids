@@ -1,11 +1,124 @@
 # Troubleshooting Guide
 
+## Quick Fix Command
+
+**After WiFi change or reboot, run this first:**
+```bash
+./scripts/check-setup.sh
+```
+
+This will:
+- Fix K3s permissions
+- Show current IP and all service URLs
+- Verify cluster and pod status
+
+---
+
 ## Quick Fix Checklist
 
+- [ ] K3s permissions? `sudo chmod 644 /etc/rancher/k3s/k3s.yaml`
+- [ ] KUBECONFIG set? `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`
 - [ ] API key set? `echo $XAI_API_KEY`
 - [ ] Pods running? `kubectl get pods -n smart-city`
-- [ ] No errors? `kubectl logs -n smart-city ids-api`
+- [ ] No errors? `kubectl logs -n smart-city -l app=ids-api --tail=50`
 - [ ] Network working? `ping google.com`
+
+---
+
+## WiFi / IP Changed Issues
+
+### Cannot Access Grafana/Prometheus After WiFi Change
+
+**Error:** `Failed to connect to 172.x.x.x port 30300`
+
+**Cause:** IP address changed when you connected to new WiFi
+
+**Fix:**
+```bash
+# Run the check script to see new IP
+./scripts/check-setup.sh
+
+# Or manually get new IP
+kubectl get nodes -o wide
+# Look at INTERNAL-IP column
+```
+
+---
+
+### K3s Permission Denied
+
+**Error:** `error loading config file "/etc/rancher/k3s/k3s.yaml": permission denied`
+
+**Fix:**
+```bash
+sudo chmod 644 /etc/rancher/k3s/k3s.yaml
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+# Make permanent (add to shell config)
+echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc
+echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.zshrc
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+---
+
+### K3s Not Running After Reboot
+
+**Error:** `The connection to the server localhost:6443 was refused`
+
+**Fix:**
+```bash
+sudo systemctl restart k3s
+sleep 15
+sudo chmod 644 /etc/rancher/k3s/k3s.yaml
+kubectl get nodes
+```
+
+---
+
+## Raspberry Pi Issues
+
+### Pi Cannot Connect to IDS API
+
+**Error:** `Failed to connect to 172.x.x.x port 30800`
+
+**Cause:** IP changed or Pi on different network
+
+**Fix:**
+1. On Kali, get current IP:
+   ```bash
+   ./scripts/check-setup.sh
+   ```
+2. On Pi, update and run:
+   ```bash
+   python3 motion_sensor.py --ids-url http://<NEW_IP>:30800
+   ```
+
+---
+
+### Motion Sensor Always Shows "MOTION!" (Stuck)
+
+**Cause:** Sensor damaged (likely connected to 5V instead of 3.3V)
+
+**Fix:**
+- AM312 sensor MUST use Pin 1 (3.3V), NOT Pin 2 (5V)
+- If damaged, replace sensor (~$2)
+- Temporary workaround: Add cooldown in code or use keyboard simulation
+
+---
+
+### GPIO Busy Error
+
+**Error:** `lgpio.error: 'GPIO busy'`
+
+**Cause:** Previous Python process still holding GPIO
+
+**Fix:**
+```bash
+sudo killall python3
+sleep 2
+python3 motion_sensor.py --ids-url http://<IP>:30800
+```
 
 ---
 

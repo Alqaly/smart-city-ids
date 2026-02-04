@@ -63,8 +63,8 @@ Attack Simulator → Container Runtime → Falco/Suricata → Forwarder → IDS 
 | 2. Syscall detected | Falco rule name + output |
 | 3. Alert forwarded | Forwarder log + HTTP POST |
 | 4. Alert stored | PostgreSQL `alerts` table |
-| 5. LLM analyzed | `llm_analysis_duration_seconds` metric |
-| 6. Action taken | `automated_actions_total{action}` metric |
+| 5. LLM analyzed | `smartcity_ids_llm_latency_seconds` metric |
+| 6. Action taken | `smartcity_ids_actions_executed_total{action}` metric |
 
 ---
 
@@ -174,26 +174,32 @@ A: Falco and Suricata rule sets are maintained by security communities (Falco Pr
 
 ```promql
 # Alert rate during attack window
-rate(alerts_total[5m])
+rate(smartcity_ids_alerts_received_total[5m])
 
 # Severity distribution during attack
-histogram_quantile(0.95, security_alert_severity_bucket)
+sum by (severity) (smartcity_ids_severity_total)
 
 # Automated actions triggered
-increase(automated_actions_total[5m])
+increase(smartcity_ids_actions_executed_total[5m])
 
 # LLM latency under load
-histogram_quantile(0.95, llm_analysis_duration_seconds_bucket)
+histogram_quantile(0.95, rate(smartcity_ids_llm_latency_seconds_bucket[5m]))
+
+# Time to mitigation (decision-to-action)
+histogram_quantile(0.95, sum(rate(smartcity_ids_time_to_mitigation_seconds_bucket[5m])) by (le))
+
+# LLM decision outcomes
+sum by (outcome) (increase(smartcity_ids_llm_decision_outcome_total[5m]))
 ```
 
 ### Expected Observations
 
 | Metric | Baseline | During Attack | Recovery |
 |--------|----------|---------------|----------|
-| `alerts_total` rate | <1/min | 10-50/min | <1/min |
-| `severity` p95 | 3-4 | 7-9 | 3-4 |
-| `automated_actions_total` | 0 | 1-5 | 0 |
-| `llm_analysis_duration` | <2s | 2-5s | <2s |
+| `smartcity_ids_alerts_received_total` rate | <1/min | 10-50/min | <1/min |
+| `smartcity_ids_severity_total` | Mostly 3-4 | 7-9 | 3-4 |
+| `smartcity_ids_actions_executed_total` | 0 | 1-5 | 0 |
+| `smartcity_ids_llm_latency_seconds` p95 | <2s | 2-5s | <2s |
 
 ---
 

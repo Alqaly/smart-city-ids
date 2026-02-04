@@ -41,7 +41,7 @@ Technical architecture documentation for the LLM-driven Intrusion Detection Syst
 │  │  │                                                                  │   ││
 │  │  │  ┌─────────────────────────────────────────────────────────────┐│   ││
 │  │  │  │                     PostgreSQL                              ││   ││
-│  │  │  │              (Alert history & metrics)                      ││   ││
+│  │  │  │ (alerts, analysis_results, automation_actions, audit_logs)  ││   ││
 │  │  │  └─────────────────────────────────────────────────────────────┘│   ││
 │  │  └─────────────────────────────────────────────────────────────────┘   ││
 │  │                             │                                          ││
@@ -69,7 +69,7 @@ Technical architecture documentation for the LLM-driven Intrusion Detection Syst
 |------|---------|
 | `main.py` | FastAPI application, alert endpoints, automation orchestration |
 | `config.py` | Environment configuration, validation |
-| `database.py` | PostgreSQL connection, alert persistence |
+| `database.py` | PostgreSQL connection, alerts, analysis results, actions, audit logs |
 | `llm_engine_xai.py` | xAI Grok integration for threat analysis |
 | `llm_engine_openai.py` | OpenAI GPT fallback |
 | `k8s_automation.py` | Kubernetes actions (isolate, scale, evict) |
@@ -203,11 +203,19 @@ def isolate_pod(pod_name, namespace):
 IDS API ──(metrics)──► Prometheus ──(queries)──► Grafana
     │
     └── /metrics endpoint exposes:
-        - alerts_total (counter)
-        - alerts_by_severity (histogram)
-        - llm_response_time (gauge)
-        - actions_taken (counter)
+        - smartcity_ids_alerts_received_total (counter)
+        - smartcity_ids_severity_total (counter)
+        - smartcity_ids_llm_latency_seconds (histogram)
+        - smartcity_ids_actions_executed_total (counter)
+        - smartcity_ids_time_to_mitigation_seconds (histogram)
+        - smartcity_ids_llm_decision_outcome_total (counter)
 ```
+
+### Metrics Source of Truth
+
+The IDS API is the authoritative source of IDS metrics. Prometheus scrapes
+`/metrics` directly from the IDS API on port `8000` and Grafana uses those
+`smartcity_ids_*` series as the monitoring ground truth.
 
 ---
 
@@ -283,6 +291,7 @@ The IDS API service account has permissions to:
 | LLM response time | 1-3s | Depends on provider |
 | Prometheus scrape interval | 15s | Configurable |
 | Alert retention | 30 days | PostgreSQL storage |
+| Automation/Audit retention | 180 days | Governance traceability |
 
 ---
 
@@ -303,8 +312,8 @@ The IDS API service account has permissions to:
 ### Custom Dashboards
 
 1. Export from Grafana as JSON
-2. Place in `infrastructure/monitoring/grafana-dashboards/`
-3. Run `scripts/load-dashboards.sh`
+2. Place in `infrastructure/monitoring/`
+3. Run `scripts/generate-grafana-provisioning.sh` and apply `k8s-manifests/grafana-provisioning-dashboards.yaml`
 
 ---
 

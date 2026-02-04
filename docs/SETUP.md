@@ -213,12 +213,65 @@ curl http://${NODE_IP}:30800/docs
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | Grafana | http://NODE_IP:30300 | admin / admin |
-| Prometheus | http://NODE_IP:31701 | - |
+| Prometheus | http://NODE_IP:31106 | - |
 | IDS API Docs | http://NODE_IP:30800/docs | - |
+
+**Tip:** Run `./scripts/check-setup.sh` to see all URLs with current IP.
+
+---
+
+## Raspberry Pi Motion Sensor Setup
+
+### Hardware Required
+
+- Raspberry Pi 5 (or 4)
+- AM312 PIR Motion Sensor (3.3V)
+- 3 jumper wires
+
+### Wiring (AM312 - 3.3V)
+
+```
+AM312 PIR Sensor       Raspberry Pi
+═════════════════      ═════════════════
+VCC (Left)     ─────►  Pin 1  (3.3V)  ⚠️ NOT Pin 2 (5V)!
+OUT (Middle)   ─────►  Pin 11 (GPIO 17)
+GND (Right)    ─────►  Pin 6  (Ground)
+```
+
+### Software Setup (on Pi)
+
+```bash
+# Install dependencies
+sudo apt update && sudo apt install python3-pip python3-gpiozero -y
+pip3 install requests --break-system-packages
+
+# Copy motion sensor script from laptop
+scp /home/kali/smart-city-ids/raspberry-pi/motion_sensor.py pi@<PI_IP>:/home/pi/
+
+# Run sensor (replace IP with your Kali IP)
+python3 motion_sensor.py --ids-url http://<KALI_IP>:30800
+```
+
+### Get Current IPs
+
+```bash
+# On Kali - get all URLs including Pi command
+./scripts/check-setup.sh
+
+# Find Pi on network
+nmap -sn 192.168.1.0/24 | grep -i raspberry
+```
 
 ---
 
 ## Troubleshooting
+
+### WiFi Changed / IP Issues
+
+```bash
+# Run this after WiFi change or reboot
+./scripts/check-setup.sh
+```
 
 ### K3s Won't Start
 
@@ -272,9 +325,12 @@ kubectl logs -n smart-city <pod-name> -f
 
 After successful deployment:
 
-1. **Import Grafana Dashboard:** Go to Grafana → Import → Upload `infrastructure/monitoring/grafana-dashboards/`
-2. **Run Attack Simulation:** `python attack-simulator/ddos_simulator.py http://NODE_IP:30800 5 10`
-3. **Read Operations Guide:** See [OPERATIONS.md](OPERATIONS.md)
+1. **Check System:** Run `./scripts/check-setup.sh` to verify everything
+2. **Import Grafana Dashboard:** Go to Grafana → Import → Upload `infrastructure/monitoring/grafana-dashboard-ieee-improved.json`
+3. **Connect Raspberry Pi:** Set up motion sensor following guide above
+4. **Run Attack Simulation:** `python attack-simulator/ddos_simulator.py http://NODE_IP:30800 5 10`
+5. **Run Demo:** `./scripts/demo-walkthrough.sh`
+6. **Read Operations Guide:** See [OPERATIONS.md](OPERATIONS.md)
 
 ---
 

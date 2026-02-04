@@ -83,25 +83,36 @@ In Grafana, monitor these panels:
 
 | Metric | Warning Threshold | Action |
 |--------|-------------------|--------|
-| `alerts_total` rate | >50/min | Check for attack or misconfiguration |
-| `llm_response_time` | >5s | Check LLM API status |
-| `severity_distribution` | Many 8+ | Review automated actions |
+| `smartcity_ids_alerts_received_total` rate | >50/min | Check for attack or misconfiguration |
+| `smartcity_ids_llm_latency_seconds` p95 | >5s | Check LLM API status |
+| `smartcity_ids_severity_total` | Many 8+ | Review automated actions |
 | Pod CPU/Memory | >80% | Consider scaling |
 
 ### Prometheus Queries
 
 ```promql
 # Total alerts in last hour
-increase(alerts_total[1h])
+sum(increase(smartcity_ids_alerts_received_total[1h]))
 
 # Alerts by severity
-sum by (severity) (alerts_total)
+sum by (severity) (smartcity_ids_severity_total)
 
 # LLM response time (95th percentile)
-histogram_quantile(0.95, rate(llm_response_time_bucket[5m]))
+histogram_quantile(0.95, rate(smartcity_ids_llm_latency_seconds_bucket[5m]))
 
 # Actions taken
-sum by (action) (actions_total)
+sum by (action) (smartcity_ids_actions_executed_total)
+
+# Time to mitigation (p95)
+histogram_quantile(0.95, sum(rate(smartcity_ids_time_to_mitigation_seconds_bucket[5m])) by (le))
+```
+
+### Reading Histogram Percentiles in Grafana
+
+Use `histogram_quantile()` on the `_bucket` series to compute p50/p95/p99. Example:
+
+```promql
+histogram_quantile(0.95, sum(rate(smartcity_ids_alert_processing_seconds_bucket[5m])) by (le))
 ```
 
 ---
@@ -169,6 +180,40 @@ curl -X POST http://NODE_IP:30800/api/alerts \
 # Check if network policy was created
 kubectl get networkpolicies -n smart-city
 ```
+
+---
+
+## Demo Verification Checklist (Must Pass)
+
+Use this checklist before any examiner/demo session:
+
+1. **Prometheus Targets Up**
+   ```bash
+   kubectl exec -n monitoring deploy/prometheus -- /bin/sh -c \
+     "wget -qO- http://localhost:9090/api/v1/targets | grep -q 'smart-city-ids' && echo OK"
+   ```
+2. **IDS API Metrics Present**
+   ```bash
+   kubectl exec -n monitoring deploy/prometheus -- /bin/sh -c \
+     "wget -qO- 'http://localhost:9090/api/v1/query?query=sum(smartcity_ids_alerts_received_total)'"
+   ```
+3. **LLM Activity Visible**
+   ```bash
+   kubectl exec -n monitoring deploy/prometheus -- /bin/sh -c \
+     "wget -qO- 'http://localhost:9090/api/v1/query?query=sum(smartcity_ids_llm_requests_total)'"
+   ```
+4. **Forwarder → IDS API Pipeline**
+   - Check Falco forwarder logs:
+     ```bash
+     kubectl logs -n falco-system -l app=falco-forwarder --tail=20
+     ```
+   - Check Suricata forwarder logs:
+     ```bash
+     kubectl logs -n suricata-system -l app=suricata-forwarder --tail=20
+     ```
+5. **Grafana Dashboard Freshness**
+   - Open `Smart City IDS - IEEE Capstone II (Improved)`.
+   - Confirm panels show values from last 15 minutes (queries use `increase()`/`rate()`).
 
 ---
 
