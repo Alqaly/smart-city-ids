@@ -934,16 +934,39 @@ def require_auth(token: str = None) -> str:
 async def health():
     uptime = (datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds()
     PROM_UPTIME_SECONDS.set(uptime)
+    
+    # Build comprehensive LLM engine status
+    llm_status = {}
+    for engine_name in ["xai", "anthropic", "openai", "gemini", "kimi"]:
+        engine = llm_engines.get(engine_name)
+        cb_stats = circuit_breaker.engine_stats.get(engine_name, {})
+        cb_state = cb_stats.get("state", "unknown")
+        if engine:
+            llm_status[engine_name] = f"connected (circuit: {cb_state})"
+        else:
+            llm_status[engine_name] = "no-api-key"
+    
+    # Check database connection
+    db_status = "postgresql" if not db.use_memory else "memory-fallback"
+    
+    # Get Suricata forwarder status (check if target is up via config)
+    suricata_status = "enabled" if Config.SURICATA_ENABLED else "disabled"
+    
     return {
         "status": "healthy",
         "components": {
-            "xai_grok4": "connected" if xai_engine else "disconnected",
-            "openai": "connected" if openai_engine else "disconnected",
+            "llm_engines": llm_status,
             "kubernetes": "connected" if k8s_automation else "disconnected",
-            "falco": "enabled"
+            "database": db_status,
+            "falco": "enabled" if Config.FALCO_ENABLED else "disabled",
+            "suricata": suricata_status
         },
+        "active_llm_engines": list(llm_engines.keys()),
+        "llm_priority": Config.get_engine_priority(),
+        "circuit_breaker_states": {k: v.get("state", "unknown") for k, v in circuit_breaker.engine_stats.items()},
         "uptime_seconds": uptime,
-        "total_alerts_processed": metrics["total_alerts"]
+        "total_alerts_processed": metrics["total_alerts"],
+        "storage_type": db_status
     }
 
 @app.get("/api/safety")

@@ -19,10 +19,17 @@ data:
         metrics_path: '/metrics'
         scrape_interval: 5s
 
-      # Scrape IDS operator metrics
-      - job_name: 'smart-city-ids-operator'
+      # Scrape Suricata forwarder metrics
+      - job_name: 'suricata-forwarder'
         static_configs:
-          - targets: ['ids-operator-metrics.smart-city.svc.cluster.local:8001']
+          - targets: ['suricata-forwarder.monitoring.svc.cluster.local:8100']
+        metrics_path: '/metrics'
+        scrape_interval: 5s
+
+      # Scrape Falco forwarder metrics (if exposed)
+      - job_name: 'falco-forwarder'
+        static_configs:
+          - targets: ['falco-forwarder.falco-system.svc.cluster.local:8080']
         metrics_path: '/metrics'
         scrape_interval: 5s
 

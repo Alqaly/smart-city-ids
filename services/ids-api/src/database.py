@@ -197,6 +197,36 @@ class Database:
             self._memory_alerts.append(alert)
             return alert["id"]
 
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO alerts (source, rule, priority, severity, summary, threat_type,
+                                        recommendations, automated_actions, raw_alert, analysis, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    alert.get("source"),
+                    alert.get("rule"),
+                    alert.get("priority"),
+                    alert.get("severity"),
+                    alert.get("summary"),
+                    alert.get("threat_type"),
+                    json.dumps(alert.get("recommendations", [])),
+                    json.dumps(alert.get("automated_actions", [])),
+                    json.dumps(alert.get("raw_alert", {})),
+                    json.dumps(alert.get("analysis", {})),
+                    alert.get("timestamp", datetime.now())
+                ))
+                alert_id = cur.fetchone()[0]
+                logger.info(f"✅ Alert stored in PostgreSQL: id={alert_id}")
+                return alert_id
+        except Exception as e:
+            logger.error(f"Error adding alert to PostgreSQL: {e}")
+            # Fallback to memory
+            alert["id"] = len(self._memory_alerts) + 1
+            self._memory_alerts.append(alert)
+            return alert["id"]
+
     def add_analysis_result(self, alert_id: int, result: Dict[str, Any]) -> int:
         """Add LLM analysis result for an alert."""
         record = {
