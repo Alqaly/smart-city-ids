@@ -21,6 +21,22 @@ log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 log_error() { echo -e "${RED}[✗]${NC} $1"; }
 log_section() { echo ""; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${BLUE}$1${NC}"; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 
+# =============================================================================
+# KUBECONFIG Setup (Permanent)
+# =============================================================================
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+
+# Make KUBECONFIG permanent in user's profile
+setup_kubeconfig_permanent() {
+    for profile in ~/.bashrc ~/.zshrc ~/.profile; do
+        if [ -f "$profile" ]; then
+            if ! grep -q "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" "$profile"; then
+                echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$profile"
+            fi
+        fi
+    done
+}
+
 # Ensure we're running as root
 if [[ $EUID -ne 0 ]]; then
     log_warn "This script requires root privileges. Re-invoking with sudo..."
@@ -28,6 +44,7 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 cd "$PROJECT_ROOT"
+setup_kubeconfig_permanent
 
 log_section "🚀 Smart City IDS - Complete System Deployment"
 
@@ -281,9 +298,14 @@ echo -e "${GREEN}✓ Deployment Complete!${NC}"
 echo ""
 echo "Access your Smart City IDS system at:"
 echo ""
-echo -e "  ${BLUE}Grafana Dashboards:${NC}     http://$NODE_IP:30300"
-echo -e "  ${BLUE}Prometheus Metrics:${NC}      http://$NODE_IP:31106"
-echo -e "  ${BLUE}IDS API Documentation:${NC}   http://$NODE_IP:30800/docs"
+echo -e "  ${BLUE}🎯 Dashboard:${NC}              http://localhost:8000/ui"
+echo -e "  ${BLUE}📊 API Documentation:${NC}      http://localhost:8000/docs"
+echo -e "  ${BLUE}📈 Grafana Dashboards:${NC}     http://$NODE_IP:30300"
+echo -e "  ${BLUE}📉 Prometheus Metrics:${NC}      http://$NODE_IP:31106"
+echo ""
+echo -e "${YELLOW}Login Credentials:${NC}"
+echo "  Username: operator"
+echo "  Password: operator"
 echo ""
 echo -e "${YELLOW}Quick Commands:${NC}"
 echo "  View all pods:           kubectl get pods -A"
@@ -294,6 +316,35 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 log_info "✅ Smart City IDS is now running!"
-echo "  View logs:      kubectl logs -n smart-city -l app=ids-api -f"
-echo "  Port forward:   kubectl port-forward svc/traffic-camera-service 8001:80 -n smart-city"
+echo "  KUBECONFIG: $KUBECONFIG (permanent in ~/.bashrc, ~/.zshrc)"
+echo ""
+
+# =============================================================================
+# Auto Port-Forward Setup
+# =============================================================================
+log_section "PHASE 9: Setting Up Port-Forwarding"
+
+# Kill any existing port-forwards
+pkill -f "kubectl port-forward.*ids-api" 2>/dev/null || true
+sleep 1
+
+# Create background port-forward
+nohup kubectl port-forward -n smart-city svc/ids-api-service 8000:8000 > /tmp/ids-api-portforward.log 2>&1 &
+PID=$!
+echo $PID > /tmp/ids-api-portforward.pid
+
+# Wait for port-forward to connect
+sleep 2
+
+# Test connection
+if curl -s http://localhost:8000/ > /dev/null 2>&1; then
+    log_info "✅ Port-forward successful (localhost:8000 → IDS API)"
+    echo ""
+    echo -e "${GREEN}🎉 Dashboard ready at:${NC} http://localhost:8000/ui"
+    echo ""
+else
+    log_warn "Port-forward started but connection test failed"
+    echo "Try manually: kubectl port-forward -n smart-city svc/ids-api-service 8000:8000"
+    echo "Or access on NodePort: http://localhost:30800/ui"
+fi
 echo ""
