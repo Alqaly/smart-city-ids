@@ -4,6 +4,47 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [Infrastructure] Alert Pipeline & Deployment Fixes - 2026-02-04
+
+### Bug Fixes
+
+**1. Database Indentation Error** (`services/ids-api/src/database.py`)
+- Fixed Python indentation error on line 535 in `cleanup_old_data()` method
+- The `deleted` dictionary was incorrectly indented inside the `cutoffs` dictionary block
+- This was causing `IndentationError: unexpected indent` on IDS API startup
+
+**2. Falco JSON Output Configuration** (`k8s-manifests/falco-values.yaml`)
+- Created Helm values file to ensure Falco outputs JSON format
+- Required for Falco forwarder integration (forwarder expects JSON, not plain text)
+- Includes: `json_output: true`, `json_include_output_property: true`, `json_include_output_fields_property: true`
+- Resource limits optimized for single-node K3s (8GB RAM)
+
+### Deployment Script Improvements
+
+**Updated `scripts/start-everything.sh`:**
+- **Phase 5**: Added Falco Helm deployment with JSON output enabled
+  - Automatically installs Helm if not present
+  - Uses `falco-values.yaml` for JSON output configuration
+  - Handles both fresh install and upgrade scenarios
+- **Phase 6**: Changed IoT emulation to use existing `iot-simulator/k8s-enhanced.yaml`
+  - Removed problematic 100-pod deployment using remote image
+  - Now uses local manifest with controlled replicas (5 high + 10 medium + 5 burst = 20 pods)
+  - Uses existing MQTT device emulation code
+- **Phase 7**: Added Falco readiness wait
+- **Phase 8-10**: Renumbered phases for clarity
+- Updated quick commands to include Falco log watching
+
+### Alert Pipeline
+
+The complete alert pipeline is now functional:
+1. **Falco** detects security events → outputs JSON
+2. **Falco Forwarder** reads Falco logs → parses JSON → POSTs to IDS API
+3. **IDS API** receives alerts → LLM analysis → Kubernetes automation
+4. **Prometheus** scrapes metrics from IDS API
+5. **Grafana** displays dashboards with live data
+
+---
+
 ## [Capstone III] Operator Interface & Human-in-the-Loop Governance - 2026-02-04
 
 ### Major Feature: PhD-Level Operator Interface
@@ -37,6 +78,10 @@ Implemented transparent, explainable, controllable human-in-the-loop security go
   - Mitigating factors (false positive checks)
   - Detailed reasoning field (plain English explanation)
   - Updated prompts emphasize transparent analysis for operator review
+
+### Fixes
+- Operator Web UI now ships inside the IDS API container image.
+- `/ui` resolves static files reliably in both dev and container layouts.
   - Fallback responses include confidence, not just severity
 
 **4. Operator API Endpoints** (`/api/operator/`)

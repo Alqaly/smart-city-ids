@@ -532,7 +532,7 @@ class Database:
             "automation_actions": datetime.now() - timedelta(days=automation_days),
             "audit_logs": datetime.now() - timedelta(days=audit_days),
         }
-            deleted = {"alerts": 0, "iot_events": 0, "automation_actions": 0, "audit_logs": 0}
+        deleted = {"alerts": 0, "iot_events": 0, "automation_actions": 0, "audit_logs": 0}
 
         if self.use_memory or not self._ensure_connection():
             before = len(self._memory_alerts)

@@ -1,0 +1,45 @@
+# =============================================================================
+# Falco Helm Values - Smart City IDS
+# JSON output enabled by default for integration with IDS forwarder
+# =============================================================================
+# Install with: helm install falco falcosecurity/falco -n falco-system -f falco-values.yaml
+# =============================================================================
+
+# Enable JSON output (REQUIRED for forwarder integration)
+falco:
+  json_output: true
+  json_include_output_property: true
+  json_include_output_fields_property: true
+  json_include_tags_property: true
+  log_stderr: true
+  log_syslog: false
+  log_level: info
+
+# Resource limits optimized for single-node K3s (8GB RAM)
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Use modern eBPF driver (works without kernel headers)
+driver:
+  enabled: true
+  kind: modern_ebpf
+
+# Enable container metadata enrichment
+collectors:
+  enabled: true
+  kubernetes:
+    enabled: true
+
+# Disable unused outputs to reduce overhead
+falcosidekick:
+  enabled: false
+
+# Disable metrics server (we use forwarder → IDS API → Prometheus)
+webserver:
+  enabled: true
+  prometheus_metrics_enabled: false

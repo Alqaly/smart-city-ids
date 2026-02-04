@@ -195,57 +195,55 @@ done
 log_info "Manifests applied successfully"
 
 # =============================================================================
-# Phase 5: Deploy IoT Device Emulation (100 devices)
+# Phase 5: Deploy Falco Runtime Security (with JSON output for forwarder)
 # =============================================================================
-log_section "PHASE 5: IoT Device Emulation Deployment"
+log_section "PHASE 5: Falco Runtime Security Deployment"
 
-# Create IoT device emulation manifest dynamically
-log_info "Creating unified IoT device emulation (100 pods)..."
-cat > /tmp/iot-device-emulation.yaml <<'IOTEOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: iot-device-emulation
-  namespace: smart-city
-  labels:
-    app.kubernetes.io/name: iot-device-emulation
-spec:
-  replicas: 100
-  selector:
-    matchLabels:
-      app: iot-device-emulation
-  template:
-    metadata:
-      labels:
-        app: iot-device-emulation
-        emulation-tier: production
-    spec:
-      containers:
-      - name: mqtt-simulator
-        image: ghcr.io/agazitt/smart-city-ids/iot-simulator:latest
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: MQTT_BROKER_HOST
-          value: "mqtt-broker.smart-city.svc.cluster.local"
-        - name: MQTT_BROKER_PORT
-          value: "1883"
-        resources:
-          requests:
-            cpu: "50m"
-            memory: "64Mi"
-          limits:
-            cpu: "100m"
-            memory: "128Mi"
-IOTEOF
+# Check if Helm is installed
+if ! command -v helm &> /dev/null; then
+    log_info "Installing Helm..."
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+fi
 
-kubectl apply -f /tmp/iot-device-emulation.yaml
+# Add Falco Helm repo
+helm repo add falcosecurity https://falcosecurity.github.io/charts 2>/dev/null || true
+helm repo update 2>/dev/null || true
 
-log_info "IoT emulation deployment created (100 replicas)"
+# Install/upgrade Falco with JSON output enabled (required for forwarder integration)
+if helm status falco -n falco-system &>/dev/null; then
+    log_info "Upgrading Falco with JSON output enabled..."
+    helm upgrade falco falcosecurity/falco -n falco-system \
+        -f "$PROJECT_ROOT/k8s-manifests/falco-values.yaml" \
+        --wait --timeout 120s 2>&1 | tail -3 || true
+else
+    log_info "Installing Falco with JSON output enabled..."
+    helm install falco falcosecurity/falco -n falco-system \
+        -f "$PROJECT_ROOT/k8s-manifests/falco-values.yaml" \
+        --wait --timeout 180s 2>&1 | tail -3 || true
+fi
+
+log_info "Falco deployed with JSON output for IDS integration"
 
 # =============================================================================
-# Phase 6: Wait for Services to be Ready
+# Phase 6: Deploy IoT Device Emulation (Controlled Scale)
 # =============================================================================
-log_section "PHASE 6: Waiting for Services to Be Ready"
+log_section "PHASE 6: IoT Device Emulation Deployment"
+
+# Use the existing enhanced IoT emulation manifest with controlled replicas
+# This deploys 3 device classes: high-frequency (5), medium-frequency (10), burst (5)
+# Total: 20 pods generating realistic MQTT traffic patterns
+if [[ -f "$PROJECT_ROOT/iot-simulator/k8s-enhanced.yaml" ]]; then
+    log_info "Deploying IoT device emulation from iot-simulator/k8s-enhanced.yaml..."
+    kubectl apply -f "$PROJECT_ROOT/iot-simulator/k8s-enhanced.yaml" 2>&1 | grep -E "(created|configured|unchanged)" | head -5 || true
+    log_info "IoT emulation deployed: 5 high-freq + 10 medium-freq + 5 burst = 20 devices"
+else
+    log_warn "iot-simulator/k8s-enhanced.yaml not found, skipping IoT emulation"
+fi
+
+# =============================================================================
+# Phase 7: Wait for Services to be Ready
+# =============================================================================
+log_section "PHASE 7: Waiting for Services to Be Ready"
 
 log_info "Waiting for IDS API to be ready..."
 kubectl wait --for=condition=ready pod -l app=ids-api -n smart-city --timeout=120s 2>/dev/null || true
@@ -256,17 +254,20 @@ kubectl wait --for=condition=ready pod -l app=prometheus -n monitoring --timeout
 log_info "Waiting for Grafana to be ready..."
 kubectl wait --for=condition=ready pod -l app=grafana -n monitoring --timeout=60s 2>/dev/null || true
 
+log_info "Waiting for Falco to be ready..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=falco -n falco-system --timeout=120s 2>/dev/null || true
+
 log_info "Waiting for IoT device emulation pods to initialize..."
-sleep 10
+sleep 5
 
 # Count ready pods
-READY_PODS=$(kubectl get pods -n smart-city -l app=iot-device-emulation --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-log_info "$READY_PODS / 100 IoT device emulation pods are running"
+IOT_PODS=$(kubectl get pods -n smart-city -l app=iot-simulator --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+log_info "$IOT_PODS IoT emulation pods are running"
 
 # =============================================================================
-# Phase 7: Verify Kubernetes Organization
+# Phase 8: Verify Kubernetes Organization
 # =============================================================================
-log_section "PHASE 7: System Health Check"
+log_section "PHASE 8: System Health Check"
 
 echo ""
 log_info "Kubernetes Cluster Status:"
@@ -275,7 +276,7 @@ echo ""
 
 log_info "Smart City Namespace Pods:"
 kubectl get pods -n smart-city --no-headers 2>/dev/null | wc -l | xargs echo "  Total pods:"
-kubectl get pods -n smart-city -o wide 2>/dev/null | grep -E "(ids-api|postgres|mqtt|traffic-camera)" | head -5 || true
+kubectl get pods -n smart-city -o wide 2>/dev/null | grep -E "(ids-api|postgres|mqtt|traffic-camera|iot-simulator)" | head -5 || true
 
 echo ""
 log_info "Monitoring Stack:"
@@ -286,9 +287,9 @@ log_info "Security Tools:"
 kubectl get pods -n falco-system --no-headers 2>/dev/null | wc -l | xargs echo "  Falco system pods:"
 
 # =============================================================================
-# Phase 8: Display Service URLs
+# Phase 9: Display Service URLs
 # =============================================================================
-log_section "PHASE 8: Service Endpoints"
+log_section "PHASE 9: Service Endpoints"
 
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
@@ -310,7 +311,8 @@ echo ""
 echo -e "${YELLOW}Quick Commands:${NC}"
 echo "  View all pods:           kubectl get pods -A"
 echo "  Watch IDS API logs:      kubectl logs -f -n smart-city -l app=ids-api"
-echo "  Scale IoT devices:       kubectl scale deployment/iot-device-emulation --replicas=50 -n smart-city"
+echo "  Watch Falco alerts:      kubectl logs -f -n falco-system -l app.kubernetes.io/name=falco"
+echo "  Scale IoT emulation:     kubectl scale deployment/iot-simulator-high -n smart-city --replicas=10"
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
@@ -322,7 +324,7 @@ echo ""
 # =============================================================================
 # Auto Port-Forward Setup
 # =============================================================================
-log_section "PHASE 9: Setting Up Port-Forwarding"
+log_section "PHASE 10: Setting Up Port-Forwarding"
 
 # Kill any existing port-forwards
 pkill -f "kubectl port-forward.*ids-api" 2>/dev/null || true
