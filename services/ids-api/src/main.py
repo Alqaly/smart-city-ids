@@ -31,6 +31,7 @@ from llm_engine_openai import OpenAIAnalyzer
 from k8s_automation import K8sAutomation
 from database import db
 from alert_deduplicator import AlertDeduplicator, AlertBatcher
+from operator_interface import operator_interface
 
 # Configure logging
 logging.basicConfig(
@@ -979,7 +980,95 @@ async def action_history(limit: int = 50):
     """Get recent action history for audit trail."""
     return {"history": governance.get_action_history(limit)}
 
-# ============== END GOVERNANCE API ==============
+# ============== OPERATOR INTERFACE API ==============
+# PhD-Level Governance: Transparent, Evidence-Based, Human-Controlled
+
+@app.get("/api/operator/incidents")
+async def get_incidents_dashboard(limit: int = 50):
+    """Operator dashboard: recent incidents with summaries and governance info.
+    
+    Returns:
+        - Incident summaries (plain language, not technical)
+        - Evidence (what Falco/Suricata actually detected)
+        - Confidence scores (how certain is the analysis)
+        - Reasoning (why the LLM reached this conclusion)
+        - Actions (what's available, what needs approval, what's blocked)
+    """
+    dashboard = operator_interface.get_dashboard(limit=limit)
+    return dashboard.dict()
+
+@app.get("/api/operator/incident/{incident_id}")
+async def get_incident_detail(incident_id: int):
+    """Get detailed view of a single incident.
+    
+    Includes:
+    - Complete incident summary
+    - Full evidence from Falco/Suricata
+    - LLM reasoning chain
+    - Confidence score and mitigating factors
+    - Available actions with governance constraints
+    - Automation status (what runs automatically vs needs approval)
+    """
+    incident = operator_interface.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    return incident.dict()
+
+@app.get("/api/operator/evidence/{incident_id}")
+async def get_incident_evidence(incident_id: int):
+    """Get raw evidence for an incident.
+    
+    Returns original alert excerpts from Falco and Suricata,
+    useful for deep-dive investigation and correlation.
+    """
+    incident = operator_interface.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    return {
+        "incident_id": incident_id,
+        "timestamp": incident.timestamp.isoformat(),
+        "evidence": [e.dict() for e in incident.evidence]
+    }
+
+@app.get("/api/operator/reasoning/{incident_id}")
+async def get_incident_reasoning(incident_id: int):
+    """Get LLM reasoning for an incident.
+    
+    Returns:
+    - Threat classification
+    - Key indicators (top signals that led to assessment)
+    - Mitigating factors (why this might be false positive)
+    - Confidence score and level
+    - Plain English explanation
+    
+    This allows operators to understand AND verify the LLM's logic.
+    """
+    incident = operator_interface.get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    return {
+        "incident_id": incident_id,
+        "reasoning": incident.reasoning.dict(),
+        "llm_model": incident.llm_model_used,
+        "analysis_time_ms": incident.analysis_duration_ms
+    }
+
+@app.get("/api/operator/metrics")
+async def get_operator_metrics():
+    """Get operator dashboard metrics.
+    
+    Returns:
+    - Average analysis time
+    - Average confidence score
+    - Operator approval/rejection rates
+    - Incident volume trends
+    
+    Helps supervisor understand system performance and operator workload.
+    """
+    metrics = operator_interface.get_metrics()
+    return metrics.dict()
+
+# ============== END OPERATOR INTERFACE ==============
 
 @app.post("/api/alerts")
 async def process_alert(alert: Alert, request: Request, token = Depends(verify_token)) -> AlertResponse:
@@ -1193,6 +1282,21 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         for action in action_records:
             action["alert_id"] = alert_id
             db.add_automation_action(action)
+        
+        # Build operator interface incident (PhD-level governance view)
+        try:
+            operator_incident = operator_interface.build_incident_for_operator(
+                alert_id=alert_id,
+                alert_data=alert.dict(),
+                analysis=analysis,
+                llm_model_used=llm_used,
+                analysis_duration_ms=int(llm_latency * 1000),
+                automation_mode=Config.AUTOMATION_MODE,
+                protected_services=Config.PROTECTED_SERVICES
+            )
+            logger.info(f"✓ Built operator incident view: confidence={operator_incident.reasoning.confidence_score:.0%}")
+        except Exception as e:
+            logger.warning(f"Could not build operator incident: {e}")
         
         # Also keep in memory for quick access
         alerts_db.append(alert_record)

@@ -109,18 +109,22 @@ Be concise, accurate, and security-focused. Always respond with valid JSON only.
                 "summary": content[:300] if len(content) > 300 else content,
                 "severity": 7,
                 "threat_type": "Unknown",
+                "confidence": 0.65,
+                "key_indicators": ["Alert triggered", "Requires investigation"],
+                "mitigating_factors": ["Analysis uncertain due to parsing error"],
                 "business_impact": "Potential security incident requiring investigation",
+                "reasoning": "Fallback analysis due to LLM response parsing error. Manual review recommended.",
                 "recommendations": ["Investigate immediately", "Review system logs", "Check for indicators of compromise"],
-                "automated_actions": ["isolate_pod"]
+                "automated_actions": []
             }
     
     def _build_prompt(self, alert: Dict[str, Any]) -> str:
-        """Build analysis prompt from alert"""
+        """Build analysis prompt from alert - includes confidence and reasoning requirements"""
         
         # Handle both Falco and normalized alert formats
         if 'output' in alert:
             # Falco format
-            return f"""Analyze this security alert from Smart City infrastructure:
+            return f"""Analyze this security alert from Smart City infrastructure.
 
 **Alert Output:** {alert.get('output', 'N/A')}
 **Priority:** {alert.get('priority', 'N/A')}
@@ -129,12 +133,23 @@ Be concise, accurate, and security-focused. Always respond with valid JSON only.
 **Container:** {alert.get('output_fields', {}).get('container.name', 'Unknown')}
 **Process:** {alert.get('output_fields', {}).get('proc.cmdline', 'Unknown')}
 
+Provide TRANSPARENT analysis for human operator review:
+1. Assess threat type and severity (1-10)
+2. Provide confidence score (0.0-1.0) based on evidence strength
+3. List key indicators that support this assessment
+4. Note any mitigating factors or reasons this might be false positive
+5. Recommend specific actions with clear rationale
+
 Respond with JSON only in this exact format:
 {{
   "summary": "1-2 sentence explanation of what happened",
   "severity": <1-10 integer>,
-  "threat_type": "<DDoS|Privilege Escalation|Data Exfiltration|Malware|Policy Violation|Reconnaissance|Unknown>",
+  "threat_type": "DDoS|Privilege Escalation|Data Exfiltration|Malware|Policy Violation|Reconnaissance|Unknown",
+  "confidence": <0.0-1.0 float>,
+  "key_indicators": ["Indicator 1", "Indicator 2", "Indicator 3"],
+  "mitigating_factors": ["Factor 1", "Factor 2"],
   "business_impact": "How this affects Smart City operations",
+  "reasoning": "Detailed explanation of the threat assessment",
   "recommendations": ["Action 1", "Action 2", "Action 3"],
   "automated_actions": ["isolate_pod", "scale_up", "block_ip", "cordon_node", "alert_team"]
 }}"""

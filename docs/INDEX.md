@@ -53,6 +53,8 @@ The Smart City IDS project now has comprehensive, professional documentation org
 | Doc | Purpose | Audience |
 |-----|---------|----------|
 | **[ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md)** | Why emulation, not simulation | Examiners |
+| **[SUPERVISOR_GUIDE.md](SUPERVISOR_GUIDE.md)** | PhD-level work explanation | Supervisors/Examiners |
+| **[OPERATOR_INTERFACE.md](OPERATOR_INTERFACE.md)** | Transparent governance guide | Technical Readers |
 | **[EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md)** | Ready-to-use explanations | Students |
 | **[METRICS_AUDIT.md](METRICS_AUDIT.md)** | Metric realism validation | Analysts |
 | **[LLM_REALITY_CHECK.md](LLM_REALITY_CHECK.md)** | LLM capabilities & limits | Engineers |
@@ -93,9 +95,11 @@ The Smart City IDS project now has comprehensive, professional documentation org
 2. Reference: [LOG_FORMAT_GUIDE.md](LOG_FORMAT_GUIDE.md) (data structures)
 
 #### **Defend to an examiner**
-1. Read: [EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md) (key points)
-2. Reference: [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md) (detailed justification)
-3. Show: [METRICS_AUDIT.md](METRICS_AUDIT.md) (validation proof)
+1. Read: [SUPERVISOR_GUIDE.md](SUPERVISOR_GUIDE.md) (PhD work explained)
+2. Reference: [OPERATOR_INTERFACE.md](OPERATOR_INTERFACE.md) (novel approach)
+3. Show: [EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md) (key talking points)
+4. Provide: [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md) (detailed justification)
+5. Prove: [METRICS_AUDIT.md](METRICS_AUDIT.md) (validation proof)
 
 #### **Understand limitations**
 1. Read: [LLM_REALITY_CHECK.md](LLM_REALITY_CHECK.md) (what system can't do)

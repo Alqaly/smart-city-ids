@@ -65,39 +65,61 @@ Be concise, accurate, and security-focused. Always respond in JSON format."""
             return {"status": "error", "error": str(e)}
     
     def _build_prompt(self, alert: Dict[str, Any]) -> str:
-        """Build analysis prompt from alert"""
+        """Build analysis prompt from alert - includes confidence and reasoning requirements"""
         
-        prompt = f"""Analyze this security alert from our Smart City infrastructure:
+        if 'output' in alert:
+            # Falco format
+            return f"""Analyze this security alert from Smart City infrastructure.
 
-**Alert Source:** {alert.get('source')}
-**Alert Type:** {alert.get('alert_type')}
-**Timestamp:** {alert.get('timestamp')}
-**Severity:** {alert.get('severity')}
+**Alert Output:** {alert.get('output', 'N/A')}
+**Priority:** {alert.get('priority', 'N/A')}
+**Rule:** {alert.get('rule', 'N/A')}
+**Timestamp:** {alert.get('time', 'N/A')}
+**Container:** {alert.get('output_fields', {}).get('container.name', 'Unknown')}
+**Process:** {alert.get('output_fields', {}).get('proc.cmdline', 'Unknown')}
+
+Provide TRANSPARENT analysis for human operator review:
+1. Assess threat type and severity (1-10)
+2. Provide confidence score (0.0-1.0) based on evidence strength
+3. List key indicators that support this assessment
+4. Note any mitigating factors or reasons this might be false positive
+5. Recommend specific actions with clear rationale
+
+Respond with JSON ONLY in this exact format:
+{{
+  "summary": "1-2 sentence explanation of what happened",
+  "severity": <1-10 integer>,
+  "threat_type": "DDoS|Privilege Escalation|Data Exfiltration|Malware|Policy Violation|Reconnaissance|Unknown",
+  "confidence": <0.0-1.0 float>,
+  "key_indicators": ["Indicator 1", "Indicator 2", "Indicator 3"],
+  "mitigating_factors": ["Factor 1", "Factor 2"],
+  "business_impact": "How this affects Smart City operations",
+  "reasoning": "Detailed explanation of the threat assessment",
+  "recommendations": ["Action 1", "Action 2", "Action 3"],
+  "automated_actions": ["isolate_pod", "scale_up", "block_ip", "cordon_node", "alert_team"]
+}}"""
+        else:
+            # Normalized format
+            return f"""Analyze this security alert from Smart City infrastructure:
+
+**Alert Source:** {alert.get('source', 'unknown')}
+**Alert Type:** {alert.get('alert_type', 'unknown')}
+**Timestamp:** {alert.get('timestamp', 'N/A')}
+**Severity:** {alert.get('severity', 'N/A')}
 
 **Details:**
 {json.dumps(alert.get('details', {}), indent=2)}
 
-Provide analysis in JSON format:
+Provide TRANSPARENT analysis for human operator review. Respond with JSON ONLY:
 {{
   "summary": "1-2 sentence explanation of what happened",
   "severity": <1-10 integer>,
-  "threat_type": "<category: DDoS, Privilege Escalation, Data Exfiltration, Malware, etc>",
+  "threat_type": "DDoS|Privilege Escalation|Data Exfiltration|Malware|Policy Violation|Reconnaissance|Unknown",
+  "confidence": <0.0-1.0 float>,
+  "key_indicators": ["Indicator 1", "Indicator 2", "Indicator 3"],
+  "mitigating_factors": ["Factor 1", "Factor 2"],
   "business_impact": "How this affects Smart City operations",
-  "technical_details": "Technical explanation for security team",
-  "recommendations": [
-    "Action 1",
-    "Action 2",
-    "Action 3"
-  ],
-  "automated_actions": [
-    "isolate_pod",
-    "scale_up",
-    "block_ip",
-    "cordon_node",
-    "restart_service"
-  ]
-}}
-
-Respond ONLY with valid JSON."""
-        
-        return prompt
+  "reasoning": "Detailed explanation of the threat assessment",
+  "recommendations": ["Action 1", "Action 2", "Action 3"],
+  "automated_actions": ["isolate_pod", "scale_up", "block_ip", "cordon_node", "alert_team"]
+}}"""
