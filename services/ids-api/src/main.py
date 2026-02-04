@@ -48,11 +48,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Mount static files for UI
-static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
-if os.path.exists(static_dir):
-    app.mount("/ui/static", StaticFiles(directory=static_dir), name="static")
-    logger.info(f"Static files mounted: {static_dir}")
+# Mount static files for UI (support dev + configmap-mounted layout)
+_static_candidates = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static"),  # repo layout
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"),        # packaged layout
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "static"),  # /app/static when /app points to src
+]
+STATIC_DIR = next((p for p in _static_candidates if os.path.exists(p)), None)
+if STATIC_DIR:
+    app.mount("/ui/static", StaticFiles(directory=STATIC_DIR), name="static")
+    logger.info(f"Static files mounted: {STATIC_DIR}")
 
 # Security
 security = HTTPBearer()
@@ -815,21 +820,21 @@ async def root():
 @app.get("/ui")
 async def serve_ui():
     """Serve the operator dashboard UI"""
-    ui_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "index.html")
-    if os.path.exists(ui_file):
-        return FileResponse(ui_file, media_type="text/html")
-    else:
-        return {
-            "message": "UI not found",
-            "path": ui_file,
-            "api_endpoints": [
-                "GET /api/operator/incidents",
-                "GET /api/operator/incident/{id}",
-                "GET /api/operator/evidence/{id}",
-                "GET /api/operator/reasoning/{id}",
-                "GET /api/operator/metrics"
-            ]
-        }
+    if STATIC_DIR:
+        ui_file = os.path.join(STATIC_DIR, "index.html")
+        if os.path.exists(ui_file):
+            return FileResponse(ui_file, media_type="text/html")
+    return {
+        "message": "UI not found",
+        "path": os.path.join(STATIC_DIR or "missing-static-dir", "index.html"),
+        "api_endpoints": [
+            "GET /api/operator/incidents",
+            "GET /api/operator/incident/{id}",
+            "GET /api/operator/evidence/{id}",
+            "GET /api/operator/reasoning/{id}",
+            "GET /api/operator/metrics"
+        ]
+    }
 
 # ============================================================================
 # AUTHENTICATION ENDPOINTS

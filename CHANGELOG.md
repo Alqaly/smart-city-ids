@@ -80,8 +80,8 @@ Implemented transparent, explainable, controllable human-in-the-loop security go
   - Updated prompts emphasize transparent analysis for operator review
 
 ### Fixes
-- Operator Web UI now ships inside the IDS API container image.
-- `/ui` resolves static files reliably in both dev and container layouts.
+- Operator Web UI now mounts via Kubernetes ConfigMap (no Dockerfile changes).
+- `/ui` resolves static files reliably in both dev and K3s ConfigMap layouts.
   - Fallback responses include confidence, not just severity
 
 **4. Operator API Endpoints** (`/api/operator/`)

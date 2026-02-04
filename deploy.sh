@@ -305,6 +305,17 @@ deploy_manifests() {
         --namespace=$NAMESPACE_SMART_CITY \
         --from-file=app.py=smart-city-services/parking-system/app.py \
         --dry-run=client -o yaml | kubectl apply -f -
+
+    # IDS API code + operator UI
+    log_info "Creating ConfigMaps for IDS API..."
+    kubectl create configmap ids-app-code \
+        --namespace=$NAMESPACE_SMART_CITY \
+        --from-file=services/ids-api/src \
+        --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create configmap ids-app-static \
+        --namespace=$NAMESPACE_SMART_CITY \
+        --from-file=services/ids-api/static \
+        --dry-run=client -o yaml | kubectl apply -f -
     
     # Deploy smart city services
     log_info "Deploying smart city services..."

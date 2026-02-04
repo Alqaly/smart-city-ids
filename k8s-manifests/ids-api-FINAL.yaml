@@ -16,7 +16,7 @@ spec:
       serviceAccountName: ids-service-account
       containers:
       - name: ids-api
-        image: smart-city-ids/ids-api:latest
+        image: ids-api:latest
         imagePullPolicy: Never
         command: ["uvicorn"]
         args:
@@ -46,6 +46,8 @@ spec:
         volumeMounts:
         - name: app-code
           mountPath: /app
+        - name: app-static
+          mountPath: /app/static
         resources:
           requests:
             memory: "512Mi"
@@ -75,3 +77,6 @@ spec:
       - name: app-code
         configMap:
           name: ids-app-code
+      - name: app-static
+        configMap:
+          name: ids-app-static
