@@ -450,36 +450,48 @@ function refreshAll(){
     apiFetch('/api/governance/status'),  // r[5] gov
     apiNoAuth('/api/deduplicator-stats'), // r[6] dedup
     apiNoAuth('/api/alerts?limit=30'),   // r[7] alerts
-    apiFetch('/api/operator/dashboard')  // r[8] dashboard
+    apiFetch('/api/operator/dashboard'), // r[8] dashboard
+    apiNoAuth('/api/llm/diagnostics')    // r[9] llmDiag
   ]).then(function(r){
-    var h=r[0],m=r[1],cb=r[2],safety=r[3],prod=r[4],gov=r[5],dedup=r[6],alerts=r[7],dash=r[8];
-    // Derive LLM info from /health (no auth needed) instead of /api/llm/status
+    var h=r[0],m=r[1],cb=r[2],safety=r[3],prod=r[4],gov=r[5],dedup=r[6],alerts=r[7],dash=r[8],llmDiag=r[9];
+    // Derive LLM info from /health (no auth needed)
     var llmFromHealth=null;
     if(h&&h.components&&h.components.llm_providers){
       var provNames=Object.keys(h.components.llm_providers);
       llmFromHealth={provider_count:h.llm_provider_count||provNames.length,providers:provNames};
     }
-    renderOverview(m,h,cb,safety,prod,gov,llmFromHealth);
+    renderOverview(m,h,cb,safety,prod,gov,llmFromHealth,llmDiag);
     renderAlertFeed(alerts);
-    renderLLMOverview(llmFromHealth,cb);
+    renderLLMOverview(llmFromHealth,cb,llmDiag);
     renderSystemHealth(h,prod);
-    renderLLMTab(llmFromHealth,cb,dedup);
+    renderLLMTab(llmFromHealth,cb,dedup,llmDiag);
     renderGovernanceTab(gov,dash);
     renderAttackTab();
-    updateTopBar(h,gov,llmFromHealth);
+    updateTopBar(h,gov,llmFromHealth,llmDiag);
     loadK8s();
     loadIoT();
   });
 }
 
-function renderOverview(m,h,cb,safety,prod,gov,llmFromHealth){
+function renderOverview(m,h,cb,safety,prod,gov,llmFromHealth,llmDiag){
   if(!m)return;
   var uptime=m.uptime_seconds?formatDuration(m.uptime_seconds):'--';
+  var smry=(llmDiag&&llmDiag.summary)?llmDiag.summary:{};
+  var llmSub='';
+  if(smry.operational||smry.error||smry.cooldown){
+    var parts=[];
+    if(smry.operational)parts.push(smry.operational+' healthy');
+    if(smry.error)parts.push(smry.error+' error');
+    if(smry.cooldown)parts.push(smry.cooldown+' cooldown');
+    llmSub=parts.join(', ');
+  }else{
+    llmSub=(llmFromHealth&&llmFromHealth.providers?llmFromHealth.providers.join(', '):'none configured');
+  }
   document.getElementById('overviewStats').innerHTML=
     '<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">'+(m.total_alerts||0)+'</div><div class="stat-sub">Processed by IDS pipeline</div></div>'+
     '<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">'+(m.critical_alerts||0)+'</div><div class="stat-sub">Severity 8+</div></div>'+
     '<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">'+(m.iot_devices_active||0)+'</div><div class="stat-sub">Active in cluster</div></div>'+
-    '<div class="stat-card purple"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+(llmFromHealth&&llmFromHealth.providers?llmFromHealth.providers.join(', '):'none configured')+' (of '+ALL_PROVIDERS.length+' available)</div></div>'+
+    '<div class="stat-card '+(smry.error>0||smry.cooldown>0?'red':'purple')+'"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(smry.operational||h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+llmSub+'</div></div>'+
     '<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">'+(m.alert_reduction_percentage||0)+'%</div><div class="stat-sub">Duplicate alerts suppressed</div></div>'+
     '<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">'+uptime+'</div><div class="stat-sub">System operational</div></div>';
 }
@@ -639,29 +651,45 @@ function loadIoT(){
   });
 }
 
-function renderLLMTab(llm,cb,dedup){
+function renderLLMTab(llm,cb,dedup,llmDiag){
   var configCount=(llm&&llm.provider_count)?llm.provider_count:0;
   var configured=(llm&&llm.providers)?llm.providers:[];
   var engines=(cb&&cb.engines)?cb.engines:{};
+  var diags=(llmDiag&&llmDiag.providers)?llmDiag.providers:{};
+  var smry=(llmDiag&&llmDiag.summary)?llmDiag.summary:{};
   document.getElementById('llmStats').innerHTML=
     '<div class="stat-card purple"><div class="stat-label">Total Providers</div><div class="stat-value">'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+ALL_PROVIDERS.map(function(p){return p.id}).join(', ')+'</div></div>'+
-    '<div class="stat-card green"><div class="stat-label">Configured (Keys Set)</div><div class="stat-value">'+configCount+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+(configured.length?configured.join(', '):'none configured')+'</div></div>'+
-    '<div class="stat-card yellow"><div class="stat-label">Dedup Hit Rate</div><div class="stat-value">'+(dedup&&dedup.hit_rate_percent?dedup.hit_rate_percent.toFixed(1):'0.0')+'%</div><div class="stat-sub">'+(dedup&&dedup.hits||0)+' hits / '+(dedup&&dedup.misses||0)+' misses</div></div>'+
-    '<div class="stat-card blue"><div class="stat-label">Cost Saved</div><div class="stat-value">$'+(dedup&&dedup.cost_saved_usd?dedup.cost_saved_usd.toFixed(3):'0.000')+'</div><div class="stat-sub">Estimated LLM savings</div></div>';
+    '<div class="stat-card green"><div class="stat-label">Operational</div><div class="stat-value">'+(smry.operational||0)+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">Configured: '+configCount+'</div></div>'+
+    '<div class="stat-card red"><div class="stat-label">Errors / Cooldown</div><div class="stat-value">'+((smry.error||0)+(smry.cooldown||0))+'</div><div class="stat-sub">'+(smry.error||0)+' errors, '+(smry.cooldown||0)+' in cooldown</div></div>'+
+    '<div class="stat-card blue"><div class="stat-label">Cost Saved</div><div class="stat-value">$'+(dedup&&dedup.cost_saved_usd?dedup.cost_saved_usd.toFixed(3):'0.000')+'</div><div class="stat-sub">Dedup: '+(dedup&&dedup.hit_rate_percent?dedup.hit_rate_percent.toFixed(1):'0')+'% hit rate</div></div>';
   var pc=document.getElementById('llmProviderCards');
   var html='';
   ALL_PROVIDERS.forEach(function(p){
     var info=engines[p.id];
-    var isConfigured=configured.indexOf(p.id)!==-1||!!info;
-    var state=info?(info.state||'unknown'):(isConfigured?'ready':'unconfigured');
-    var color=state==='closed'?'var(--green)':state==='ready'?'var(--accent)':state==='half_open'?'var(--yellow)':state==='unconfigured'?'var(--text3)':'var(--red)';
-    var pct=info&&info.successes?Math.min(100,info.successes/(info.successes+info.failures)*100):0;
-    var statusLabel=state==='closed'?'Healthy':state==='ready'?'Configured':state==='unconfigured'?'No API Key':state;
-    html+='<div class="provider-card" style="margin-bottom:10px;border-left:3px solid '+color+';'+(isConfigured?'':'opacity:.6')+'">'+
+    var d=diags[p.id]||{};
+    var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
+    var ds=d.status||'unknown';
+    var color=ds==='operational'?'var(--green)':ds==='not_configured'?'var(--text3)':ds==='cooldown'?'var(--yellow)':'var(--red)';
+    var statusLabel=ds==='operational'?(d.successes>0?'Healthy':'Ready'):
+      ds==='not_configured'?'No API Key':
+      ds==='cooldown'?'Cooldown ('+d.cooldown_remaining_seconds+'s)':
+      ds==='error'?'Error':
+      ds==='circuit_open'?'Circuit Open':
+      ds==='recovering'?'Recovering':'Unknown';
+    var pct=(d.successes&&(d.successes+d.failures)>0)?Math.min(100,d.successes/(d.successes+d.failures)*100):0;
+    var reason=d.reason||'';
+    var lastErr=d.last_error||'';
+    var latency=d.last_latency_ms?d.last_latency_ms+'ms':'-';
+    html+='<div class="provider-card" style="margin-bottom:12px;border-left:3px solid '+color+';'+(isConfigured?'':'opacity:.6')+'">'+
       '<div class="provider-icon" style="color:'+p.color+'">'+p.icon+'</div>'+
       '<div class="provider-info" style="flex:1">'+
-      '<div class="provider-name">'+p.name+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+p.model+'</span></div>'+
-      '<div class="provider-detail">Status: '+statusLabel+(info?' | Successes: '+(info.successes||0)+' | Failures: '+(info.failures||0):'')+'</div>'+
+      '<div class="provider-name">'+p.name+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+(d.model||p.model)+'</span></div>'+
+      '<div class="provider-detail" style="margin:2px 0">Status: <strong style="color:'+color+'">'+statusLabel+'</strong>'+(d.attempts>0?' | '+d.successes+' ok / '+d.failures+' fail | Latency: '+latency:'')+'</div>'+
+      '<div style="font-size:11px;margin:4px 0;padding:6px 8px;border-radius:4px;background:'+(ds==='operational'?'rgba(34,197,94,.08)':ds==='not_configured'?'rgba(148,163,184,.08)':'rgba(239,68,68,.08)')+';color:'+(ds==='operational'?'var(--green)':ds==='not_configured'?'var(--text3)':'#ef4444')+';line-height:1.4">'+
+        '<strong>Why:</strong> '+esc(reason)+
+        (lastErr&&ds!=='operational'&&ds!=='not_configured'?'<br><strong>Raw error:</strong> <span style="opacity:.7">'+esc(lastErr)+'</span>':'')+
+        (!d.key_format_valid&&ds==='not_configured'&&p.id!=='local'?'<br><strong>Fix:</strong> Set <code style="background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px">'+p.id.toUpperCase()+'_API_KEY</code> environment variable':'')+
+      '</div>'+
       '<div class="progress"><div class="progress-fill" style="width:'+(isConfigured?Math.max(pct,5):0)+'%;background:'+color+'"></div></div>'+
       '</div></div>';
   });
@@ -670,7 +698,8 @@ function renderLLMTab(llm,cb,dedup){
   var cbHtml='<div style="font-size:13px;color:var(--text2)"><div>Failure threshold: <strong>'+(cb&&cb.failure_threshold||5)+'</strong></div><div>Recovery timeout: <strong>'+(cb&&cb.recovery_timeout_seconds||30)+'s</strong></div><div style="margin-top:8px">';
   ALL_PROVIDERS.forEach(function(p){
     var info=engines[p.id];
-    var isConfigured=configured.indexOf(p.id)!==-1||!!info;
+    var d=diags[p.id]||{};
+    var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
     if(info){cbHtml+='<span class="badge '+(info.state==='closed'?'badge-low':info.state==='half_open'?'badge-med':'badge-crit')+'" style="margin-right:4px;margin-bottom:4px;display:inline-block">'+p.id+': '+(info.state==='closed'?'HEALTHY':info.state.toUpperCase())+'</span>'}
     else{cbHtml+='<span class="badge '+(isConfigured?'badge-info':'badge-purple')+'" style="margin-right:4px;margin-bottom:4px;display:inline-block;opacity:'+(isConfigured?'1':'.5')+'">'+p.id+': '+(isConfigured?'READY':'N/A')+'</span>'}
   });
@@ -925,13 +954,16 @@ function closeModal(){document.getElementById('modalOverlay').classList.remove('
 function clearAttackLog(){document.getElementById('attackLog').textContent=''}
 function addLog(msg){var el=document.getElementById('attackLog');var t=new Date().toLocaleTimeString();var isIndent=msg.startsWith('  ')||msg.startsWith('━')||msg===''||msg.startsWith('\n');var prefix=isIndent?'           ':'['+t+'] ';el.textContent+=prefix+msg+'\n';el.scrollTop=el.scrollHeight}
 
-function updateTopBar(h,gov,llm){
+function updateTopBar(h,gov,llm,llmDiag){
   var cp=document.getElementById('clusterPill');
   if(h&&h.components&&h.components.kubernetes==='connected'){cp.className='pill pill-ok';cp.textContent='K8s Connected'}else{cp.className='pill pill-err';cp.textContent='K8s Disconnected'}
   var lp=document.getElementById('llmPill');
-  // Use llm_provider_count from /health (no auth needed)
   var pc=(h&&h.llm_provider_count)?h.llm_provider_count:((llm&&llm.provider_count)?llm.provider_count:0);
-  if(pc>0){lp.className='pill pill-ok';lp.textContent=pc+'/'+ALL_PROVIDERS.length+' LLM Assisted'}else{lp.className='pill pill-err';lp.textContent='No LLM'}
+  var smry=(llmDiag&&llmDiag.summary)?llmDiag.summary:{};
+  var errCount=(smry.error||0)+(smry.cooldown||0);
+  if(pc>0&&errCount===0){lp.className='pill pill-ok';lp.textContent=pc+'/'+ALL_PROVIDERS.length+' LLM OK'}
+  else if(pc>0){lp.className='pill pill-warn';lp.textContent=(smry.operational||pc)+'/'+ALL_PROVIDERS.length+' LLM ('+errCount+' issue'+(errCount>1?'s':'')+')'}
+  else{lp.className='pill pill-err';lp.textContent='No LLM'}
   var gp=document.getElementById('govPill');
   if(gov){var m=gov.mode||'assisted';gp.textContent=m.charAt(0).toUpperCase()+m.slice(1);gp.className='pill '+(m==='autopilot'?'pill-warn':'pill-ok')}
   if(h&&h.uptime_seconds){document.getElementById('uptimeLabel').textContent='Uptime: '+formatDuration(h.uptime_seconds)}

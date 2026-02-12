@@ -61,6 +61,40 @@ async def _sse_broadcast(event: dict):
     for q in dead:
         _sse_clients.remove(q)
 
+
+# ─── LLM Error Classification ───────────────────────────────────────────────
+def _classify_llm_error(error_msg: str) -> str:
+    """Classify an LLM error into a human-readable diagnostic reason."""
+    if not error_msg:
+        return "Unknown error"
+    msg = error_msg.lower()
+    if "invalid api key" in msg or "incorrect api key" in msg or "api error 401" in msg:
+        return "Invalid API key — check your key is correct and not expired"
+    if "unauthorized" in msg or "authentication" in msg or "api error 403" in msg:
+        return "Authentication failed — API key rejected by provider"
+    if "insufficient_quota" in msg or "quota" in msg or "api error 429" in msg:
+        return "Insufficient credits / quota exceeded — add billing or wait for reset"
+    if "resource has been exhausted" in msg or "used all available credits" in msg:
+        return "Credits exhausted — provider account has no remaining balance"
+    if "monthly spending limit" in msg:
+        return "Monthly spending limit reached — increase limit in provider settings"
+    if "exhausted" in msg:
+        return "Resource exhausted — provider capacity limit reached"
+    if "timeout" in msg:
+        return "Request timeout — provider too slow or network issue"
+    if "connection" in msg or "connect" in msg:
+        return "Connection failed — network error or provider is down"
+    if "rate limit" in msg or "rate_limit" in msg:
+        return "Rate limited — too many requests, will retry after cooldown"
+    if "model not found" in msg or "model_not_found" in msg:
+        return "Model not found — configured model is unavailable on this provider"
+    if "api error" in msg:
+        return f"API error — {error_msg}"
+    if "cooldown" in msg:
+        return error_msg  # Already descriptive
+    return f"Error: {error_msg}"
+
+
 # Initialize FastAPI
 app = FastAPI(
     title="Smart City IDS",
@@ -118,10 +152,26 @@ try:
 
             def get_status(self):
                 providers = self._manager.get_available_engines()
+                details = {}
+                for p in providers:
+                    stats = self._manager.runtime_stats.get(p, {})
+                    cooldown_until = self._manager.provider_cooldown_until.get(p, 0)
+                    details[p] = {
+                        "configured": True,
+                        "model": getattr(self._manager.engines.get(p), 'model', 'unknown') if self._manager.engines.get(p) else 'unknown',
+                        "base_url": getattr(self._manager.engines.get(p), 'base_url', '') if self._manager.engines.get(p) else '',
+                        "attempts": stats.get("attempts", 0),
+                        "successes": stats.get("successes", 0),
+                        "failures": stats.get("failures", 0),
+                        "last_latency_ms": stats.get("last_latency_ms"),
+                        "last_error": stats.get("last_error"),
+                        "cooldown_until": int(cooldown_until),
+                        "cooldown_remaining_seconds": max(0, int(cooldown_until - time.time())),
+                    }
                 return {
                     "provider_count": len(providers),
                     "providers": providers,
-                    "details": {p: {"configured": True} for p in providers},
+                    "details": details,
                 }
 
         llm_manager = LegacyLLMAdapter()
@@ -1067,14 +1117,74 @@ async def health():
     
     # Build LLM provider status - generic, works with any provider
     llm_status = {}
+    llm_diagnostics = {}
+    all_known_providers = ["xai", "anthropic", "openai", "gemini", "kimi", "local"]
+    key_validation = Config.get_valid_engines() if hasattr(Config, 'get_valid_engines') else {}
+    
     if llm_manager:
         status = llm_manager.get_status()
-        for name, details in status.get("details", {}).items():
-            cb_stats = circuit_breaker.engine_stats.get(name, {})
+        configured_set = set(status.get("providers", []))
+        for prov_name in all_known_providers:
+            details = status.get("details", {}).get(prov_name, {})
+            cb_stats = circuit_breaker.engine_stats.get(prov_name, {})
             cb_state = cb_stats.get("state", "unknown")
-            failures = cb_stats.get("failures", 0)
-            successes = cb_stats.get("successes", 0)
-            llm_status[name] = f"configured (circuit: {cb_state}, ok={successes}, fail={failures})"
+            cb_failures = cb_stats.get("failures", 0)
+            cb_successes = cb_stats.get("successes", 0)
+            is_configured = prov_name in configured_set
+            key_info = key_validation.get(prov_name, {})
+            
+            cooldown_remaining = details.get("cooldown_remaining_seconds", 0)
+            last_error = details.get("last_error") or cb_stats.get("last_error")
+            attempts = details.get("attempts", 0)
+            successes_count = details.get("successes", 0)
+            failures_count = details.get("failures", 0)
+            
+            # Determine verbose status and human-readable reason
+            if prov_name == "local":
+                diag_status = "operational"
+                reason = "Rule-based engine, always available (no API key needed)"
+            elif not is_configured:
+                diag_status = "not_configured"
+                if not key_info:
+                    reason = "No API key set — add " + prov_name.upper() + "_API_KEY environment variable"
+                elif not key_info.get("valid_format", True):
+                    reason = "API key format invalid — check key prefix and length"
+                else:
+                    reason = "Provider not initialized"
+            elif cooldown_remaining > 0:
+                diag_status = "cooldown"
+                reason = _classify_llm_error(last_error) + f" (cooldown: {cooldown_remaining}s remaining)"
+            elif last_error and failures_count > 0 and successes_count == 0:
+                diag_status = "error"
+                reason = _classify_llm_error(last_error)
+            elif cb_state == "open":
+                diag_status = "circuit_open"
+                reason = "Circuit breaker OPEN — too many consecutive failures. " + (_classify_llm_error(last_error) if last_error else "Unknown error")
+            elif cb_state == "half_open":
+                diag_status = "recovering"
+                reason = "Circuit breaker half-open — testing recovery"
+            else:
+                diag_status = "operational"
+                reason = "Healthy" if successes_count > 0 else "Ready (no requests yet)"
+            
+            # Legacy summary string
+            llm_status[prov_name] = f"configured (circuit: {cb_state}, ok={cb_successes}, fail={cb_failures})" if is_configured else "not configured"
+            
+            # Verbose diagnostics
+            llm_diagnostics[prov_name] = {
+                "status": diag_status,
+                "reason": reason,
+                "configured": is_configured,
+                "key_format_valid": key_info.get("valid_format", True) if key_info else (prov_name == "local"),
+                "model": details.get("model", ""),
+                "attempts": attempts,
+                "successes": successes_count,
+                "failures": failures_count,
+                "last_error": last_error,
+                "last_latency_ms": details.get("last_latency_ms"),
+                "cooldown_remaining_seconds": cooldown_remaining,
+                "circuit_breaker_state": cb_state,
+            }
     
     # Check database connection
     db_status = "postgresql" if not db.use_memory else "memory-fallback"
@@ -1092,11 +1202,55 @@ async def health():
             "suricata": suricata_status
         },
         "llm_provider_count": llm_manager.get_status()["provider_count"] if llm_manager else 0,
+        "llm_diagnostics": llm_diagnostics,
         "circuit_breaker_states": {k: v.get("state", "unknown") for k, v in circuit_breaker.engine_stats.items()},
         "uptime_seconds": uptime,
         "total_alerts_processed": metrics["total_alerts"],
         "storage_type": db_status
     }
+
+
+# ─── LLM Diagnostics (no auth — operator dashboard) ─────────────────────
+@app.get("/api/llm/diagnostics")
+async def llm_diagnostics_endpoint():
+    """
+    Verbose LLM provider diagnostics. No auth required.
+    Shows: configured status, key validity, last error with classification,
+    cooldown state, circuit breaker, attempts/successes/failures, latency.
+    """
+    h = await health()
+    diags = h.get("llm_diagnostics", {})
+    cb_states = h.get("circuit_breaker_states", {})
+    
+    # Enrich with unconfigured providers for full picture
+    all_names = ["xai", "anthropic", "openai", "gemini", "kimi", "local"]
+    for name in all_names:
+        if name not in diags:
+            diags[name] = {
+                "status": "not_configured",
+                "reason": f"No API key set — add {name.upper()}_API_KEY environment variable",
+                "configured": False,
+                "key_format_valid": False,
+                "model": "",
+                "attempts": 0, "successes": 0, "failures": 0,
+                "last_error": None, "last_latency_ms": None,
+                "cooldown_remaining_seconds": 0,
+                "circuit_breaker_state": "unknown",
+            }
+    
+    summary = {
+        "operational": sum(1 for d in diags.values() if d["status"] == "operational"),
+        "error": sum(1 for d in diags.values() if d["status"] in ("error", "circuit_open")),
+        "cooldown": sum(1 for d in diags.values() if d["status"] == "cooldown"),
+        "not_configured": sum(1 for d in diags.values() if d["status"] == "not_configured"),
+    }
+    
+    return {
+        "summary": summary,
+        "providers": diags,
+        "circuit_breaker_states": cb_states,
+    }
+
 
 # ─── SSE Live Alert Stream ───────────────────────────────────────────────
 @app.get("/api/alerts/live")
