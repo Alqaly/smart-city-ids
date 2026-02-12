@@ -336,6 +336,14 @@ function connectLiveFeed(){
     dot.className='dot dot-green'; status.textContent='Connected — streaming all alert processing';
   };
 
+  _sse.addEventListener('connected',function(ev){
+    // Clear the 'Connecting...' placeholder when SSE confirms connection
+    var log=document.getElementById('liveFeedLog');
+    if(log.innerHTML==='Connecting to live event stream...'){
+      log.innerHTML='<span style="color:var(--green)">\u2713 Connected to live pipeline stream. Alerts from ALL sources (CLI, Falco, Suricata, dashboard) will appear here in real-time.</span>';
+    }
+  });
+
   _sse.addEventListener('alert',function(ev){
     try{
       var d=JSON.parse(ev.data);
@@ -513,21 +521,36 @@ function renderAlertFeed(data){
   el.innerHTML=html;
 }
 
-function renderLLMOverview(llm,cb){
+function renderLLMOverview(llm,cb,llmDiag){
   var el=document.getElementById('llmOverview');
   var engines=(cb&&cb.engines)?cb.engines:{};
   var configured=(llm&&llm.providers)?llm.providers:[];
+  var diags=(llmDiag&&llmDiag.providers)?llmDiag.providers:{};
   var html='';
   ALL_PROVIDERS.forEach(function(p){
     var info=engines[p.id];
-    var isConfigured=configured.indexOf(p.id)!==-1||!!info;
-    var stateText=!isConfigured?'Not Configured':(!info?'Ready':(info.state==='closed'?'Healthy':'State: '+info.state));
-    var dotClass=!isConfigured?'dot-yellow':((!info||info.state==='closed')?'dot-green':info.state==='half_open'?'dot-yellow':'dot-red');
+    var d=diags[p.id]||{};
+    var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
+    var ds=d.status||'unknown';
+    var stateText=ds==='operational'?(d.successes>0?'Healthy':'Ready'):
+      ds==='not_configured'?'No API Key':
+      ds==='cooldown'?'Cooldown':
+      ds==='error'?'Error':
+      ds==='circuit_open'?'Circuit Open':
+      !isConfigured?'Not Configured':'Ready';
+    var dotClass=ds==='operational'?'dot-green':
+      ds==='not_configured'?'dot-yellow':
+      (ds==='cooldown'||ds==='recovering')?'dot-yellow':
+      (ds==='error'||ds==='circuit_open')?'dot-red':
+      !isConfigured?'dot-yellow':'dot-green';
+    var stats=info?' | '+(info.successes||0)+' ok / '+(info.failures||0)+' fail':'';
+    var reason=(d.reason&&ds!=='operational'&&ds!=='not_configured')?' <span style="font-size:10px;color:var(--text3);display:block;margin-top:1px">'+esc(d.reason.substring(0,60))+'</span>':'';
     html+='<div class="provider-card" style="margin-bottom:8px;'+(isConfigured?'':'opacity:.55')+'">'+
       '<div class="provider-icon" style="'+(isConfigured?'color:'+p.color:'color:var(--text3)')+'">'+p.icon+'</div>'+
       '<div class="provider-info">'+
       '<div class="provider-name">'+p.name+'</div>'+
-      '<div class="provider-detail"><span class="dot '+dotClass+'"></span>'+stateText+(info?' | '+(info.successes||0)+' ok / '+(info.failures||0)+' fail':'')+'</div>'+
+      '<div class="provider-detail"><span class="dot '+dotClass+'"></span>'+stateText+stats+'</div>'+
+      reason+
       '</div></div>';
   });
   el.innerHTML=html;
@@ -700,8 +723,11 @@ function renderLLMTab(llm,cb,dedup,llmDiag){
     var info=engines[p.id];
     var d=diags[p.id]||{};
     var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
-    if(info){cbHtml+='<span class="badge '+(info.state==='closed'?'badge-low':info.state==='half_open'?'badge-med':'badge-crit')+'" style="margin-right:4px;margin-bottom:4px;display:inline-block">'+p.id+': '+(info.state==='closed'?'HEALTHY':info.state.toUpperCase())+'</span>'}
-    else{cbHtml+='<span class="badge '+(isConfigured?'badge-info':'badge-purple')+'" style="margin-right:4px;margin-bottom:4px;display:inline-block;opacity:'+(isConfigured?'1':'.5')+'">'+p.id+': '+(isConfigured?'READY':'N/A')+'</span>'}
+    var ds=d.status||'unknown';
+    var badgeClass=ds==='operational'?'badge-low':ds==='cooldown'?'badge-med':(ds==='error'||ds==='circuit_open')?'badge-crit':isConfigured?'badge-info':'badge-purple';
+    var label=ds==='operational'?(d.successes>0?'OK':'READY'):ds==='cooldown'?'COOLDOWN':ds==='error'?'ERROR':ds==='circuit_open'?'CB OPEN':isConfigured?'READY':'N/A';
+    var opacity=isConfigured||ds==='operational'?'1':'.5';
+    cbHtml+='<span class="badge '+badgeClass+'" style="margin-right:4px;margin-bottom:4px;display:inline-block;opacity:'+opacity+'">'+p.id+': '+label+'</span>';
   });
   cbHtml+='</div></div>';
   document.getElementById('circuitBreakerDetail').innerHTML=cbHtml;
