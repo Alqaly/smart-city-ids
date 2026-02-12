@@ -1,624 +1,284 @@
-# Developer Guide
+# Development Guide — Smart City IDS
 
-Guidelines for contributing to the Smart City IDS project.
+How to modify, test, and deploy code changes.
 
 ---
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+- **K3s** running on the node (`/etc/rancher/k3s/k3s.yaml` accessible)
+- **Python 3.10+** with pip
+- At least one LLM API key (`XAI_API_KEY`, `OPENAI_API_KEY`, etc.) — or use the local fallback engine with no key
+- `kubectl` configured (`export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`)
+- `jq` for JSON processing in scripts
 
-- Python 3.10+
-- Docker
-- kubectl
-- K3s or Kubernetes cluster
-- Git
+---
 
-### Clone and Setup
+## Project Layout
+
+```
+services/ids-api/src/       Core IDS application (Python, FastAPI)
+services/ids-api/static/    Operator dashboard (HTML/JS SPA)
+services/forwarders/        Falco and Suricata alert forwarders
+smart-city-services/        Intentionally vulnerable IoT apps (Flask)
+k8s-manifests/              All Kubernetes manifests
+scripts/                    Deployment, attack, and utility scripts
+attack-simulator/           Standalone attack tools (Python)
+attack-simulations/         Shell-based attack scripts
+tests/                      Test suite (pytest)
+docs/                       Technical documentation
+config/                     Prometheus ServiceMonitor + sidecar configs
+infrastructure/             Database and monitoring configs
+```
+
+---
+
+## Running Locally (Outside K8s)
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/smart-city-ids.git
-cd smart-city-ids
+# Set at least one LLM key (or skip for local-only mode)
+export XAI_API_KEY="xai-..."
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install development dependencies
-pip install -r requirements-dev.txt
-```
-
----
-
-## Project Structure
-
-```
-smart-city-ids/
-├── scripts/
-│   └── start-everything.sh        # Main deployment script
-├── k8s-manifests/                 # Kubernetes configuration
-│   ├── ids-api-FINAL.yaml         # IDS API deployment
-│   ├── postgres-deployment.yaml   # Database
-│   ├── prometheus-deployment.yaml # Metrics
-│   └── ...
-├── services/
-│   ├── ids-api/
-│   │   └── src/
-│   │       ├── main.py            # FastAPI application
-│   │       ├── config.py          # Configuration
-│   │       ├── llm_engine_xai.py  # xAI integration
-│   │       ├── llm_engine_openai.py  # OpenAI integration
-│   │       ├── k8s_automation.py  # Kubernetes actions
-│   │       └── requirements.txt
-│   ├── forwarders/
-│   │   ├── falco/                 # Falco alert handler
-│   │   └── suricata/              # Suricata alert handler
-│   └── iot-simulator/             # IoT device emulation
-├── smart-city-services/           # Vulnerable demo apps
-│   ├── traffic-camera/
-│   ├── healthcare-api/
-│   └── parking-system/
-├── attack-simulator/              # Attack tools
-│   ├── ddos_simulator.py
-│   ├── privilege_escalation.py
-│   └── ...
-├── tests/                         # Test suite
-│   ├── test_llm_engine.py
-│   └── ...
-├── docs/                          # Documentation
-└── docker/                        # Docker images
-```
-
----
-
-## Core Modules
-
-### IDS API (`services/ids-api/src/main.py`)
-
-**Purpose:** Alert processing engine
-
-**Key Endpoints:**
-```python
-POST /api/alerts           # Receive new alert
-GET  /api/alerts           # Query stored alerts
-GET  /api/analysis         # Query analyses
-GET  /health               # Health check
-GET  /metrics              # Prometheus metrics
-```
-
-**Alert Processing Pipeline:**
-```python
-@app.post("/api/alerts")
-async def receive_alert(alert: Alert):
-    # 1. Validate and store
-    db_alert = db.save_alert(alert)
-    
-    # 2. Analyze with LLM
-    analysis = await llm_engine.analyze_alert(alert)
-    db.save_analysis(db_alert.id, analysis)
-    
-    # 3. Execute actions
-    if analysis["severity"] >= 8:
-        k8s.isolate_pod(alert.container_name)
-        metrics.actions_executed["isolate_pod"].inc()
-    
-    # 4. Return response
-    return {"status": "processed", "alert_id": db_alert.id}
-```
-
-**To modify:**
-- **Alert validation:** Edit `Alert` class in `main.py`
-- **LLM prompt:** Edit `llm_engine_xai.py` or `llm_engine_openai.py`
-- **Automation thresholds:** Edit `config.py`
-- **Kubernetes actions:** Edit `k8s_automation.py`
-
-### LLM Engines (`services/ids-api/src/llm_engine_*.py`)
-
-**xAI Integration (`llm_engine_xai.py`):**
-```python
-async def analyze_alert(alert: Alert) -> dict:
-    # Build prompt with context
-    system_prompt = "You are a cybersecurity analyst..."
-    user_message = f"Analyze this security alert: {alert.rule}"
-    
-    # Call xAI Grok API
-    response = await client.messages.create(
-        model="grok-4",
-        messages=[{"role": "user", "content": user_message}],
-        system=system_prompt,
-        max_tokens=500
-    )
-    
-    # Parse JSON response
-    analysis_json = extract_json_from_response(response.text)
-    
-    return {
-        "severity": analysis_json["severity"],
-        "threat_type": analysis_json["threat_type"],
-        "summary": analysis_json["summary"],
-        "recommendations": analysis_json["recommendations"],
-        "automated_actions": analysis_json["automated_actions"]
-    }
-```
-
-**To modify:**
-- **System prompt:** Update in `analyze_alert()` method
-- **Model selection:** Change `model="grok-4"` to preferred version
-- **Temperature/sampling:** Add parameters to API call
-- **Response parsing:** Update `extract_json_from_response()` logic
-
-**Expected Response Format:**
-```json
-{
-  "severity": 8,
-  "threat_type": "Privilege Escalation",
-  "summary": "Unauthorized shell access...",
-  "recommendations": ["Isolate pod", "Collect logs"],
-  "automated_actions": ["isolate_pod"]
-}
-```
-
-### Kubernetes Automation (`services/ids-api/src/k8s_automation.py`)
-
-**Available Actions:**
-```python
-async def isolate_pod(pod_name: str, namespace: str = "smart-city"):
-    # Creates NetworkPolicy to block all traffic
-    policy = NetworkPolicy(
-        metadata=V1ObjectMeta(name=f"isolate-{pod_name}"),
-        spec=V1NetworkPolicySpec(
-            pod_selector=V1LabelSelector(
-                match_labels={"pod": pod_name}
-            ),
-            policy_types=["Ingress", "Egress"]
-        )
-    )
-    await client.create_namespaced_network_policy(
-        namespace=namespace,
-        body=policy
-    )
-
-async def scale_up(deployment_name: str, namespace: str = "smart-city"):
-    # Increase replicas
-    deployment = await client.read_namespaced_deployment(
-        name=deployment_name,
-        namespace=namespace
-    )
-    deployment.spec.replicas = min(
-        deployment.spec.replicas + 1,
-        MAX_REPLICAS
-    )
-    await client.patch_namespaced_deployment(...)
-
-async def evict_pod(pod_name: str, namespace: str = "smart-city"):
-    # Force pod termination
-    await client.delete_namespaced_pod(
-        name=pod_name,
-        namespace=namespace,
-        grace_period_seconds=0
-    )
-```
-
-**To Add New Action:**
-```python
-async def custom_action(target: str):
-    # 1. Validate input
-    if not is_valid_target(target):
-        raise ValueError(f"Invalid target: {target}")
-    
-    # 2. Execute Kubernetes API call
-    result = await k8s_client.custom_action(target)
-    
-    # 3. Log action
-    metrics.actions_executed["custom_action"].inc()
-    
-    # 4. Return result
-    return {"action": "custom_action", "result": result}
-
-# 5. Add to decision logic in main.py
-if analysis["severity"] >= CUSTOM_THRESHOLD:
-    k8s.custom_action(target)
-```
-
----
-
-## Adding Tests
-
-### Unit Tests
-
-```python
-# tests/test_llm_engine.py
-
-import pytest
-from services.ids_api.src.llm_engine_xai import LLMEngineXAI
-
-@pytest.fixture
-def llm_engine():
-    return LLMEngineXAI()
-
-@pytest.mark.asyncio
-async def test_analyze_alert_valid_json(llm_engine, monkeypatch):
-    """Test that LLM response is parsed correctly"""
-    
-    # Mock the API response
-    async def mock_api_call(*args, **kwargs):
-        return MockResponse(text='''
-        ```json
-        {
-          "severity": 8,
-          "threat_type": "Privilege Escalation",
-          "summary": "Shell access detected",
-          "recommendations": ["Isolate"],
-          "automated_actions": ["isolate_pod"]
-        }
-        ```
-        ''')
-    
-    monkeypatch.setattr(llm_engine, "client.messages.create", mock_api_call)
-    
-    # Test parsing
-    result = await llm_engine.analyze_alert(mock_alert())
-    
-    assert result["severity"] == 8
-    assert result["threat_type"] == "Privilege Escalation"
-```
-
-### Integration Tests
-
-```python
-@pytest.mark.asyncio
-async def test_full_alert_pipeline(client):
-    """Test complete alert → analysis → action flow"""
-    
-    # 1. Send alert
-    alert_data = {
-        "rule": "Terminal shell in container",
-        "priority": "Critical",
-        "output": "Shell spawned",
-        "output_fields": {"container.name": "traffic-camera-xyz"}
-    }
-    
-    response = await client.post("/api/alerts", json=alert_data)
-    assert response.status_code == 200
-    alert_id = response.json()["alert_id"]
-    
-    # 2. Verify stored
-    response = await client.get(f"/api/alerts/{alert_id}")
-    assert response.status_code == 200
-    
-    # 3. Verify action executed
-    response = await client.get(f"/api/actions?alert_id={alert_id}")
-    assert len(response.json()) > 0
-```
-
-### Run Tests
-
-```bash
-# All tests
-pytest -v
-
-# Specific test
-pytest tests/test_llm_engine.py::test_analyze_alert_valid_json -v
-
-# With coverage
-pytest --cov=services/ids-api/src tests/
-```
-
----
-
-## Code Style & Quality
-
-### Style Guide
-
-```bash
-# Format code
-black services/ids-api/src/
-
-# Lint
-flake8 services/ids-api/src/ --max-line-length=100
-
-# Type checking
-mypy services/ids-api/src/ --ignore-missing-imports
-
-# All together
-make lint
-```
-
-### Requirements
-
-- Follow PEP 8
-- Use type hints
-- Document complex functions with docstrings
-- Write tests for new features
-- Keep functions focused and small
-
-### Example Function
-
-```python
-async def analyze_alert(
-    alert: Alert,
-    timeout: int = 30
-) -> Dict[str, Any]:
-    """Analyze security alert using LLM.
-    
-    Args:
-        alert: Security alert to analyze
-        timeout: API request timeout in seconds
-        
-    Returns:
-        Analysis dict with keys: severity, threat_type, summary,
-        recommendations, automated_actions
-        
-    Raises:
-        APIError: If LLM API call fails
-        ValidationError: If response format is invalid
-    """
-    try:
-        # Implementation
-        pass
-    except APIError as e:
-        logger.error(f"LLM API failed: {e}")
-        return fallback_analysis(alert)
-```
-
----
-
-## Making Changes
-
-### Development Workflow
-
-```bash
-# 1. Create feature branch
-git checkout -b feature/my-feature
-
-# 2. Make changes
-# ... edit files ...
-
-# 3. Test locally
-pytest tests/
-python3 -m flake8 services/ids-api/src/
-```
-
-### Running Locally (Without K3s)
-
-```bash
-# Terminal 1: Start services
+# Create virtualenv and install dependencies
 cd services/ids-api/src
-python3 -m venv venv
-source venv/bin/activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-# Terminal 2: Run tests
-pytest tests/test_llm_engine.py -v
+# Start the API
+uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Terminal 3: Send test alert
-curl -X POST http://localhost:8000/api/alerts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rule": "Test Alert",
-    "priority": "High",
-    "output": "Test output",
-    "output_fields": {"container.name": "test-pod"}
-  }'
+# Dashboard: http://localhost:8000/ui
+# Health:    http://localhost:8000/health
 ```
 
-### Debugging
-
-```python
-# Add debug logging
-import logging
-logger = logging.getLogger(__name__)
-
-logger.debug(f"Alert received: {alert}")
-logger.info(f"LLM analysis started for alert {alert.id}")
-logger.warning(f"LLM response took {latency}ms (SLO: 5s)")
-logger.error(f"Failed to isolate pod: {error}")
-
-# Run with debug logging
-export LOG_LEVEL=DEBUG
-uvicorn main:app --log-level debug
-```
+Without any API key, the system uses only the local fallback engine (11 rule patterns, zero cost).
 
 ---
 
-## Adding New Components
+## Deploying to K3s
 
-### New Service
+The project uses a **Docker-free deploy** pattern — code is mounted into pods via ConfigMaps. No container registry required.
+
+### Full Cluster Setup
 
 ```bash
-# 1. Create service directory
-mkdir -p services/my-service/src
-
-# 2. Create Dockerfile
-# Build image
-
-# 3. Create K8s manifest
-# Add to k8s-manifests/
-
-# 4. Update deployment script
-# Add service deployment to scripts/start-everything.sh
+./scripts/start-everything.sh
 ```
 
-### New Vulnerable App
+This script:
+1. Creates namespaces (smart-city, monitoring, falco-system)
+2. Creates ConfigMaps from source files
+3. Applies all K8s manifests
+4. Waits for pods to be ready
+5. Deploys Falco via Helm
+
+### Code-Only Deploy (After Changes)
 
 ```bash
-# 1. Create app
-mkdir -p smart-city-services/my-app
-cd smart-city-services/my-app
-
-# 2. Create Flask app with vulnerability
-# vulnerability_example.py
-
-# 3. Create Dockerfile
-# Dockerfile
-
-# 4. Add to services-no-build.yaml manifest
-
-# 5. Update start script
+./scripts/deploy-code.sh
 ```
 
-### New Security Rule
+This script:
+1. Deletes existing ConfigMaps for IDS API and forwarders
+2. Recreates ConfigMaps from current source files on disk
+3. Deletes pods to trigger re-pull of ConfigMap data
+4. Waits for new pods to reach Ready state
+5. Reports deployment status
+
+Use `deploy-code.sh` after editing any file in `services/ids-api/src/`, `services/ids-api/static/`, or `services/forwarders/`.
+
+### Deploying IoT Service Changes
+
+IoT service code lives in `smart-city-services/<service>/app.py`. To deploy changes:
 
 ```bash
-# 1. Create Falco rule
-# Edit k8s-manifests/falco-rules.yaml
-
-- rule: Custom Suspicious Behavior
-  desc: Description of what triggers this rule
-  condition: >
-    spawned_process and
-    container and
-    proc.name in (suspicious_binary, another_binary)
-  output: >
-    Suspicious process spawned
-    (user=%user.name command=%proc.cmdline container_id=%container.id)
-  priority: WARNING
-
-# 2. Rebuild Falco image
-docker build -f docker/falco/Dockerfile .
-
-# 3. Test with attack simulator
-python3 attack-simulator/ddos_simulator.py ...
-```
-
----
-
-## Deployment for Development
-
-### Quick Deploy with Changes
-
-```bash
-# 1. Build and push image
-docker build -t my-registry/smart-city-ids:latest .
-docker push my-registry/smart-city-ids:latest
-
-# 2. Update manifest with new image tag
-# Edit k8s-manifests/ids-api-FINAL.yaml
-# Change image: to point to new version
-
-# 3. Redeploy
-kubectl set image deployment/ids-api \
-  ids-api=my-registry/smart-city-ids:latest \
+# Delete and recreate the ConfigMap
+kubectl delete configmap <service>-code -n smart-city
+kubectl create configmap <service>-code \
+  --from-file=app.py=smart-city-services/<service>/app.py \
   -n smart-city
 
-# 4. Watch rollout
-kubectl rollout status deployment/ids-api -n smart-city
-```
-
-### Local Testing with Docker Compose
-
-```bash
-# Create docker-compose.yml for local testing
-version: '3'
-services:
-  ids-api:
-    build: ./services/ids-api
-    ports:
-      - "8000:8000"
-    environment:
-      - XAI_API_KEY=${XAI_API_KEY}
-  
-  postgres:
-    image: postgres:15
-    environment:
-      - POSTGRES_PASSWORD=password
-    ports:
-      - "5432:5432"
-
-# Run
-docker-compose up
-
-# Test
-curl http://localhost:8000/health
+# Restart pods
+kubectl delete pods -l app=<service> -n smart-city
 ```
 
 ---
 
-## Pull Request Process
+## Code Architecture
 
-1. **Create PR** with clear title and description
-2. **Link issues** - Reference related GitHub issues
-3. **Add tests** - All new code must have tests
-4. **Run checks** - Ensure all CI checks pass
-5. **Code review** - Address reviewer feedback
-6. **Squash commits** - Clean up commit history
-7. **Merge** - Maintainer merges to main
+### Main Application (main.py)
 
-### PR Template
+The FastAPI app initializes on startup:
 
-```markdown
-## Description
-Brief summary of changes
+1. Load configuration from environment (`config.py`)
+2. Initialize database (PostgreSQL or memory fallback)
+3. Create LLM manager with all configured providers
+4. Initialize K8s automation client
+5. Create governance controller
+6. Start rate limiter, deduplicator, circuit breakers
+7. Restore Prometheus counters from database
+8. Register all route handlers
 
-## Related Issues
-Closes #123
+**Key entry point for alerts:** the `process_alert_pipeline()` function (called by both `/api/alerts` and `/api/alerts/internal`) handles the full flow: rate limit → dedup → LLM → governance → K8s action → persist.
 
-## Changes
-- Added feature X
-- Fixed bug Y
-- Updated documentation
+### Adding a New LLM Provider
+
+1. Create `services/ids-api/src/llm_engine_<name>.py` extending `BaseLLMEngine`
+2. Implement `analyze_alert(alert_data: dict) -> dict` — must return the standard response schema
+3. Register the engine in `llm_manager.py` (`ALL_PROVIDERS` list and initialization logic)
+4. Add `<NAME>_API_KEY` to `config.py`
+5. Add to `LLM_PRIORITY` default order
+6. Deploy: `./scripts/deploy-code.sh`
+
+### Adding a New K8s Automation Action
+
+1. Add method to `k8s_automation.py`
+2. Register the action name in `main.py`'s action dispatch (the `if action == "..."` block)
+3. Add to `operator_models.py` `ActionType` enum
+4. Update governance controller if the action needs approval logic
+5. Add Prometheus counter if tracking is needed
+
+### Adding a New API Endpoint
+
+1. Add route handler in `main.py`
+2. Add Pydantic models to `operator_models.py` if needed
+3. Choose auth: wrap with `Depends(api_key_dependency)` for JWT-protected, or leave open
+4. Add to the UI if user-facing (edit `static/index.html`)
+
+---
 
 ## Testing
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Deployed and tested on K3s
-- [ ] No regressions in existing functionality
 
-## Screenshots (if UI changes)
-[Optional screenshots]
+```bash
+cd services/ids-api/src
+source venv/bin/activate
+pip install pytest pytest-asyncio httpx
+
+# Run all tests
+pytest -q
+
+# Run specific test file
+pytest tests/test_llm_parsing.py -v
+```
+
+### What to Test
+
+| Area | How | Mock |
+|---|---|---|
+| LLM response parsing | Unit test JSON extraction and fallback | No mock needed (pure parsing) |
+| K8s automation | Unit test action methods | Mock `kubernetes.client` |
+| Alert rate limiter | Unit test window enforcement | No mock needed |
+| Governance decisions | Unit test mode logic | No mock needed |
+| API endpoints | Integration test with `httpx.AsyncClient` | Mock LLM + K8s |
+
+### Example Test
+
+```python
+import pytest
+from llm_engine_xai import XAIEngine
+
+def test_parse_json_response():
+    """LLM response with JSON fences should parse correctly."""
+    raw = '```json\n{"severity": 8, "summary": "test", "threat_type": "Malware"}\n```'
+    result = XAIEngine._parse_response(raw)
+    assert result["severity"] == 8
+    assert result["threat_type"] == "Malware"
+
+def test_parse_fallback():
+    """Unparseable response should return conservative fallback."""
+    raw = "I cannot analyze this alert."
+    result = XAIEngine._parse_response(raw)
+    assert result["severity"] == 5
+    assert result["threat_type"] == "Policy Violation"
 ```
 
 ---
 
-## Documentation
+## Debugging
 
-### Update docs when you:
-- Add new API endpoint
-- Change configuration options
-- Add new deployment feature
-- Fix significant bug
-- Change architecture
+### Pod Logs
 
-### Documentation Format
+```bash
+# IDS API logs
+kubectl logs -l app=ids-api -n smart-city --tail=100 -f
 
-```markdown
-## New Feature Title
+# Falco forwarder logs
+kubectl logs -l app=falco-forwarder -n falco-system --tail=50 -f
 
-**Purpose:** What does this feature do?
+# Suricata forwarder logs
+kubectl logs -l app=suricata-forwarder -n monitoring --tail=50 -f
+```
 
-**Location:** Where in the codebase?
+### Common Issues
 
-**Usage:**
-\`\`\`python
-# Example code
-\`\`\`
+| Problem | Cause | Fix |
+|---|---|---|
+| IDS API pods CrashLoopBackOff | Missing Python dependencies | Check `requirements.txt`, ensure ConfigMap has all source files |
+| LLM returns "fallback analysis" | API key expired/invalid, circuit breaker open | Check `/health` → `llm_providers`, reset circuit breakers |
+| K8s automation does nothing | Wrong KUBECONFIG, RBAC missing | `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`, check pod service account |
+| Falco not forwarding | Forwarder can't reach IDS API | Check service DNS, `kubectl get svc -n smart-city` |
+| Dashboard shows stale data | Browser cache | Hard refresh, check if pods are running |
+| Rate limiter blocking everything | Thresholds too low for attack simulation | Reset via `/api/rate-limiter/reset` or adjust env vars |
+| PostgreSQL unavailable | Pod not ready, wrong connection string | Check `kubectl get pods -n smart-city`, verify `DATABASE_URL` |
 
-**Configuration:**
-| Option | Default | Description |
-|--------|---------|-------------|
-| option1 | value1 | What it does |
+### Health Check
 
-**See Also:**
-- [Related Doc](link)
+```bash
+# Quick system check
+curl -s http://localhost:30800/health | jq .
+
+# Check LLM providers (needs auth)
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"operator","password":"operator"}' | jq -r .access_token)
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/llm/status | jq .
+
+# Check rate limiter
+curl -s http://localhost:30800/api/rate-limiter/status | jq .
+
+# Check circuit breakers
+curl -s http://localhost:30800/api/circuit-breaker/status | jq .
+```
+
+### Smoke Test
+
+```bash
+# Send a test alert and verify full pipeline
+curl -s -X POST http://localhost:30800/api/alerts/internal \
+  -H "Content-Type: application/json" \
+  -d '{
+    "output": "Shell spawned in container",
+    "priority": "Warning",
+    "rule": "Terminal shell in container",
+    "time": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+    "output_fields": {"container.name": "traffic-camera-test", "proc.cmdline": "/bin/bash"}
+  }' | jq .
 ```
 
 ---
 
-## Getting Help
+## Scripts Reference
 
-- **Questions:** Open GitHub Discussions
-- **Bugs:** Create GitHub Issue with reproduction steps
-- **Design Discussion:** Start a Discussion for architecture questions
+| Script | Purpose |
+|---|---|
+| `scripts/start-everything.sh` | Full cluster deploy (namespaces → ConfigMaps → manifests → Falco) |
+| `scripts/deploy-code.sh` | Quick code deploy (ConfigMap update + pod restart) |
+| `scripts/attack-iot-pipeline.sh` | 12 real attack scenarios through full IDS pipeline |
+| `attack-simulations/ids-demo-showcase.sh` | Guided demo walkthrough |
+| `attack-simulations/generate-security-events.sh` | Generate Falco-style security events |
+| `attack-simulations/generate-network-attacks.sh` | Generate network attack patterns |
+| `attack-simulations/generate-advanced-attacks.sh` | Generate advanced multi-stage attacks |
+| `attack-simulator/ddos_simulator.py` | Multi-threaded DDoS flood tool |
+| `attack-simulator/data_exfiltration.py` | Data exfiltration simulator |
+| `attack-simulator/privilege_escalation.py` | Privilege escalation simulator |
 
 ---
 
-## Contributors
+## Conventions
 
-- Smart City IDS Development Team
-- Contributors welcome! See [CONTRIBUTING.md](CONTRIBUTING.md)
-
----
-
-**Last Updated:** February 2026  
-**Maintained By:** Smart City IDS Team
+- **Do not remove** intentional vulnerabilities in `smart-city-services/` — they are the detection targets
+- **Protected services** (`healthcare-api`, `ids-api`, `postgres`) are never auto-isolated
+- **All external access** uses `localhost` NodePorts (30800, 30300, 31106) — no IP dependency
+- **LLM response parsing** always has a fallback (severity 5, "Policy Violation") — never crashes on bad LLM output
+- **ConfigMap-based deploys** — no Docker builds, no container registry, edit source files and run `deploy-code.sh`
+- Update `docs/` when changing architecture, thresholds, or API contracts

@@ -173,13 +173,14 @@ tr:hover td{background:rgba(0,212,255,.03)}
 
 <div class="tab-panel" id="tab-kubernetes">
   <div class="stat-grid" id="k8sStats"></div>
+  <div style="padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--text3);background:rgba(0,212,255,.04);border-radius:6px;border:1px solid var(--border)" id="k8sExplain"></div>
   <div class="row">
     <div class="card">
-      <div class="card-header"><h3>Pod Status</h3><button class="btn btn-outline btn-sm" onclick="loadK8s()">Refresh</button></div>
+      <div class="card-header"><h3>Pods</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Running container instances</span><button class="btn btn-outline btn-sm" onclick="loadK8s()">Refresh</button></div>
       <div class="card-body no-pad"><table><thead><tr><th>Pod</th><th>Status</th><th>Restarts</th><th>Namespace</th></tr></thead><tbody id="podsTable"></tbody></table></div>
     </div>
     <div class="card">
-      <div class="card-header"><h3>Services</h3></div>
+      <div class="card-header"><h3>Services</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Stable network endpoints that route to pods</span></div>
       <div class="card-body no-pad"><table><thead><tr><th>Service</th><th>Type</th><th>Port(s)</th><th>Namespace</th></tr></thead><tbody id="servicesTable"></tbody></table></div>
     </div>
   </div>
@@ -236,9 +237,28 @@ tr:hover td{background:rgba(0,212,255,.03)}
       <div class="attack-grid" id="attackGrid"></div>
     </div>
   </div>
-  <div class="card" style="margin-top:16px">
-    <div class="card-header"><h3>Simulation Log</h3><button class="btn btn-outline btn-sm" onclick="clearAttackLog()">Clear</button></div>
-    <div class="card-body"><pre id="attackLog" style="font-size:12px;color:var(--text2);max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre></div>
+  <div class="row" style="margin-top:16px">
+    <div class="card">
+      <div class="card-header"><h3>Simulation Log</h3><button class="btn btn-outline btn-sm" onclick="clearAttackLog()">Clear</button></div>
+      <div class="card-body"><pre id="attackLog" style="font-size:12px;color:var(--text2);max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>CLI Attack Scripts</h3><span style="font-size:11px;color:var(--text3)">Run from terminal for advanced scenarios</span></div>
+      <div class="card-body" style="font-size:12px">
+        <div style="margin-bottom:12px;color:var(--text2)">These scripts provide deeper attack simulations beyond the quick-inject cards above.</div>
+        <table><thead><tr><th>Script</th><th>Type</th><th>Description</th><th>Command</th></tr></thead><tbody>
+        <tr style="background:rgba(0,212,255,.06)"><td style="font-weight:600;color:var(--accent)">attack-iot-pipeline.sh</td><td><span class="badge badge-crit">Full Pipeline</span></td><td>12 real IoT attacks → IDS → LLM → response</td><td style="font-family:monospace;font-size:11px;color:var(--green)">bash scripts/attack-iot-pipeline.sh</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">demo_attack_runner.py</td><td><span class="badge badge-crit">Full Demo</span></td><td>10 attack scenarios with LLM analysis</td><td style="font-family:monospace;font-size:11px;color:var(--green)">python3 attack-simulator/demo_attack_runner.py --url http://localhost:30800 --scenario all</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">demo-showcase-full.sh</td><td><span class="badge badge-crit">Showcase</span></td><td>End-to-end demo with infra overview</td><td style="font-family:monospace;font-size:11px;color:var(--green)">bash attack-simulations/demo-showcase-full.sh</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">generate-security-events.sh</td><td><span class="badge badge-high">Hybrid</span></td><td>Real kubectl exec + IDS reporting</td><td style="font-family:monospace;font-size:11px;color:var(--green)">bash attack-simulations/generate-security-events.sh</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">generate-advanced-attacks.sh</td><td><span class="badge badge-med">Live K8s</span></td><td>Real attacks in pods (Falco detects)</td><td style="font-family:monospace;font-size:11px;color:var(--green)">bash attack-simulations/generate-advanced-attacks.sh</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">generate-network-attacks.sh</td><td><span class="badge badge-med">Live K8s</span></td><td>Network attacks (Suricata detects)</td><td style="font-family:monospace;font-size:11px;color:var(--green)">bash attack-simulations/generate-network-attacks.sh</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">ddos_simulator.py</td><td><span class="badge badge-info">Direct</span></td><td>HTTP flood against a service</td><td style="font-family:monospace;font-size:11px;color:var(--green)">python3 attack-simulator/ddos_simulator.py http://&lt;service&gt; 10 30</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">privilege_escalation.py</td><td><span class="badge badge-info">Direct</span></td><td>Privesc techniques against service</td><td style="font-family:monospace;font-size:11px;color:var(--green)">python3 attack-simulator/privilege_escalation.py http://&lt;service&gt; --report-ids http://localhost:30800</td></tr>
+        <tr><td style="font-weight:600;color:var(--accent)">data_exfiltration.py</td><td><span class="badge badge-info">Direct</span></td><td>Extract data from vulnerable services</td><td style="font-family:monospace;font-size:11px;color:var(--green)">python3 attack-simulator/data_exfiltration.py http://&lt;service&gt;</td></tr>
+        </tbody></table>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -318,7 +338,7 @@ function refreshAll(){
       var provNames=Object.keys(h.components.llm_providers);
       llmFromHealth={provider_count:h.llm_provider_count||provNames.length,providers:provNames};
     }
-    renderOverview(m,h,cb,safety,prod,gov);
+    renderOverview(m,h,cb,safety,prod,gov,llmFromHealth);
     renderAlertFeed(alerts);
     renderLLMOverview(llmFromHealth,cb);
     renderSystemHealth(h,prod);
@@ -331,14 +351,14 @@ function refreshAll(){
   });
 }
 
-function renderOverview(m,h,cb,safety,prod,gov){
+function renderOverview(m,h,cb,safety,prod,gov,llmFromHealth){
   if(!m)return;
   var uptime=m.uptime_seconds?formatDuration(m.uptime_seconds):'--';
   document.getElementById('overviewStats').innerHTML=
     '<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">'+(m.total_alerts||0)+'</div><div class="stat-sub">Processed by IDS pipeline</div></div>'+
     '<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">'+(m.critical_alerts||0)+'</div><div class="stat-sub">Severity 8+</div></div>'+
     '<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">'+(m.iot_devices_active||0)+'</div><div class="stat-sub">Active in cluster</div></div>'+
-    '<div class="stat-card purple"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+ALL_PROVIDERS.map(function(p){return p.id}).join(', ')+'</div></div>'+
+    '<div class="stat-card purple"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+(llmFromHealth&&llmFromHealth.providers?llmFromHealth.providers.join(', '):'none configured')+' (of '+ALL_PROVIDERS.length+' available)</div></div>'+
     '<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">'+(m.alert_reduction_percentage||0)+'%</div><div class="stat-sub">Duplicate alerts suppressed</div></div>'+
     '<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">'+uptime+'</div><div class="stat-sub">System operational</div></div>';
 }
@@ -388,7 +408,7 @@ function renderSystemHealth(h,prod){
   el.innerHTML=
     '<div style="display:grid;gap:8px;font-size:13px">'+
     '<div><span class="dot '+(c.kubernetes==='connected'?'dot-green':'dot-red')+'"></span>Kubernetes: '+(c.kubernetes||'unknown')+'</div>'+
-    '<div><span class="dot '+(c.database==='memory-fallback'?'dot-yellow':'dot-green')+'"></span>Database: '+(c.database||'unknown')+'</div>'+
+    '<div><span class="dot '+(c.database==='memory-fallback'?'dot-yellow':'dot-green')+'"'+'></span>Database: '+(c.database||'unknown')+(c.database==='memory-fallback'?' <span style="font-size:10px;color:var(--text3)">(PostgreSQL unavailable — using in-memory store, data lost on restart)</span>':' <span style="font-size:10px;color:var(--text3)">(persistent, 8 tables)</span>')+'</div>'+
     '<div><span class="dot '+(c.falco==='enabled'?'dot-green':'dot-red')+'"></span>Falco: '+(c.falco||'unknown')+'</div>'+
     '<div><span class="dot '+(c.suricata==='enabled'?'dot-green':'dot-red')+'"></span>Suricata: '+(c.suricata||'unknown')+'</div>'+
     '<div style="margin-top:4px;color:var(--text3);font-size:11px">Rate limit: '+(rl.total_requests||0)+' req ('+(rl.rejected_requests||0)+' rejected)</div>'+
@@ -419,7 +439,7 @@ function loadK8s(){
     var c=(h&&h.components)?h.components:{};
     document.getElementById('k8sStats').innerHTML=
       '<div class="stat-card green"><div class="stat-label">Kubernetes</div><div class="stat-value">'+(c.kubernetes==='connected'?'Connected':'Offline')+'</div><div class="stat-sub">Cluster API</div></div>'+
-      '<div class="stat-card blue"><div class="stat-label">Database</div><div class="stat-value">'+(c.database||'--')+'</div><div class="stat-sub">Storage backend</div></div>'+
+      '<div class="stat-card blue"><div class="stat-label">Database</div><div class="stat-value">'+(c.database==='memory-fallback'?'In-Memory':(c.database||'--'))+'</div><div class="stat-sub">'+(c.database==='memory-fallback'?'PostgreSQL offline — volatile storage':'PostgreSQL persistent storage')+'</div></div>'+
       '<div class="stat-card purple"><div class="stat-label">Falco</div><div class="stat-value">'+(c.falco||'--')+'</div><div class="stat-sub">Runtime detection</div></div>'+
       '<div class="stat-card orange"><div class="stat-label">Suricata</div><div class="stat-value">'+(c.suricata||'--')+'</div><div class="stat-sub">Network detection</div></div>';
     renderK8sTables();
@@ -448,6 +468,9 @@ function renderK8sTables(){
   ];
   var ph='';pods.forEach(function(p){ph+='<tr><td>'+p[0]+'</td><td><span class="dot dot-green"></span>'+p[1]+'</td><td>'+p[2]+'</td><td>'+p[3]+'</td></tr>'});
   document.getElementById('podsTable').innerHTML=ph;
+  // Pods/Services explanation
+  var explEl=document.getElementById('k8sExplain');
+  if(explEl)explEl.innerHTML='<strong>Pods</strong> are running container instances (the actual processes). <strong>Services</strong> are stable network endpoints that route traffic to pods — pods restart/move, but the service name and port stay the same.';
   // Real cluster services
   var svcs=[
     ['ids-api-service','NodePort','8000:30800','smart-city'],
@@ -563,7 +586,7 @@ function renderGovernanceTab(gov,dashboard){
   loadPending();
   loadHistory();
 }
-function setGovMode(mode){apiFetch('/api/governance/mode?mode='+mode,{method:'POST'}).then(function(){addLog('Governance mode changed to '+mode);refreshAll()})}
+function setGovMode(mode){apiFetch('/api/governance/mode?mode='+mode,{method:'POST'}).then(function(){refreshAll()})}
 function loadPending(){
   apiFetch('/api/governance/pending').then(function(data){
     var el=document.getElementById('pendingActions');
@@ -611,7 +634,8 @@ function renderAttackTab(){
 }
 
 function runAttack(type){
-  addLog('Launching: '+type+'...');
+  addLog('Launching: '+type+' ...');
+  addLog('  Payload: '+JSON.stringify(payloads[type]||"{}").substring(0,200)+'...');
   var ts=new Date().toISOString();
   var payloads={
     falco_shell:{output:'Terminal shell in container: bash was spawned in traffic-camera-north (user=root command=bash)',priority:'Critical',rule:'Terminal shell in container',time:ts,output_fields:{'container.name':'traffic-camera-north','proc.cmdline':'bash','user.name':'root'}},
@@ -626,9 +650,24 @@ function runAttack(type){
   if(!payload)return;
   fetch(API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
   .then(function(r){return r.json()})
-  .then(function(d){addLog('Alert injected - status: '+(d.status||'ok')+', severity: '+(d.severity||'-')+', engine: '+(d.llm_engine||'cooldown'))})
-  .catch(function(e){addLog('Error: '+e.message)});
-  setTimeout(refreshAll,1500);
+  .then(function(d){
+    var a=d.analysis||{};
+    var sev=a.severity||d.severity||'-';
+    var eng=a.llm_engine||a.model_used||d.llm_engine||'unknown';
+    var threat=a.threat_type||'-';
+    var summary=(a.summary||'').substring(0,120);
+    var actions=(d.actions_taken&&d.actions_taken.length)?d.actions_taken.join(', '):'none';
+    addLog('\n  ┌─ Alert Result ─────────────────────────────');
+    addLog('  │ Status:    '+(d.status||'ok'));
+    addLog('  │ Severity:  '+sev+'/10  │  Threat: '+threat);
+    addLog('  │ LLM Engine: '+eng);
+    addLog('  │ Summary:   '+summary);
+    addLog('  │ Actions:   '+actions);
+    addLog('  └──────────────────────────────────────────────\n');
+  })
+  .catch(function(e){addLog('ERROR: '+e.message)});
+  setTimeout(refreshAll,2000);
+  setTimeout(refreshAll,5000);
 }
 function showCustomModal(){
   document.getElementById('modalContent').innerHTML=
@@ -651,13 +690,21 @@ function sendCustom(){
   addLog('Sending custom alert: '+payload.rule);
   fetch(API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
   .then(function(r){return r.json()})
-  .then(function(d){addLog('Custom alert sent - '+(d.status||'ok'))})
-  .catch(function(e){addLog('Error: '+e.message)});
-  setTimeout(refreshAll,1500);
+  .then(function(d){
+    var a=d.analysis||{};
+    addLog('  ┌─ Custom Alert Result ──────────────────────');
+    addLog('  │ Status: '+(d.status||'ok')+' │ Severity: '+(a.severity||'-')+'/10');
+    addLog('  │ Threat: '+(a.threat_type||'-'));
+    addLog('  │ Summary: '+((a.summary||'').substring(0,120)));
+    addLog('  └──────────────────────────────────────────────');
+  })
+  .catch(function(e){addLog('ERROR: '+e.message)});
+  setTimeout(refreshAll,2000);
+  setTimeout(refreshAll,5000);
 }
 function closeModal(){document.getElementById('modalOverlay').classList.remove('open')}
 function clearAttackLog(){document.getElementById('attackLog').textContent=''}
-function addLog(msg){var el=document.getElementById('attackLog');var t=new Date().toLocaleTimeString();el.textContent+='['+t+'] '+msg+'\n';el.scrollTop=el.scrollHeight}
+function addLog(msg){var el=document.getElementById('attackLog');var t=new Date().toLocaleTimeString();var prefix=msg.startsWith('\n')||msg.startsWith('  ')?'          ':'['+t+'] ';el.textContent+=prefix+msg+'\n';el.scrollTop=el.scrollHeight}
 
 function updateTopBar(h,gov,llm){
   var cp=document.getElementById('clusterPill');

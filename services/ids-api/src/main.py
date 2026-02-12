@@ -917,6 +917,11 @@ class AlertResponse(BaseModel):
     analysis: Optional[Dict[str, Any]] = None
     actions_taken: Optional[List[str]] = None
     error: Optional[str] = None
+    severity: Optional[int] = None
+    threat_type: Optional[str] = None
+    summary: Optional[str] = None
+    llm_engine: Optional[str] = None
+    processing_time_ms: Optional[int] = None
 
 @app.get("/")
 async def root():
@@ -1755,7 +1760,12 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
             status="processed",
             alert_id=alert_id,
             analysis=analysis,
-            actions_taken=actions_taken
+            actions_taken=actions_taken,
+            severity=severity,
+            threat_type=threat_type,
+            summary=analysis.get("summary", "") if isinstance(analysis, dict) else "",
+            llm_engine=llm_used,
+            processing_time_ms=int((time.perf_counter() - started) * 1000)
         )
         
     except Exception as e:
@@ -2022,7 +2032,12 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
             status="processed",
             alert_id=alert_id,
             analysis=analysis,
-            actions_taken=actions_taken
+            actions_taken=actions_taken,
+            severity=severity,
+            threat_type=threat_type,
+            summary=analysis.get("summary", "") if isinstance(analysis, dict) else "",
+            llm_engine=llm_used,
+            processing_time_ms=int((time.perf_counter() - started) * 1000)
         )
         
     except Exception as e:

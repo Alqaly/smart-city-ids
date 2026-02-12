@@ -1,511 +1,256 @@
-# How Smart City IDS Works: Technical Deep Dive
+# How It Works — Smart City IDS
 
-This document explains the complete data flow and architecture of the Smart City IDS system, from threat detection to automated response.
-
----
-
-## Table of Contents
-
-1. [System Overview](#system-overview)
-2. [Component Architecture](#component-architecture)
-3. [Data Flow: Complete Example](#data-flow-complete-example)
-4. [Real vs. Emulated](#real-vs-emulated)
+End-to-end walkthrough of the system, from detection to automated response.
 
 ---
 
-## System Overview
+## 1. The Smart City Environment
 
-The Smart City IDS is a **real-time security orchestration system** that:
+The cluster runs intentionally vulnerable IoT services — simulating real smart-city infrastructure:
 
-1. **Detects** security threats using runtime and network monitoring tools (Falco, Suricata)
-2. **Analyzes** threats using Large Language Models (xAI Grok, OpenAI GPT)
-3. **Responds** automatically with Kubernetes actions (pod isolation, scaling, eviction)
-4. **Observes** the entire process through Prometheus metrics and Grafana dashboards
-5. **Persists** all decisions in PostgreSQL for auditing and analysis
+| Service | What It Does | Vulnerabilities (by design) |
+|---|---|---|
+| **traffic-camera** | License plate recognition, camera feeds | Command injection, path traversal, no auth |
+| **healthcare-api** | Patient records, medical data | SQL injection, no input validation |
+| **parking-system** | Reservations, payments | Injection, weak session handling |
+| **mqtt-broker** | MQTT pub/sub for sensors | Unauthenticated, no TLS |
+| **iot-simulators** | 20 pods generating sensor telemetry | High event volume for realism |
 
----
-
-## Component Architecture
-
-### Layer 1: IoT Device Emulation (30-100 pods)
-
-**Purpose:** Generate realistic IoT traffic and events
-
-**Components:**
-- 30-100 MQTT-connected containers simulating:
-  - Traffic cameras (high message rate: 1-2 msg/sec)
-  - Environmental sensors (medium: 1 msg/10 sec)
-  - Motion detectors (low/burst: 1 msg/30 sec)
-
-**Real Behavior:**
-```
-IoT Pod #1 → Opens TCP connection to MQTT Broker
-            → Publishes JSON message every 2 seconds
-            → Message: {"vehicle_count": 47, "avg_speed": 35}
-            → Broker stores message in memory
-            
-IoT Pod #2 → Same process, different device type
-            → Message: {"temperature_c": 22.5, "humidity": 65}
-```
-
-**Why Real:**
-- Uses real MQTT protocol (binary, not text)
-- Real TCP/IP networking between pods
-- Real message serialization/deserialization
-- Can be detected by network monitoring tools
+These services are deployed from `smart-city-services/` and mounted into Kubernetes via ConfigMaps — no Docker builds required.
 
 ---
 
-### Layer 2: Security Monitoring Tools
+## 2. Detection Layer
 
-#### **Falco (Runtime IDS)**
+Two independent detection engines monitor the cluster:
 
-**Purpose:** Detect suspicious process and system behavior inside containers
+### Falco (Runtime Detection)
+- Runs as a DaemonSet using eBPF probes
+- Detects syscall-level threats: shell spawns, sensitive file reads, privilege escalation
+- Outputs structured JSON alerts with `rule`, `output`, `output_fields`, `priority`
+- Configured via `k8s-manifests/falco-values.yaml`
 
-**How It Works:**
-```
-Container Process Executes System Call
-    ↓
-eBPF Kernel Hook Intercepts
-    ↓
-Compare Against 100+ Rules (YAML-defined)
-    ↓
-If Match → Generate Alert JSON
-    ↓
-Forward to IDS API
-```
+### Suricata (Network Detection)
+- Runs as a pod in the monitoring namespace
+- Analyzes network traffic with signature rules
+- Detects: port scans, DDoS patterns, DNS tunneling, known exploit signatures
+- Outputs EVE JSON logs parsed by the Suricata forwarder
 
-**Example Detection:**
-```
-Rule: "Terminal shell in container"
-Triggered When:
-  - Process name = "bash" OR "sh"
-  - Container name matches known workload (traffic-camera, healthcare-api)
-  - Process was NOT started by parent process
-
-Real Event:
-  Pod: traffic-camera-7ddc6b8db6-nj8w7
-  Process: /bin/bash (PID 1234)
-  User: root
-  Parent: supervisord (suspicious!)
-  
-Alert Output:
-{
-  "rule": "Terminal shell in container",
-  "priority": "Critical",
-  "output": "A shell was spawned inside the container",
-  "output_fields": {
-    "container.name": "traffic-camera-7ddc6b8db6-nj8w7",
-    "proc.pid": 1234,
-    "proc.name": "bash",
-    "proc.cmdline": "/bin/bash",
-    "user.name": "root"
-  }
-}
-```
-
-**Why Real:**
-- Detects actual kernel syscalls (`execve`, `open`, `connect`, etc.)
-- Rules are from Falco community project (battle-tested)
-- Zero false negatives for configured threats
+Both detectors feed their alerts through **forwarders** — lightweight Python services that:
+1. Parse raw alert output into a normalized JSON shape
+2. Deduplicate repeated alerts (fingerprint-based, 60s window)
+3. Map priority strings to numeric severity (1–10)
+4. POST to `http://ids-api:8000/api/alerts/internal`
 
 ---
 
-#### **Suricata (Network IDS)**
+## 3. Alert Intake
 
-**Purpose:** Detect suspicious network traffic patterns
+When an alert arrives at `/api/alerts/internal`, the IDS API applies multiple protective layers before any LLM call:
 
-**How It Works:**
 ```
-Network Packet Traverses CNI Interface
-    ↓
-Suricata Decodes Packet (Layer 7: Application)
-    ↓
-Match Against ET (Emerging Threats) Rules
-    ↓
-If Match → Generate Alert
-    ↓
-Forward to IDS API
-```
-
-**Example Detection:**
-```
-Packet: IoT Pod sends HTTP GET to suspicious IP
-  Source: 10.42.1.47 (IoT Pod)
-  Destination: 203.0.113.45 (Malicious C2 Server)
-  Protocol: HTTP
-  URI: /api/cmd?id=12345
-
-Rule Match: "ET TROJAN Known Botnet C2"
-Alert:
-{
-  "event_type": "alert",
-  "alert": {
-    "action": "alert",
-    "signature": "Known Botnet C2 Communication Detected",
-    "category": "Trojan Traffic"
-  },
-  "src_ip": "10.42.1.47",
-  "dest_ip": "203.0.113.45",
-  "dest_port": 80
-}
+Incoming alert
+    │
+    ├─ Token bucket rate limiter (120/min refill, 30 burst)
+    │   └─ Exceeded → HTTP 429
+    │
+    ├─ Request queue semaphore (max 100 concurrent)
+    │   └─ Full → HTTP 503
+    │
+    ├─ Alert rate limiter (sliding window)
+    │   ├─ Per-rule: max 10 per 60s
+    │   ├─ Per-source: max 100 per 60s
+    │   └─ Global: max 500 per 60s
+    │       └─ Exceeded → stored in throttled_alerts table, HTTP 429
+    │
+    └─ Dedup cache (MD5 fingerprint, 60s TTL)
+        └─ Cache hit → return previous analysis immediately, skip LLM
 ```
 
-**Why Real:**
-- Inspects actual packet payloads
-- Uses curated threat intelligence rules
-- Detects known attack patterns with high confidence
+This stack prevents a flood of Falco alerts (common during active attacks) from overwhelming the LLM provider or running up API costs.
 
 ---
 
-### Layer 3: Alert Forwarding
+## 4. LLM Analysis
 
-**Falco Forwarder & Suricata Forwarder**
+If the alert passes all filters (not rate-limited, not a duplicate), it goes to the LLM manager.
 
-Purpose: Normalize and forward raw security alerts to the IDS API
+### Provider Selection
 
-**Process:**
-```
-Raw Alert (from Falco/Suricata)
-    ↓
-Forwarder Pod Receives
-    ↓
-Parse & Normalize JSON
-    ↓
-POST to IDS API: /api/alerts
-    ↓
-HTTP 200 OK response
-```
+The manager maintains a priority-ordered list of LLM engines. For each call:
 
-**Real Behavior:**
-- Forwarders are stateless consumers
-- Can scale horizontally (multiple replicas handle high alert volume)
-- Network transport is HTTP/HTTPS (TLS optional)
+1. Check if engine's **circuit breaker** is open → skip if so
+2. Check if engine is in **cooldown** (15min after auth/quota error) → skip if so
+3. Attempt API call with the alert context
 
----
+If the call fails, the manager tries the next provider. The local fallback engine always succeeds (no network call).
 
-### Layer 4: IDS API (Decision Engine)
+### The Prompt
 
-**Purpose:** Receive alerts, analyze with LLM, execute automated actions
+Each engine sends a system prompt that instructs the LLM to act as a cybersecurity analyst. The prompt includes:
 
-**Architecture:**
-```
-POST /api/alerts (Receives alert)
-    ↓
-┌─────────────────────────────────────┐
-│ PHASE 1: Alert Parsing & Storage    │
-│ - Extract rule, priority, container │
-│ - Store raw alert in PostgreSQL     │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│ PHASE 2: LLM Analysis               │
-│ - Build system prompt with context  │
-│ - Call xAI Grok or OpenAI GPT       │
-│ - Parse JSON response               │
-│ - Extract: severity, threat_type    │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│ PHASE 3: Decision Logic             │
-│ if severity >= 8:                   │
-│    execute isolate_pod()            │
-│ elif severity >= 6:                 │
-│    execute scale_up()               │
-│ else:                               │
-│    log_only()                       │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│ PHASE 4: Kubernetes Automation      │
-│ - Call Kubernetes API               │
-│ - Apply network policies, scale     │
-│ - Record action in PostgreSQL       │
-└─────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────┐
-│ PHASE 5: Metrics Emission           │
-│ - Increment Prometheus counters     │
-│ - Record LLM latency histogram      │
-│ - Export metrics via /metrics       │
-└─────────────────────────────────────┘
-    ↓
-HTTP 200 OK (Alert processed)
-```
+- The alert rule name, output text, and raw output fields
+- Instructions to return **only** valid JSON
+- The exact response schema (severity, threat_type, summary, recommendations, automated_actions)
+- Constraint: severity 1–10, threat_type from a known set
 
-**Real Code Example:**
-```python
-@app.post("/api/alerts")
-async def receive_alert(alert: Alert):
-    # 1. Validate and store
-    db_alert = db.save_alert(alert)
-    
-    # 2. Call LLM
-    start_time = time.time()
-    analysis = await xai_engine.analyze_alert(alert)
-    llm_latency = time.time() - start_time
-    
-    # 3. Save analysis
-    db.save_analysis(db_alert.id, analysis)
-    
-    # 4. Take action if needed
-    if analysis["severity"] >= 8:
-        k8s.isolate_pod(alert.output_fields["container.name"])
-        db.save_action("isolate_pod", alert.id)
-        metrics.actions_executed["isolate_pod"].inc()
-    
-    # 5. Emit metrics
-    metrics.alerts_received.inc()
-    metrics.severity[analysis["severity"]].inc()
-    metrics.llm_latency.observe(llm_latency)
-    
-    return {"status": "processed", "alert_id": db_alert.id}
-```
+### Response Parsing
 
-**Why Real:**
-- Makes real HTTP calls to LLM APIs (costs real money)
-- Uses real Kubernetes client (kubectl under the hood)
-- Stores in real PostgreSQL database
-- Emits real Prometheus metrics
+The engine attempts to extract JSON from the response:
+1. Look for ```json fences
+2. Look for raw `{...}` JSON
+3. Validate required fields (severity, summary, threat_type)
+4. If parsing fails entirely → return conservative fallback analysis (severity 5, "Policy Violation")
+
+### Local Fallback Engine
+
+When no cloud LLM is available (all have open circuit breakers or no API keys), the local engine performs pattern matching against 11 rules:
+
+- Matches keywords in the alert `output` and `rule` fields
+- Returns pre-defined severity and threat type per pattern
+- Zero latency, zero cost, always available
+- Used as the last resort in the provider chain
 
 ---
 
-### Layer 5: PostgreSQL (Persistent Storage)
+## 5. Automated Response
 
-**Purpose:** Store all alerts, analyses, and actions for auditing and forensics
+After LLM analysis, the system decides what to do based on severity and governance mode:
 
-**Tables:**
-```sql
-alerts:
-  - id (UUID)
-  - source (falco, suricata)
-  - rule (string)
-  - container_name (string)
-  - severity (1-10)
-  - timestamp (datetime)
-  - raw_alert_json (jsonb)
+### Severity Thresholds
 
-analysis_results:
-  - id (UUID)
-  - alert_id (FK)
-  - llm_engine (xai-grok, openai)
-  - severity (1-10)
-  - threat_type (string)
-  - summary (text)
-  - recommendations (array)
-  - llm_latency_ms (integer)
+| Severity | Action | Details |
+|---|---|---|
+| ≥ 8 (critical) | `isolate_pod` | Creates a deny-all NetworkPolicy for the pod's container |
+| ≥ 6 (high) | `scale_up` | Patches the deployment to 5 replicas (absorb load) |
+| < 6 | No automated action | Logged only |
 
-automation_actions:
-  - id (UUID)
-  - alert_id (FK)
-  - action_type (isolate_pod, scale_up, evict)
-  - target_pod (string)
-  - executed_at (datetime)
-  - result (success, failed, pending_approval)
-```
+### Protected Services
 
-**Real Behavior:**
-- All data persists to disk
-- Supports ACID transactions
-- Can query historical data
-- Enables compliance/audit trail
+Some services are exempt from automated isolation to prevent self-disruption:
+- `healthcare-api` — critical patient data
+- `ids-api` — the IDS itself
+- `postgres` — persistence layer
+
+If a critical alert targets a protected service, the action is logged as `blocked_protected_service` instead of executed.
+
+### Kubernetes Operations
+
+`k8s_automation.py` uses the official Kubernetes Python client:
+
+- **isolate_pod**: Creates a `NetworkPolicy` named `isolate-{pod-name}` with empty ingress/egress rules
+- **scale_up**: Patches the deployment's replica count via the Apps V1 API
+- **block_ip**: Creates a `NetworkPolicy` with a CIDR-based ingress deny rule
+- **cordon_node**: Patches the node spec to set `unschedulable: True`
+- **restart_service**: Deletes pods matching the deployment label (rolling restart)
 
 ---
 
-### Layer 6: Prometheus (Metrics Collection)
+## 6. Governance (Human-in-the-Loop)
 
-**Purpose:** Collect time-series metrics from all components
+The governance controller mediates between automated analysis and K8s actions:
 
-**Scrape Process:**
-```
-Every 5 seconds:
-  Prometheus → HTTP GET /metrics (from IDS API)
-              → HTTP GET /metrics (from MQTT Broker)
-              → HTTP GET /metrics (from each service)
-  
-  Collect response:
-    ids_alerts_received_total{source="falco"} 1042
-    ids_severity_total{severity="8"} 15
-    ids_severity_total{severity="9"} 8
-    ids_llm_latency_seconds_bucket{le="1.0"} 35
-    ids_llm_latency_seconds_bucket{le="5.0"} 40
-    ...
-  
-  Store in TSDB (Time-Series Database)
-  at /prometheus/data/
-```
+### Modes
 
-**Real Behavior:**
-- Stores 15 days of data by default
-- Enables time-series queries and graphing
-- Detects trends and anomalies
-- Powers alerting rules
+| Mode | Behavior |
+|---|---|
+| **Autopilot** | All actions execute immediately without approval |
+| **Assisted** | Actions auto-execute if severity < 8; severity ≥ 8 queued for approval |
+| **Manual** | All actions queued for operator approval |
 
----
+### Approval Workflow
 
-### Layer 7: Grafana (Visualization)
+1. Action is proposed (isolate_pod, scale_up, etc.)
+2. Governance controller evaluates: can it auto-execute?
+   - If yes → execute immediately, log to audit
+   - If no → add to pending queue with 5-minute expiry
+3. Operator sees pending actions in the dashboard
+4. Operator approves (executes + logs) or rejects (logs reason)
+5. Expired actions are cleaned up automatically
 
-**Purpose:** Display system health and security posture in real-time
+### Audit Trail
 
-**Dashboards:**
-```
-Smart City IDS Dashboard
-├─ Alert Rate (5-min moving average)
-│  └─ Query: rate(ids_alerts_received_total[5m])
-│     Shows: Spikes indicate attacks/anomalies
-│
-├─ Severity Distribution (pie chart)
-│  └─ Query: sum by (severity) (ids_severity_total)
-│     Shows: What % of alerts are critical vs. informational
-│
-├─ LLM Response Time (histogram)
-│  └─ Query: histogram_quantile(0.95, ids_llm_latency_seconds)
-│     Shows: p95 LLM latency (SLO = 5 seconds)
-│
-├─ Automated Actions (bar chart)
-│  └─ Query: sum by (action) (increase(ids_actions_executed_total[1h]))
-│     Shows: How many pods were isolated, scaled, etc.
-│
-└─ Pod Health (table)
-   └─ Query: kube_pod_container_restarts_total
-      Shows: Which pods are crashing
-```
-
-**Why Real:**
-- Queries actual Prometheus API
-- Displays live, interactive graphs
-- Supports drill-down and time-range selection
-- Enables real-time incident response
+Every governance decision is recorded in the `audit_logs` table:
+- Action type, target, severity, mode at time of decision
+- Who approved/rejected, when, with what comment
+- Execution result (success/failure)
 
 ---
 
-## Data Flow: Complete Example
+## 7. Persistence
 
-**Scenario:** An attacker gains shell access to a traffic camera pod
+### PostgreSQL (Primary)
 
-```
-[T=0ms] Attacker executes: kubectl exec -it traffic-camera-xyz -- /bin/bash
+8 tables store the full operational history:
+- `alerts` — every processed alert with full LLM analysis (JSONB)
+- `analysis_results` — LLM model used, analysis time, confidence
+- `automation_actions` — K8s actions taken, status, governance mode
+- `audit_logs` — governance decisions and operator actions
+- `iot_devices` — device registry (auto-populated from sensor data)
+- `iot_events` — telemetry history
+- `system_logs` — application logs
+- `throttled_alerts` — rate-limited alerts (for visibility)
 
-[T=10ms] Process /bin/bash is created in container
-        Falco eBPF hook detects syscall: execve("/bin/bash")
-        Compares against rules
-        Rule "Terminal shell in container" MATCHES
+### Memory Fallback
 
-[T=20ms] Falco generates alert JSON:
-        {
-          "rule": "Terminal shell in container",
-          "priority": "Critical",
-          "output": "A shell was spawned inside the container",
-          "output_fields": {
-            "container.name": "traffic-camera-xyz",
-            "proc.name": "bash",
-            "proc.pid": 5678
-          }
-        }
+If PostgreSQL is unreachable at startup, the system falls back to in-memory storage:
+- Same API, same data model
+- Data is lost on pod restart
+- The `/health` and `/api/metrics` endpoints report `storage_type: "memory"` vs `"postgresql"`
 
-[T=25ms] Falco Forwarder receives alert
-        POST /api/alerts with the JSON
+### Prometheus Counter Restoration
 
-[T=26ms] IDS API receives request
-        Stores alert in PostgreSQL
-        Calls xAI Grok LLM with context
-
-[T=26 + LLM_LATENCY] xAI API returns:
-        {
-          "severity": 9,
-          "threat_type": "Privilege Escalation",
-          "summary": "Unauthorized shell access to containerized service"
-        }
-
-[T=27.5s] IDS API checks: severity 9 >= 8 (threshold)
-         Executes isolate_pod("traffic-camera-xyz")
-         
-         Kubernetes Action:
-         kubectl create networkpolicy --deny-all -l pod=traffic-camera-xyz
-
-[T=28ms] Pod is now isolated
-        - Cannot send outbound connections
-        - Cannot receive inbound connections
-        - But stays running (for forensics)
-
-[T=28.5ms] IDS API saves action to PostgreSQL:
-         INSERT INTO automation_actions
-         (alert_id, action_type, target_pod, result)
-         VALUES (1, 'isolate_pod', 'traffic-camera-xyz', 'success')
-
-[T=29ms] IDS API emits Prometheus metrics:
-        ids_severity_total{severity="9"} += 1
-        ids_actions_executed_total{action="isolate_pod"} += 1
-        ids_llm_latency_seconds.observe(1.5)
-
-[T=35ms] Prometheus scrapes /metrics endpoint
-        Stores the new metric values
-
-[T=35s] Grafana dashboard updates
-       Shows:
-       - Alert count increased by 1
-       - 1 pod was isolated in last 5 seconds
-       - Severity histogram updated with a "9"
-
-[T=5m] Security analyst is alerted by Grafana
-      Logs into dashboard
-      Sees the isolated pod
-      Reviews the attack chain:
-        - Original alert: shell spawn
-        - LLM analysis: privilege escalation threat
-        - Action taken: pod isolation
-        - Time to mitigation: 1.5 seconds
-      
-      Analyst approves the action or rolls it back
-```
+On startup, the database restores Prometheus counters from persisted data so metrics survive pod restarts. This prevents counter resets from appearing as drops in Grafana dashboards.
 
 ---
 
-## Real vs. Emulated
+## 8. Operator Dashboard
 
-### What Is REAL
+A single-page HTML application served at `/ui` (NodePort 30800):
 
-| Component | Real Behavior | Evidence |
-|-----------|---------------|----------|
-| **IoT Traffic** | Real MQTT messages, real TCP/IP | Packet capture shows actual protocol |
-| **Falco Alerts** | Real kernel syscalls, real eBPF | Detects actual process creation |
-| **Suricata Alerts** | Real packet inspection, real IDS rules | Matches known attack signatures |
-| **IDS API Processing** | Real FastAPI application, real business logic | HTTP logs show processing pipeline |
-| **LLM Calls** | Real API calls to xAI/OpenAI | API costs real money per call |
-| **Kubernetes Actions** | Real kubectl commands, real NetworkPolicies | kubectl describe networkpolicies confirms |
-| **PostgreSQL Storage** | Real SQL queries, real disk persistence | psql shows stored data after restart |
-| **Prometheus Metrics** | Real time-series data, real scrapes | PromQL queries return numeric data |
-| **Grafana Dashboards** | Real live data visualization | Browser shows interactive charts |
+| Tab | Data Source | What It Shows |
+|---|---|---|
+| **Overview** | `/health`, `/api/metrics` | System status, alert counts, LLM engine health |
+| **Incidents** | `/api/operator/incidents` | Alert feed with severity, evidence, actions |
+| **Governance** | `/api/governance/*` | Mode control, pending approvals, audit history |
+| **LLM Engines** | `/api/llm/status`, `/health` | Provider status, circuit breakers, cooldowns |
+| **Kubernetes** | `/api/production-status` | Pod status, network policies, automation actions |
+| **IoT Devices** | `/api/iot/devices`, `/api/iot/events` | Device registry, telemetry, security events |
+| **Attack Simulation** | Client-side | One-click attack buttons + CLI script reference |
 
-### What Is EMULATED (By Design)
-
-| Aspect | Emulated As | Why |
-|--------|------------|-----|
-| **City Scale** | 30-100 IoT pods | Cannot deploy to actual city; scaled for testing |
-| **Device Diversity** | Traffic/environment/motion types | Represents actual device classes |
-| **Attack Scenarios** | ddos_simulator.py script | Can't attack real infrastructure |
-| **Attack Timing** | Injected on demand | Can replay scenarios reproducibly |
-| **Geographic Distribution** | All in single K3s cluster | Single test environment is sufficient |
-
-### Key Principle
-
-**The system detects and responds to REAL security events, even if the devices and attacks are EMULATED at scale.**
-
-This is methodologically sound because:
-1. **Real detection tools** (Falco, Suricata) trigger on real behavior
-2. **Real processing** (IDS API, LLM) analyzes the real evidence
-3. **Real response** (Kubernetes) executes the decided action
-4. **Real persistence** (PostgreSQL) stores the outcome
-5. **Real metrics** (Prometheus) measure the response
-
-The emulation aspect (scale, device count, attack injection) is transparent and does not affect the validity of the security analysis.
+The dashboard auto-refreshes data every 30 seconds. Unauthenticated tabs (`/health`, `/api/metrics`) load immediately; authenticated tabs prompt for login.
 
 ---
 
-## References
+## 9. Attack Simulation
 
-- [Falco Documentation](https://falco.org/docs/)
-- [Suricata Documentation](https://suricata.readthedocs.io/)
-- [Kubernetes Documentation](https://kubernetes.io/docs/)
-- [Prometheus Documentation](https://prometheus.io/docs/)
-- [Grafana Documentation](https://grafana.com/docs/grafana/)
+### Dashboard Buttons
+
+The Attack Simulation tab provides one-click attack triggers that POST pre-built alert payloads to `/api/alerts/internal`. These test the full pipeline without executing real attacks.
+
+### CLI Pipeline Script
+
+`scripts/attack-iot-pipeline.sh` executes 12 real attack scenarios against the running cluster:
+
+1. Shell spawn in traffic-camera pod
+2. `/etc/shadow` read in healthcare-api pod
+3. License plate data exfiltration
+4. Patient record exfiltration
+5. SUID privilege escalation
+6. DDoS flood simulation
+7. Port scan detection
+8. DNS exfiltration
+9. Lateral movement
+10. SQL injection probe
+11. Cryptominer detection
+12. MQTT message poisoning
+
+Each scenario: executes the attack (or simulates it) → sends alert to IDS API → LLM analyzes → automated response applied. Run with `--quick` for a 5-scenario subset or `--scenario N` for a single test.
+
+### External Attack Tools
+
+`attack-simulator/` contains standalone Python scripts:
+- `ddos_simulator.py` — multi-threaded HTTP flood
+- `data_exfiltration.py` — simulated data theft
+- `privilege_escalation.py` — container escape simulation
+- `phase4-smart-city-attacks.py` — compound attack scenarios

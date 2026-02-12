@@ -1,324 +1,291 @@
-# Smart City IDS - Architecture
+# Architecture — Smart City IDS
 
-Technical architecture documentation for the LLM-driven Intrusion Detection System.
+Technical architecture reference for the LLM-driven Intrusion Detection System.
 
 ---
 
 ## System Overview
 
+The Smart City IDS is a Kubernetes-native intrusion detection system that uses LLM-based threat analysis to monitor intentionally vulnerable IoT services. It runs on a single-node K3s cluster with four Kubernetes namespaces.
+
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            Smart City IDS Architecture                       │
-├─────────────────────────────────────────────────────────────────────────────┤
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  K3s Cluster (single node)                                                   │
 │                                                                              │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                      │
-│  │   Traffic   │    │  Healthcare │    │   Parking   │   Smart City         │
-│  │   Camera    │    │     API     │    │   System    │   Services           │
-│  │   :5000     │    │    :5001    │    │    :5002    │   (Vulnerable)       │
-│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘                      │
-│         │                  │                  │                              │
-│         └──────────────────┼──────────────────┘                              │
-│                            ▼                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                        Kubernetes Cluster (K3s)                         ││
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    ││
-│  │  │   Falco     │  │  Suricata   │  │   MQTT      │  │    IoT      │    ││
-│  │  │  (Runtime)  │  │  (Network)  │  │   Broker    │  │  Devices    │    ││
-│  │  └──────┬──────┘  └──────┬──────┘  └─────────────┘  └─────────────┘    ││
-│  │         │                │                                              ││
-│  │         ▼                ▼                                              ││
-│  │  ┌─────────────────────────────────────────────────────────────────┐   ││
-│  │  │                    Falco Forwarder                               │   ││
-│  │  │              (Normalizes alerts → IDS API)                       │   ││
-│  │  └──────────────────────────┬──────────────────────────────────────┘   ││
-│  │                             ▼                                          ││
-│  │  ┌─────────────────────────────────────────────────────────────────┐   ││
-│  │  │                        IDS API                                   │   ││
-│  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │   ││
-│  │  │  │   FastAPI   │  │ LLM Engine  │  │   K8s Automation        │  │   ││
-│  │  │  │  Endpoints  │◄─┤ (xAI/OpenAI)│─►│ (isolate/scale/evict)   │  │   ││
-│  │  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │   ││
-│  │  │                                                                  │   ││
-│  │  │  ┌─────────────────────────────────────────────────────────────┐│   ││
-│  │  │  │                     PostgreSQL                              ││   ││
-│  │  │  │ (alerts, analysis_results, automation_actions, audit_logs)  ││   ││
-│  │  │  └─────────────────────────────────────────────────────────────┘│   ││
-│  │  └─────────────────────────────────────────────────────────────────┘   ││
-│  │                             │                                          ││
-│  │                             ▼                                          ││
-│  │  ┌─────────────────────────────────────────────────────────────────┐   ││
-│  │  │                    Monitoring Stack                              │   ││
-│  │  │  ┌─────────────┐                    ┌─────────────┐             │   ││
-│  │  │  │  Prometheus │───────────────────►│   Grafana   │             │   ││
-│  │  │  │   :9090     │    metrics         │    :3000    │             │   ││
-│  │  │  └─────────────┘                    └─────────────┘             │   ││
-│  │  └─────────────────────────────────────────────────────────────────┘   ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
+│  ┌─── smart-city ──────────────────────────────────────────────────────────┐ │
+│  │  IoT Services (intentionally vulnerable)                                │ │
+│  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐  │ │
+│  │  │traffic-camera│ │healthcare-api│ │parking-system│ │  mqtt-broker  │  │ │
+│  │  │   (×2 pods)  │ │   (×2 pods)  │ │   (×2 pods)  │ │   (×1 pod)   │  │ │
+│  │  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘  │ │
+│  │         │                │                │                │           │ │
+│  │  ┌──────┴────────────────┴────────────────┴────────────────┘           │ │
+│  │  │  IoT Simulators: enhanced(×10) + high(×4) + medium(×5) + burst(×1) │ │
+│  │  └────────────────────────────────────────────────────────────────┬──┐ │ │
+│  │                                                                   │  │ │ │
+│  │  ┌───────────────────────────────────────────┐  ┌──────────────┐  │  │ │ │
+│  │  │           IDS API  (×2 pods)              │  │  PostgreSQL  │  │  │ │ │
+│  │  │  FastAPI · LLM Analysis · K8s Automation  │──│  (persistence)│  │  │ │ │
+│  │  │  NodePort 30800                           │  └──────────────┘  │  │ │ │
+│  │  └──────────────┬────────────────────────────┘                    │  │ │ │
+│  └─────────────────┼─────────────────────────────────────────────────┘  │ │ │
+│                    │                                                     │ │
+│  ┌─── falco-system ┼────────────────────────────────────────────────────┐│ │
+│  │  ┌──────────┐   │   ┌───────────────────┐  ┌────────────────────┐   ││ │
+│  │  │  Falco   │───┼──→│ Falco Forwarder   │─→│  IDS API /alerts   │   ││ │
+│  │  │(DaemonSet│   │   │ (dedup + reshape) │  │                    │   ││ │
+│  │  └──────────┘   │   └───────────────────┘  └────────────────────┘   ││ │
+│  └─────────────────┼───────────────────────────────────────────────────┘│ │
+│                    │                                                     │ │
+│  ┌─── monitoring ──┼────────────────────────────────────────────────────┐│ │
+│  │  ┌──────────┐   │   ┌───────────────────┐                           ││ │
+│  │  │ Suricata │───┼──→│Suricata Forwarder │─→ IDS API                 ││ │
+│  │  └──────────┘   │   └───────────────────┘                           ││ │
+│  │  ┌──────────┐       ┌──────────────────┐                            ││ │
+│  │  │Prometheus│       │     Grafana      │   NodePort 30300           ││ │
+│  │  │ NP 31106 │       └──────────────────┘                            ││ │
+│  │  └──────────┘                                                        ││ │
+│  └──────────────────────────────────────────────────────────────────────┘│ │
+└──────────────────────────────────────────────────────────────────────────┘ │
+                     │                                                       │
+              ┌──────┴──────┐                                                │
+              │  LLM APIs   │  xAI Grok-4 · OpenAI GPT-4 · Anthropic Claude │
+              │  (external) │  Google Gemini · Moonshot Kimi · Local Fallback│
+              └─────────────┘
 ```
 
 ---
 
-## Component Details
+## Namespaces and Pod Inventory
 
-### 1. IDS API (Core)
+| Namespace | Component | Replicas | Purpose |
+|---|---|---|---|
+| `smart-city` | ids-api | 2 | Core IDS: alert intake, LLM analysis, K8s automation |
+| `smart-city` | postgres | 1 | Alert/action/audit persistence |
+| `smart-city` | traffic-camera | 2 | Vulnerable Flask camera feed + license plate API |
+| `smart-city` | healthcare-api | 2 | Vulnerable Flask patient record API |
+| `smart-city` | parking-system | 2 | Vulnerable Flask parking reservation/payment API |
+| `smart-city` | mqtt-broker | 1 | Mosquitto MQTT broker for IoT telemetry |
+| `smart-city` | iot-devices-enhanced | 10 | MQTT sensor simulators (standard rate) |
+| `smart-city` | iot-simulator-high | 4 | High-frequency MQTT simulators |
+| `smart-city` | iot-simulator-medium | 5 | Medium-frequency MQTT simulators |
+| `smart-city` | iot-simulator-burst | 1 | Bursty MQTT traffic simulator |
+| `falco-system` | falco | 1 (DaemonSet) | Runtime syscall detection (eBPF) |
+| `falco-system` | falco-forwarder | 1 | Deduplicates + reshapes Falco alerts → IDS API |
+| `falco-system` | falco-k8s-metacollector | 1 | K8s metadata enrichment for Falco |
+| `monitoring` | suricata | 1 | Network traffic IDS (signature-based) |
+| `monitoring` | suricata-forwarder | 1 | Reshapes Suricata alerts → IDS API |
+| `monitoring` | prometheus | 1 | Metrics collection (NodePort 31106) |
+| `monitoring` | grafana | 1 | Dashboards (NodePort 30300) |
 
-**Location:** `services/ids-api/src/`
+**Total: ~45 pods across 4 namespaces** (+ kube-system pods managed by K3s).
 
-| File | Purpose |
-|------|---------|
-| `main.py` | FastAPI application, alert endpoints, automation orchestration |
-| `config.py` | Environment configuration, validation |
-| `database.py` | PostgreSQL connection, alerts, analysis results, actions, audit logs |
-| `llm_engine_xai.py` | xAI Grok integration for threat analysis |
-| `llm_engine_openai.py` | OpenAI GPT fallback |
-| `k8s_automation.py` | Kubernetes actions (isolate, scale, evict) |
-| `metrics.py` | Prometheus metrics export |
+---
 
-**API Endpoints:**
+## Alert Processing Pipeline
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/alerts` | POST | Receive security alerts |
-| `/api/alerts` | GET | List stored alerts |
-| `/api/alerts/{id}` | GET | Get specific alert |
-| `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics |
-| `/docs` | GET | OpenAPI documentation |
-
-### 2. LLM Engine
-
-**Architecture:**
+Every security event follows this path:
 
 ```
-Alert JSON ──► System Prompt ──► LLM API ──► JSON Response ──► Automated Actions
-                   │                             │
-                   ▼                             ▼
-            "Analyze this              {"severity": 8,
-             security alert..."          "threat_type": "...",
-                                        "recommendations": [...]}
+1. DETECTION
+   Falco (runtime syscalls)  ──→  Falco Forwarder  ──→  POST /api/alerts/internal
+   Suricata (network sigs)   ──→  Suricata Forwarder ─→  POST /api/alerts/internal
+   Dashboard buttons / CLI   ──────────────────────────→  POST /api/alerts/internal
+
+2. INTAKE (main.py)
+   ├─ Rate limiter: per-rule (10/min), per-source (100/min), global (500/min)
+   │  └─ Exceeds → HTTP 429, stored in throttled_alerts table
+   ├─ Request queue: max 100 concurrent
+   │  └─ Full → HTTP 503
+   ├─ Source detection: classify alert as "falco" or "suricata"
+   └─ Dedup cache: MD5(rule + proc.cmdline + container.name), 60s TTL
+      └─ Cache hit → return cached analysis, skip LLM call
+
+3. LLM ANALYSIS (llm_manager.py)
+   ├─ Circuit breaker check (per-engine, threshold=5 failures, 30s recovery)
+   ├─ Cooldown check (15min after quota/auth errors)
+   ├─ Try engines in priority order: xai → openai → kimi → local
+   │  └─ Each: build prompt → API call → parse JSON → validate
+   └─ Output: {severity, threat_type, summary, recommendations, automated_actions}
+
+4. AUTOMATED RESPONSE (k8s_automation.py + governance.py)
+   ├─ severity ≥ 8 → isolate_pod (NetworkPolicy, unless protected service)
+   ├─ severity ≥ 6 → scale_up (replicas to 5)
+   └─ Governance: autopilot (all auto) / assisted (sev<8 auto) / manual (all approval)
+
+5. PERSISTENCE (database.py)
+   ├─ PostgreSQL: alerts, analysis_results, automation_actions, audit_logs
+   ├─ Memory fallback if PostgreSQL unavailable
+   └─ Prometheus counters restored from DB on restart
 ```
 
-**LLM Response Contract:**
+---
+
+## Source Code Structure
+
+```
+services/ids-api/
+├── src/
+│   ├── main.py                 (2327 lines)  FastAPI app, endpoints, pipeline
+│   ├── config.py               (161 lines)   Environment-based configuration
+│   ├── llm_manager.py          (870 lines)   Multi-provider LLM with failover
+│   ├── database.py             (893 lines)   PostgreSQL + memory fallback
+│   ├── operator_interface.py   (572 lines)   Incident transforms for dashboard
+│   ├── governance.py           (507 lines)   HITL governance controller
+│   ├── alert_rate_limiter.py   (287 lines)   Time-window rate limiter
+│   ├── alert_deduplicator.py   (385 lines)   Alert dedup cache
+│   ├── k8s_automation.py       (207 lines)   K8s defensive actions
+│   ├── operator_models.py      (166 lines)   Pydantic data models
+│   ├── llm_response_schema.py  (279 lines)   LLM response validation
+│   ├── llm_retry.py            (381 lines)   Retry logic with backoff
+│   ├── llm_base.py             (400 lines)   Base LLM engine class
+│   ├── llm_engine_xai.py       (176 lines)   xAI Grok engine
+│   ├── llm_engine_openai.py    (125 lines)   OpenAI GPT engine
+│   ├── llm_engine_anthropic.py (148 lines)   Anthropic Claude engine
+│   ├── llm_engine_gemini.py    (149 lines)   Google Gemini engine
+│   └── llm_engine_kimi.py      (149 lines)   Moonshot Kimi engine
+├── static/
+│   └── index.html              (~700 lines)  Operator dashboard SPA
+└── requirements.txt
+
+services/forwarders/
+├── falco/src/main.py           (187 lines)   Falco alert forwarder
+└── suricata/src/main.py        (453 lines)   Suricata EVE log forwarder
+
+smart-city-services/
+├── traffic-camera/app.py       Vulnerable camera API (Flask)
+├── healthcare-api/app.py       Vulnerable patient API (Flask)
+└── parking-system/app.py       Vulnerable parking API (Flask)
+```
+
+---
+
+## LLM Provider Architecture
+
+Six providers with priority-ordered failover:
+
+| Priority | Provider | API Endpoint | Model | Env Var |
+|---|---|---|---|---|
+| 1 | xAI Grok-4 | `api.x.ai/v1/chat/completions` | grok-4-latest | `XAI_API_KEY` |
+| 2 | Anthropic Claude | `api.anthropic.com/v1/messages` | claude-3-5-sonnet | `ANTHROPIC_API_KEY` |
+| 3 | OpenAI GPT-4 | `api.openai.com/v1/chat/completions` | gpt-4-turbo | `OPENAI_API_KEY` |
+| 4 | Google Gemini | `generativelanguage.googleapis.com` | gemini-2.0-flash | `GEMINI_API_KEY` |
+| 5 | Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | moonshot-v1-128k | `KIMI_API_KEY` |
+| 6 | Local Fallback | (no network call) | 11 rule patterns | (always available) |
+
+### Resilience
+
+| Mechanism | Config | Behavior |
+|---|---|---|
+| Circuit Breaker | 5 failures → open, 30s recovery | Per-engine, half-open allows 3 test calls |
+| Provider Cooldown | 15 minutes (env: `LLM_PROVIDER_COOLDOWN_SECONDS`) | After HTTP 401/403/429 or quota errors |
+| Dedup Cache | 60s TTL, 100 max entries | MD5(rule+process+container), avoids duplicate LLM calls |
+| Local Fallback | Always active | Rule-based pattern matching, no API key needed |
+
+### LLM Response Contract
 
 ```json
 {
-  "status": "success",
-  "analysis": {
-    "summary": "Short 1-2 sentence explanation",
-    "severity": 8,
-    "threat_type": "Privilege Escalation",
-    "recommendations": ["Isolate pod", "Collect logs"],
-    "automated_actions": ["isolate_pod"]
-  }
+  "summary": "Human-readable 1-2 sentence explanation",
+  "severity": 8,
+  "threat_type": "Privilege Escalation",
+  "confidence": 0.85,
+  "key_indicators": ["rule match", "process name"],
+  "mitigating_factors": ["single occurrence"],
+  "business_impact": "Potential disruption to service X",
+  "reasoning": "Step-by-step analysis logic",
+  "recommendations": ["Isolate pod", "Collect logs"],
+  "automated_actions": ["isolate_pod"]
 }
 ```
 
-### 3. Smart City Services
+### Local Fallback Engine Rules
 
-**Purpose:** Intentionally vulnerable demo services for attack simulation.
-
-| Service | Port | Vulnerabilities |
-|---------|------|-----------------|
-| Traffic Camera | 5000 | Command injection, exposed debug |
-| Healthcare API | 5001 | SQL injection, data exposure |
-| Parking System | 5002 | Authentication bypass |
-
-**Location:** `smart-city-services/`
-
-### 4. Security Monitoring
-
-#### Falco (Runtime Security)
-
-- Detects container runtime anomalies
-- Monitors syscalls, process execution
-- Alerts on policy violations
-
-**Alert Flow:**
-```
-Container ──► Falco ──► Falco Forwarder ──► IDS API
-                 │
-            (syscall monitoring)
-```
-
-#### Suricata (Network IDS)
-
-- Network traffic analysis
-- Signature-based detection
-- Protocol anomaly detection
-
-### 5. Kubernetes Automation
-
-**Automated Actions (based on severity):**
-
-| Severity | Action | Description |
-|----------|--------|-------------|
-| ≥8 | `isolate_pod` | Apply network policy to isolate |
-| ≥6 | `scale_up` | Increase replica count |
-| ≥4 | `log_alert` | Record for review |
-
-**Implementation:** `services/ids-api/src/k8s_automation.py`
-
-```python
-# Example isolation
-def isolate_pod(pod_name, namespace):
-    # Creates NetworkPolicy blocking all ingress/egress
-    network_policy = {...}
-    api.create_namespaced_network_policy(namespace, network_policy)
-```
+| Pattern | Severity | Threat Type |
+|---|---|---|
+| crypto, miner, xmrig, stratum | 7 | Malware |
+| sql injection, sqlmap, union select | 8 | Data Exfiltration |
+| /etc/shadow, /etc/passwd, sensitive file | 8 | Data Exfiltration |
+| container escape, nsenter, /proc/1 | 9 | Privilege Escalation |
+| privilege escalation, setuid, sudo | 9 | Privilege Escalation |
+| shell, bash, /bin/sh spawned | 7 | Privilege Escalation |
+| ddos, flood, amplification | 8 | DDoS |
+| dns exfiltration, dns tunnel | 7 | Data Exfiltration |
+| lateral movement, service discovery | 8 | Reconnaissance |
+| outbound connection, unexpected | 7 | Policy Violation |
+| port scan, network scan | 6 | Reconnaissance |
+| (default fallback) | 5 | Policy Violation |
 
 ---
 
-## Data Flow
+## Kubernetes Automation
 
-### Alert Processing Pipeline
+| Action | Trigger | K8s Operation |
+|---|---|---|
+| `isolate_pod` | severity ≥ 8 | Creates NetworkPolicy blocking all ingress/egress |
+| `scale_up` | severity ≥ 6 | Patches deployment replicas to 5 |
+| `block_ip` | manual/API | Creates NetworkPolicy blocking CIDR |
+| `cordon_node` | manual/API | Sets node `unschedulable: True` |
+| `restart_service` | manual/API | Deletes pods (rolling restart) |
 
-```
-1. Security Event Generated
-   └─► Falco detects syscall anomaly
-   └─► Suricata detects network anomaly
+**Protected services** (never auto-isolated): `healthcare-api`, `ids-api`, `postgres`
 
-2. Alert Forwarding
-   └─► Forwarder normalizes alert format
-   └─► POST to IDS API /api/alerts
+**Governance modes** (env: `AUTOMATION_MODE`, or `/api/governance/mode`):
 
-3. LLM Analysis
-   └─► Build context with alert + system prompt
-   └─► Call xAI Grok (or OpenAI fallback)
-   └─► Parse JSON response
-
-4. Automated Response
-   └─► Check severity thresholds
-   └─► Execute Kubernetes actions
-   └─► Update Prometheus metrics
-
-5. Persistence
-   └─► Store alert + analysis in PostgreSQL
-   └─► Log to stdout for kubectl logs
-```
-
-### Metrics Pipeline
-
-```
-IDS API ──(metrics)──► Prometheus ──(queries)──► Grafana
-    │
-    └── /metrics endpoint exposes:
-        - smartcity_ids_alerts_received_total (counter)
-        - smartcity_ids_severity_total (counter)
-        - smartcity_ids_llm_latency_seconds (histogram)
-        - smartcity_ids_actions_executed_total (counter)
-        - smartcity_ids_time_to_mitigation_seconds (histogram)
-        - smartcity_ids_llm_decision_outcome_total (counter)
-```
-
-### Metrics Source of Truth
-
-The IDS API is the authoritative source of IDS metrics. Prometheus scrapes
-`/metrics` directly from the IDS API on port `8000` and Grafana uses those
-`smartcity_ids_*` series as the monitoring ground truth.
+| Mode | Behavior | Use Case |
+|---|---|---|
+| `autopilot` | All actions execute immediately | Demo, testing |
+| `assisted` | Auto if severity < 8; otherwise queued | Default, production |
+| `manual` | All actions require operator approval | Audit, investigation |
 
 ---
 
-## Kubernetes Resources
+## Database Schema
 
-### Namespaces
+PostgreSQL with automatic in-memory fallback. 8 tables:
 
-| Namespace | Purpose |
-|-----------|---------|
-| `smart-city` | Main application workloads |
-| `monitoring` | Prometheus, Grafana |
-| `falco-system` | Falco runtime security |
-| `suricata-system` | Suricata network IDS |
+| Table | Key Columns | Purpose |
+|---|---|---|
+| `alerts` | source, rule, severity, threat_type, analysis (JSONB) | Processed alerts |
+| `analysis_results` | alert_id, model, analysis_time_ms, confidence | LLM results |
+| `automation_actions` | alert_id, action_type, target, status, mode | K8s actions |
+| `audit_logs` | action, actor, status, details (JSONB) | Governance audit |
+| `iot_devices` | device_id (PK), type, first/last seen, event_count | Device registry |
+| `iot_events` | device_id, event_type, value (JSONB) | Sensor telemetry |
+| `system_logs` | level, component, message | App logs |
+| `throttled_alerts` | source, rule, throttle_reason | Rate-limited alerts |
 
-### Key Deployments
-
-```yaml
-# smart-city namespace
-- ids-api          # Core IDS service
-- traffic-camera   # Demo service
-- healthcare-api   # Demo service
-- parking-system   # Demo service
-- postgres         # Alert database
-- mqtt-broker      # IoT message broker
-- iot-devices      # IoT simulator
-
-# monitoring namespace
-- prometheus       # Metrics collection
-- grafana          # Visualization
-```
-
-### Service Ports
-
-| Service | Type | Internal | External |
-|---------|------|----------|----------|
-| ids-api | NodePort | 8000 | 30800 |
-| grafana | NodePort | 3000 | 30300 |
-| prometheus | NodePort | 9090 | dynamic* |
-| postgres | ClusterIP | 5432 | - |
-
-> *Prometheus NodePort is dynamically assigned by K8s. Find it with:
-> `kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}'`
+**Retention**: alerts 30d, IoT 30d, automation/audit 180d.
 
 ---
 
-## Security Considerations
+## Network Access
 
-### Defense-in-Depth Layers
+| Service | Port | Access |
+|---|---|---|
+| IDS API + Dashboard | `localhost:30800` | NodePort |
+| Grafana | `localhost:30300` | NodePort |
+| Prometheus | `localhost:31106` | NodePort |
+| K8s API | `127.0.0.1:6443` | Direct (kubeconfig) |
+| PostgreSQL | `postgres:5432` | ClusterIP (internal) |
+| MQTT Broker | `mqtt-broker:1883` | ClusterIP (internal) |
 
-1. **Network Level:** Suricata monitors traffic patterns
-2. **Runtime Level:** Falco monitors container behavior
-3. **Application Level:** IDS API analyzes combined alerts
-4. **Response Level:** Automated Kubernetes actions
-
-### Secrets Management
-
-- API keys stored in Kubernetes Secrets
-- Never committed to repository
-- Mounted as environment variables in pods
-
-### RBAC
-
-The IDS API service account has permissions to:
-- List/get pods and deployments
-- Create/update network policies
-- Scale deployments
-- Evict pods
+All external access uses `localhost` — WiFi/IP-independent.
 
 ---
 
-## Performance Characteristics
+## Prometheus Metrics (38 total)
 
-| Metric | Target | Notes |
-|--------|--------|-------|
-| Alert processing latency | <5s | Includes LLM call |
-| LLM response time | 1-3s | Depends on provider |
-| Prometheus scrape interval | 15s | Configurable |
-| Alert retention | 30 days | PostgreSQL storage |
-| Automation/Audit retention | 180 days | Governance traceability |
+**Core:** `ids_alerts_received_total`, `ids_alerts_processed_total`, `ids_automated_actions_total`, `ids_blocked_actions_total`, `ids_alert_processing_seconds`, `ids_uptime_seconds`
 
----
+**LLM:** `ids_llm_requests_total`, `ids_llm_request_latency_seconds`, `ids_alert_cache_hits_total`
 
-## Extension Points
+**Security:** `ids_severity_distribution`, `ids_threat_types_total`, `ids_critical_alerts_total`
 
-### Adding New Alert Sources
+**Governance:** `ids_decision_outcomes_total`, `ids_automated_decisions_total`, `ids_human_overrides_total`, `ids_blocked_by_policy_total`, `ids_time_to_mitigation_seconds`
 
-1. Create forwarder in `services/forwarders/`
-2. Normalize to expected JSON format
-3. POST to `/api/alerts`
+**IoT:** `ids_iot_events_total`, `ids_iot_devices_active`, `ids_iot_security_events_total`, `ids_iot_heartbeats_total`
 
-### Adding New Automated Actions
+**K8s:** `ids_pods_isolated_total`, `ids_scale_operations_total`, `ids_protected_service_hits_total`
 
-1. Add method to `k8s_automation.py`
-2. Register in `main.py` action dispatcher
-3. Update LLM prompt in `llm_engine_*.py`
-
-### Custom Dashboards
-
-1. Export from Grafana as JSON
-2. Place in `infrastructure/monitoring/`
-3. Run `scripts/generate-grafana-provisioning.sh` and apply `k8s-manifests/grafana-provisioning-dashboards.yaml`
-
----
-
-*For deployment instructions, see [SETUP.md](SETUP.md)*  
-*For operational procedures, see [OPERATIONS.md](OPERATIONS.md)*
+**Resilience:** `ids_rate_limit_requests_total`, `ids_circuit_breaker_state`, `ids_circuit_breaker_trips_total`, `ids_queue_size`, `ids_queue_rejected_total`

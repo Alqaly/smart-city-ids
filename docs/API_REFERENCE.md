@@ -1,699 +1,313 @@
-# Smart City IDS - API Reference Documentation
+# API Reference — Smart City IDS
 
-**Version:** 1.0.0  
-**Base URL:** `http://<host>:8000` (or `http://localhost:30800` via NodePort)
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Authentication](#authentication)
-3. [Core Endpoints](#core-endpoints)
-4. [Alert Management](#alert-management)
-5. [Governance & Automation](#governance--automation)
-6. [Operator Interface](#operator-interface)
-7. [IoT Integration](#iot-integration)
-8. [Monitoring & Metrics](#monitoring--metrics)
-9. [LLM Engine Status](#llm-engine-status)
-10. [Error Handling](#error-handling)
-11. [Rate Limiting](#rate-limiting)
-12. [Examples](#examples)
-
----
-
-## Overview
-
-The Smart City IDS API provides a RESTful interface for:
-
-- **Alert Ingestion**: Receive security alerts from Falco, Suricata, and other sources
-- **LLM Analysis**: Multi-LLM threat analysis with automatic failover
-- **Automated Response**: Kubernetes-native threat mitigation
-- **Governance**: Human-in-the-loop approval workflow
-- **Monitoring**: Real-time metrics and status endpoints
-
-### Key Features
-
-| Feature | Description |
-|---------|-------------|
-| Multi-LLM Support | xAI Grok-4, OpenAI GPT-4, Anthropic Claude, Google Gemini, Kimi |
-| Circuit Breakers | Automatic failover when LLM APIs fail |
-| Alert Deduplication | Reduces LLM API costs by deduplicating similar alerts |
-| PostgreSQL Storage | Persistent alert and audit logging |
-| Prometheus Metrics | Full observability integration |
+Complete endpoint reference for the IDS API (FastAPI). Base URL: `http://localhost:30800`.
 
 ---
 
 ## Authentication
 
-All API endpoints (except `/health` and `/metrics`) require authentication.
+17 endpoints require JWT Bearer tokens. 20 endpoints are unauthenticated.
 
-### Enforced on Operator/Governance/LLM Endpoints
+```bash
+# Get a token (demo credentials)
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"operator","password":"operator"}' | jq -r .access_token)
 
-As of February 11, 2026, these routes are explicitly protected with bearer-token dependencies:
-
-- `/api/operator/*`
-- `/api/governance/*`
-- `/api/llm/status`
-
-Calls without `Authorization: Bearer <access_token>` now return `401/403`.
-
-### Login
-
-```http
-POST /api/auth/login
-Content-Type: application/json
+# Use token
+curl -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/operator/dashboard
 ```
 
-**Request Body:**
-```json
-{
-  "username": "operator",
-  "password": "operator"
-}
-```
-
-**Response:**
-```json
-{
-  "access_token": "b3BlcmF0b3I6MTc3MDIyOTQyMg==",
-  "token_type": "bearer",
-  "user": "operator"
-}
-```
-
-### Using the Token
-
-Include the token in the `Authorization` header:
-
-```http
-Authorization: Bearer <access_token>
-```
-
-### Logout
-
-```http
-POST /api/auth/logout
-Authorization: Bearer <access_token>
-```
+Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarders) is unauthenticated by design — it runs cluster-internal only.
 
 ---
 
-## Core Endpoints
+## Endpoints by Category
 
-### Health Check
+### Root & UI
 
-```http
-GET /health
-```
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | No | Service info, version, available endpoints |
+| GET | `/ui` | No | Operator dashboard (HTML SPA) |
 
-**Response:**
-```json
-{
-  "status": "healthy",
-  "components": {
-    "llm_engines": {
-      "xai": "connected (circuit: closed)",
-      "anthropic": "no-api-key",
-      "openai": "connected (circuit: closed)",
-      "gemini": "connected (circuit: closed)",
-      "kimi": "no-api-key"
-    },
-    "kubernetes": "connected",
-    "database": "postgresql",
-    "falco": "enabled",
-    "suricata": "enabled"
-  },
-  "active_llm_engines": ["xai", "openai", "gemini"],
-  "llm_priority": ["xai", "openai", "gemini"],
-  "circuit_breaker_states": {
-    "xai": "closed",
-    "openai": "closed",
-    "gemini": "closed"
-  },
-  "uptime_seconds": 3600.5,
-  "total_alerts_processed": 228,
-  "storage_type": "postgresql"
-}
-```
+### Authentication
 
-### Root / Web UI
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/auth/login` | No | Get JWT token. Body: `{"username":"operator","password":"operator"}` |
+| POST | `/api/auth/logout` | No | Client-side logout (no server invalidation) |
 
-```http
-GET /
-GET /ui
-```
+### Health & Monitoring
 
-Returns the Operator Dashboard web interface.
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/health` | No | Component status (LLM, K8s, DB, Falco, Suricata), uptime, alert count |
+| GET | `/api/safety` | No | Automation mode, protected services, thresholds, cache stats |
+| GET | `/api/production-status` | No | Rate limiter, circuit breaker, queue, cache operational status |
+| GET | `/api/metrics` | No | Application metrics (JSON) |
+| GET | `/metrics` | No | Prometheus text exposition format (38 metrics) |
+| GET | `/api/db/stats` | No | Database statistics |
+
+### Alert Processing
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| **POST** | **`/api/alerts`** | **Yes** | Main alert ingestion. Rate-limited, deduplicated, LLM-analyzed, auto-response |
+| **POST** | **`/api/alerts/internal`** | **No** | Same as above, for cluster-internal forwarders (Falco, Suricata, IoT) |
+| GET | `/api/alerts` | No | Query processed alerts. Params: `limit` (default 10), `source` |
+
+### Circuit Breaker
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/circuit-breaker/status` | No | Per-engine state (open/closed/half-open), failure counts |
+| POST | `/api/circuit-breaker/reset` | No | Reset circuit breakers. Param: `engine` (optional, or resets all) |
+
+### LLM Management
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/llm/status` | Yes | Active providers, priority order, circuit breaker state per engine |
+
+### Rate Limiter
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/rate-limiter/status` | No | Window config, throttle stats, per-rule/source/global counts |
+| POST | `/api/rate-limiter/reset` | No | Reset all rate limiter counters |
+
+### Deduplicator
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/deduplicator-stats` | Yes | Cache stats, hit rate, estimated cost savings |
+| POST | `/api/deduplicator/clear` | Yes | Clear fingerprint cache |
+
+### Governance (Human-in-the-Loop)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/governance/status` | Yes | Current mode, pending count, decision metrics |
+| GET | `/api/governance/mode` | Yes | Current automation mode |
+| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (autopilot/assisted/manual) |
+| GET | `/api/governance/pending` | Yes | List pending actions awaiting approval |
+| POST | `/api/governance/approve/{action_id}` | Yes | Approve + execute pending action. Params: `operator`, `comment` |
+| POST | `/api/governance/reject/{action_id}` | Yes | Reject pending action. Params: `operator`, `reason` |
+| GET | `/api/governance/history` | Yes | Audit trail. Param: `limit` (default 50) |
+
+### Operator Dashboard
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/operator/dashboard` | Yes | Full dashboard: stats, severity distribution, threat types, timeline |
+| GET | `/api/operator/incidents` | Yes | Incident list with evidence, reasoning, actions. Param: `limit` |
+| GET | `/api/operator/incident/{id}` | Yes | Single incident full detail |
+| GET | `/api/operator/evidence/{id}` | Yes | Raw evidence excerpts for incident |
+| GET | `/api/operator/reasoning/{id}` | Yes | LLM reasoning chain, confidence, indicators |
+| GET | `/api/operator/metrics` | Yes | Analysis time, confidence, approval/rejection rates |
+| GET | `/api/operator/search` | Yes | Search incidents. Params: `query`, `severity_min/max`, `threat_type`, `limit` |
+
+### IoT Sensors
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/iot/sensor` | No | Receive sensor telemetry. Security events auto-create alerts |
+| GET | `/api/iot/devices` | No | List registered IoT devices |
+| GET | `/api/iot/events` | No | Recent IoT events. Params: `limit`, `device_id` |
+
+**Total: 37 endpoints** (17 authenticated, 20 unauthenticated)
 
 ---
 
-## Alert Management
+## Alert Processing Detail
 
-### Receive Alert (External)
+### Request (POST `/api/alerts` or `/api/alerts/internal`)
 
-Used by external systems (Falco forwarder, Suricata, etc.) to submit alerts.
-
-```http
-POST /api/alerts
-Authorization: Bearer <token>
-Content-Type: application/json
-```
-
-**Request Body (Falco format):**
 ```json
 {
-  "source": "falco",
-  "output": "Detected privilege escalation: User ran sudo su in container",
+  "output": "Sensitive file opened for reading (file=/etc/shadow)",
   "priority": "Critical",
-  "rule": "Privilege Escalation Attempt",
-  "time": "2026-02-04T18:30:00.000Z",
+  "rule": "Read sensitive file untrusted",
+  "time": "2025-01-15T10:30:00Z",
   "output_fields": {
-    "container.name": "traffic-camera-pod",
-    "proc.cmdline": "sudo su -",
-    "proc.name": "sudo",
-    "user.name": "www-data",
+    "container.name": "traffic-camera-abc123",
+    "proc.cmdline": "cat /etc/shadow",
     "fd.name": "/etc/shadow"
   }
 }
 ```
 
-**Response (Success):**
+**Field constraints:**
+- `output`: 1–2048 characters
+- `priority`: Emergency, Alert, Critical, Error, Warning, Notice, Informational, Debug
+- `rule`: 1–512 characters
+- `output_fields`: max 50 keys
+
+### Response
+
 ```json
 {
   "status": "success",
-  "alert_id": 229,
+  "alert_id": 42,
   "analysis": {
-    "summary": "Privilege escalation attempt detected in traffic camera container",
-    "severity": 9,
-    "threat_type": "Privilege Escalation",
-    "recommendations": [
-      "Isolate the affected pod",
-      "Review container security policies",
-      "Check for lateral movement"
-    ],
-    "automated_actions": ["isolate_pod", "collect_evidence"]
+    "summary": "Shadow file access detected in traffic-camera container",
+    "severity": 8,
+    "threat_type": "Data Exfiltration",
+    "confidence": 0.85,
+    "key_indicators": ["sensitive file path", "non-standard process"],
+    "mitigating_factors": [],
+    "business_impact": "Credential exposure risk",
+    "reasoning": "Reading /etc/shadow indicates credential harvesting...",
+    "recommendations": ["Isolate container", "Rotate credentials"],
+    "automated_actions": ["isolate_pod"]
   },
   "actions_taken": [
     {
-      "type": "isolate_pod",
-      "target": "traffic-camera-pod",
-      "status": "pending_approval"
+      "action": "isolate_pod",
+      "target": "traffic-camera-abc123",
+      "status": "executed"
     }
   ]
 }
 ```
 
-**Response (LLM Failure):**
-```json
-{
-  "status": "error",
-  "alert_id": 230,
-  "message": "All LLM engines failed or circuits open",
-  "stored": true
-}
-```
+### Processing Pipeline
 
-### Receive Alert (Internal)
-
-Used by internal forwarders (runs without authentication).
-
-```http
-POST /api/alerts/internal
-Content-Type: application/json
-```
-
-### Get Recent Alerts
-
-```http
-GET /api/alerts
-Authorization: Bearer <token>
-```
-
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| limit | int | 100 | Maximum alerts to return |
-| source | string | - | Filter by source (falco, suricata) |
-| severity_min | int | - | Minimum severity (1-10) |
+1. **Token bucket rate limiter** — 120 requests/min refill, 30 burst. Returns 429 if exceeded.
+2. **Request queue** — max 100 concurrent. Returns 503 if full.
+3. **Alert rate limiter** — per-rule (10/min), per-source (100/min), global (500/min). Returns 429.
+4. **Dedup cache** — MD5(rule + proc.cmdline + container.name), 60s TTL. Cache hit returns previous analysis.
+5. **LLM analysis** — tries engines in priority order, respects circuit breaker and cooldown.
+6. **Automated response** — severity ≥ 8 → isolate pod, severity ≥ 6 → scale up. Governed by mode.
+7. **Persistence** — PostgreSQL (or memory fallback).
 
 ---
 
-## Governance & Automation
+## Data Models
 
-### Get Governance Status
+### Alert
 
-```http
-GET /api/governance/status
-Authorization: Bearer <token>
-```
+| Field | Type | Constraints |
+|---|---|---|
+| `output` | string | 1–2048 chars, required |
+| `priority` | enum | Emergency/Alert/Critical/Error/Warning/Notice/Informational/Debug |
+| `rule` | string | 1–512 chars, required |
+| `time` | string | ISO 8601, required |
+| `output_fields` | dict | Max 50 keys, required |
 
-**Response:**
-```json
-{
-  "mode": "assisted",
-  "auto_approve_threshold": 8,
-  "pending_actions": 3,
-  "total_approved": 45,
-  "total_rejected": 2
-}
-```
+### IoTSensorData
 
-### Change Automation Mode
+| Field | Type | Required |
+|---|---|---|
+| `device_id` | string (1–64) | Yes |
+| `device_type` | string | Yes |
+| `event_type` | string | Yes |
+| `value` | any | No |
+| `timestamp` | string (ISO) | No |
+| `metadata` | dict | No |
 
-```http
-POST /api/governance/mode
-Authorization: Bearer <token>
-Content-Type: application/json
-```
+Security event types that auto-trigger alerts: `anomaly`, `intrusion`, `tampering`, `unauthorized`, `rapid_motion`.
 
-**Request Body:**
-```json
-{
-  "mode": "assisted"
-}
-```
+### OperatorIncident
 
-**Modes:**
-| Mode | Description |
-|------|-------------|
-| `manual` | All actions require human approval |
-| `assisted` | Low-risk actions auto-approved, high-risk require approval |
-| `autonomous` | All actions auto-approved (use with caution) |
-
-### Get Pending Actions
-
-```http
-GET /api/governance/pending
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
-{
-  "pending_actions": [
-    {
-      "id": "action-123",
-      "type": "isolate_pod",
-      "target": "traffic-camera-pod",
-      "severity": 9,
-      "llm_reasoning": "High-severity privilege escalation requires immediate isolation",
-      "created_at": "2026-02-04T18:30:00Z"
-    }
-  ]
-}
-```
-
-### Approve Action
-
-```http
-POST /api/governance/approve/{action_id}
-Authorization: Bearer <token>
-```
-
-### Reject Action
-
-```http
-POST /api/governance/reject/{action_id}
-Authorization: Bearer <token>
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "reason": "False positive - legitimate admin activity"
-}
-```
-
-### Get Action History
-
-```http
-GET /api/governance/history
-Authorization: Bearer <token>
-```
+| Field | Type | Description |
+|---|---|---|
+| `incident_id` | int | Alert ID |
+| `timestamp` | string | ISO 8601 |
+| `incident_summary` | string | LLM-generated summary |
+| `severity` | int | 1–10 |
+| `evidence` | EvidenceItem[] | Source excerpts |
+| `reasoning` | AnalysisReasoning | LLM reasoning chain |
+| `recommended_actions` | RecommendedAction[] | Prioritized actions |
+| `automation_governance` | AutomationGovernance | Mode, approval status |
+| `business_impact` | string | Impact description |
+| `llm_model_used` | string | Which engine analyzed |
+| `analysis_duration_ms` | float | LLM latency |
 
 ---
 
-## Operator Interface
+## Configuration
 
-### List Incidents
+All settings via environment variables. Source: `config.py` and `main.py`.
 
-```http
-GET /api/operator/incidents
-Authorization: Bearer <token>
-```
+### LLM Provider Keys
 
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| limit | int | 50 | Maximum incidents |
-| status | string | - | Filter: open, investigating, resolved |
+| Variable | Default | Description |
+|---|---|---|
+| `XAI_API_KEY` | `""` | xAI Grok API key |
+| `OPENAI_API_KEY` | `""` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | `""` | Anthropic Claude API key |
+| `GEMINI_API_KEY` | `""` | Google Gemini API key |
+| `KIMI_API_KEY` | `""` | Moonshot Kimi API key |
 
-### Get Incident Details
+### LLM Settings
 
-```http
-GET /api/operator/incident/{incident_id}
-Authorization: Bearer <token>
-```
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_PRIORITY` | `xai,anthropic,openai,gemini,kimi` | Failover order |
+| `LLM_TEMPERATURE` | `0.3` | Sampling temperature |
+| `LLM_MAX_TOKENS` | `1000` | Max tokens per response |
 
-### Get Evidence
+### Kubernetes
 
-```http
-GET /api/operator/evidence/{incident_id}
-Authorization: Bearer <token>
-```
+| Variable | Default | Description |
+|---|---|---|
+| `K8S_NAMESPACE` | `smart-city` | Target namespace |
+| `KUBECONFIG` | `/etc/rancher/k3s/k3s.yaml` | Kubeconfig path |
 
-**Response:**
-```json
-{
-  "incident_id": "inc-123",
-  "evidence": {
-    "raw_alerts": [...],
-    "container_logs": "...",
-    "network_flows": [...],
-    "process_tree": {...}
-  }
-}
-```
+### Thresholds
 
-### Get LLM Reasoning
+| Variable | Default | Description |
+|---|---|---|
+| `CRITICAL_SEVERITY_THRESHOLD` | `8` | Severity ≥ value → isolate pod |
+| `HIGH_SEVERITY_THRESHOLD` | `6` | Severity ≥ value → scale up |
+| `AUTOMATION_MODE` | `assisted` | autopilot / assisted / manual |
+| `ASSISTED_THRESHOLD` | `8` | Severity ≥ value requires approval in assisted mode |
+| `PROTECTED_SERVICES` | `healthcare-api,ids-api,postgres` | Never auto-isolated |
+| `ACTION_EXPIRY_SECONDS` | `300` | Pending action TTL |
 
-```http
-GET /api/operator/reasoning/{incident_id}
-Authorization: Bearer <token>
-```
+### Rate Limiting & Circuit Breaker
 
-**Response:**
-```json
-{
-  "incident_id": "inc-123",
-  "llm_engine": "xai",
-  "analysis": {
-    "threat_assessment": "This appears to be an active privilege escalation attack...",
-    "attack_chain": [
-      "Initial access via web vulnerability",
-      "Local privilege escalation",
-      "Credential harvesting attempt"
-    ],
-    "confidence": 0.92,
-    "mitre_techniques": ["T1068", "T1003"]
-  }
-}
-```
+| Variable | Default | Description |
+|---|---|---|
+| `RATE_LIMIT_PER_MINUTE` | `120` | Token bucket refill rate |
+| `RATE_LIMIT_BURST` | `30` | Token bucket burst size |
+| `ALERT_RATE_LIMIT_WINDOW` | `60` | Alert rate limiter window (seconds) |
+| `ALERT_RATE_LIMIT_PER_RULE` | `10` | Max per rule per window |
+| `ALERT_RATE_LIMIT_PER_SOURCE` | `100` | Max per source per window |
+| `ALERT_RATE_LIMIT_GLOBAL` | `500` | Global max per window |
+| `CIRCUIT_BREAKER_THRESHOLD` | `5` | Failures before open |
+| `CIRCUIT_BREAKER_TIMEOUT` | `30` | Recovery timeout (seconds) |
+| `REQUEST_QUEUE_SIZE` | `100` | Max concurrent requests |
 
-### Get Operator Metrics
+### Cache & Dedup
 
-```http
-GET /api/operator/metrics
-Authorization: Bearer <token>
-```
+| Variable | Default | Description |
+|---|---|---|
+| `ALERT_CACHE_TTL_SECONDS` | `60` | LRU analysis cache TTL |
+| `ALERT_CACHE_MAX_SIZE` | `100` | Max cached analyses |
+| `DEDUPLICATOR_TTL_SECONDS` | `60` | Fingerprint dedup TTL |
+| `DEDUPLICATOR_MAX_CACHE_SIZE` | `10000` | Max fingerprints |
 
----
+### Database & Server
 
-## IoT Integration
-
-### Submit Sensor Data
-
-```http
-POST /api/iot/sensor
-Authorization: Bearer <token>
-Content-Type: application/json
-```
-
-**Request Body:**
-```json
-{
-  "device_id": "sensor-001",
-  "device_type": "motion_sensor",
-  "location": "building-a-floor-3",
-  "readings": {
-    "motion_detected": true,
-    "temperature": 22.5,
-    "humidity": 45
-  },
-  "timestamp": "2026-02-04T18:30:00Z"
-}
-```
-
-### List IoT Devices
-
-```http
-GET /api/iot/devices
-Authorization: Bearer <token>
-```
-
-### Get IoT Events
-
-```http
-GET /api/iot/events
-Authorization: Bearer <token>
-```
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://postgres:idspassword@postgres:5432/smartcity_ids` | PostgreSQL connection |
+| `SECRET_KEY` | `smart-city-ids-demo-secret-change-in-production` | JWT signing key |
+| `APP_HOST` | `0.0.0.0` | Bind address |
+| `APP_PORT` | `8000` | Listen port |
+| `LOG_LEVEL` | `INFO` | Logging level |
 
 ---
 
-## Monitoring & Metrics
+## Error Responses
 
-### Prometheus Metrics
-
-```http
-GET /metrics
-```
-
-Returns Prometheus-format metrics. No authentication required.
-
-**Key Metrics:**
-```
-# Alert metrics
-smartcity_ids_alerts_received_total{source="falco",priority="Critical"}
-smartcity_ids_alerts_processed_total{result="success"}
-smartcity_ids_alert_severity_total{severity="high"}
-
-# LLM metrics
-smartcity_ids_llm_requests_total{engine="xai",result="success"}
-smartcity_ids_llm_latency_seconds{engine="openai"}
-smartcity_ids_circuit_breaker_state{engine="gemini"}
-smartcity_ids_llm_failover_total{from_engine="xai",to_engine="openai"}
-
-# Automation metrics
-smartcity_ids_actions_executed_total{type="isolate_pod"}
-smartcity_ids_governance_decisions_total{decision="approved"}
-```
-
-### Internal Metrics API
-
-```http
-GET /api/metrics
-Authorization: Bearer <token>
-```
-
-### Database Stats
-
-```http
-GET /api/db/stats
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
-{
-  "total_alerts": 228,
-  "alerts_by_source": {
-    "falco": 220,
-    "suricata": 8
-  },
-  "alerts_by_severity": {
-    "critical": 15,
-    "high": 45,
-    "medium": 80,
-    "low": 88
-  },
-  "storage_size_mb": 12.5
-}
-```
-
-### Deduplicator Stats
-
-```http
-GET /api/deduplicator-stats
-Authorization: Bearer <token>
-```
-
-**Response:**
-```json
-{
-  "cache_size": 150,
-  "hits": 45,
-  "misses": 228,
-  "hit_rate": 0.165,
-  "cost_savings_estimate": "$2.25"
-}
-```
-
-### Clear Deduplicator Cache
-
-```http
-POST /api/deduplicator/clear
-Authorization: Bearer <token>
-```
-
----
-
-## LLM Engine Status
-
-### Circuit Breaker States
-
-| State | Value | Description |
-|-------|-------|-------------|
-| CLOSED | 0 | Normal operation, requests allowed |
-| HALF_OPEN | 1 | Testing if service recovered |
-| OPEN | 2 | Service failing, requests blocked |
-
-### Failover Priority
-
-The system automatically fails over to the next LLM engine in priority order:
-
-1. xAI Grok-4 (primary)
-2. OpenAI GPT-4
-3. Anthropic Claude
-4. Google Gemini
-5. Kimi
-
----
-
-## Error Handling
-
-### Error Response Format
-
-```json
-{
-  "detail": "Error message",
-  "error_code": "AUTH_FAILED",
-  "timestamp": "2026-02-04T18:30:00Z"
-}
-```
-
-### Common Error Codes
-
-| HTTP Code | Error | Description |
-|-----------|-------|-------------|
-| 401 | Not authenticated | Missing or invalid token |
-| 403 | Forbidden | Insufficient permissions |
-| 404 | Not found | Resource doesn't exist |
-| 429 | Rate limited | Too many requests |
-| 500 | Internal error | Server error (check logs) |
-| 503 | Service unavailable | All LLM engines failing |
-
----
-
-## Rate Limiting
-
-| Endpoint | Limit |
-|----------|-------|
-| `/api/alerts` | 100/minute |
-| `/api/auth/login` | 10/minute |
-| Others | 1000/minute |
-
----
-
-## Examples
-
-### Complete Workflow: Receive and Analyze Alert
-
-```bash
-# 1. Login
-TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"operator","password":"operator"}' | jq -r '.access_token')
-
-# 2. Send alert
-curl -X POST http://localhost:30800/api/alerts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "falco",
-    "output": "Shell spawned in container",
-    "priority": "Critical",
-    "rule": "Terminal shell in container",
-    "output_fields": {"container.name": "web-app"}
-  }'
-
-# 3. Check pending actions
-curl http://localhost:30800/api/governance/pending \
-  -H "Authorization: Bearer $TOKEN"
-
-# 4. Approve action
-curl -X POST http://localhost:30800/api/governance/approve/action-123 \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### Python Client Example
-
-```python
-import requests
-
-class SmartCityIDSClient:
-    def __init__(self, base_url, username, password):
-        self.base_url = base_url
-        self.session = requests.Session()
-        self._login(username, password)
-    
-    def _login(self, username, password):
-        resp = self.session.post(f"{self.base_url}/api/auth/login",
-            json={"username": username, "password": password})
-        token = resp.json()["access_token"]
-        self.session.headers["Authorization"] = f"Bearer {token}"
-    
-    def send_alert(self, alert):
-        return self.session.post(f"{self.base_url}/api/alerts", 
-            json=alert).json()
-    
-    def get_health(self):
-        return requests.get(f"{self.base_url}/health").json()
-    
-    def get_pending_actions(self):
-        return self.session.get(f"{self.base_url}/api/governance/pending").json()
-    
-    def approve_action(self, action_id):
-        return self.session.post(
-            f"{self.base_url}/api/governance/approve/{action_id}").json()
-
-# Usage
-client = SmartCityIDSClient("http://localhost:30800", "operator", "operator")
-print(client.get_health())
-```
-
----
-
-## OpenAPI Specification
-
-Full OpenAPI 3.0 specification available at:
-
-```
-GET /openapi.json
-```
-
-Interactive documentation (Swagger UI):
-
-```
-GET /docs
-```
-
-Alternative documentation (ReDoc):
-
-```
-GET /redoc
-```
-
----
-
-## Support
-
-- **GitHub Issues**: Report bugs and feature requests
-- **Documentation**: See `/docs/` folder in repository
-- **Logs**: `kubectl logs -n smart-city deploy/ids-api`
-
----
-
-*Generated: February 4, 2026*  
-*Smart City IDS v1.0.0 - LLM-Driven Intrusion Detection System*
+| HTTP | Cause | Body |
+|---|---|---|
+| 401 | Missing or invalid JWT | `{"detail":"Not authenticated"}` |
+| 403 | Invalid credentials | `{"detail":"Invalid credentials"}` |
+| 404 | Incident/action not found | `{"detail":"Incident X not found"}` |
+| 429 | Rate limit exceeded | `{"status":"throttled","reason":"..."}` |
+| 503 | Queue full | `{"status":"error","error":"Server overloaded"}` |
