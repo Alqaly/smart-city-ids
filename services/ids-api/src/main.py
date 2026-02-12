@@ -144,6 +144,10 @@ try:
             def __init__(self):
                 self._manager = LLMEngineManager()
 
+            @property
+            def runtime_stats(self):
+                return self._manager.runtime_stats
+
             async def analyze(self, alert_dict):
                 return await self._manager.analyze(alert_dict)
 
@@ -582,6 +586,7 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
         PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
         PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="success").inc()
         PROM_LLM_LATENCY_SECONDS.labels(engine=engine_used).observe(llm_duration)
+        _record_llm_call(engine_used, llm_duration, True)
         return analysis, engine_used, llm_duration
     
     # All engines failed
@@ -593,6 +598,7 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
         circuit_breaker.record_failure(engine_used)
     update_circuit_breaker_metrics()
     PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="error").inc()
+    _record_llm_call(engine_used, llm_duration, False)
     raise Exception(f"LLM analysis failed: {error_msg}")
 
 # Storage - Using database for persistence (alerts_db kept for backward compatibility)
@@ -748,8 +754,42 @@ PROM_LLM_LATENCY_SECONDS = Histogram(
     "smartcity_ids_llm_latency_seconds",
     "LLM API call latency in seconds.",
     ["engine"],
-    buckets=(0.5, 1, 2, 3, 5, 8, 10, 15, 20, 30),
+    buckets=(0.01, 0.05, 0.1, 0.5, 1, 2, 3, 5, 8, 10, 15, 20, 30),
 )
+PROM_LLM_COST_USD = Counter(
+    "smartcity_ids_llm_cost_usd_total",
+    "Estimated LLM API cost in USD by engine.",
+    ["engine"],
+)
+
+# Per-provider cost estimates (USD per call, approximate)
+_LLM_COST_PER_CALL = {
+    "xai": 0.006, "openai": 0.005, "anthropic": 0.008,
+    "gemini": 0.001, "kimi": 0.003, "local": 0.0,
+}
+
+# In-memory per-provider stats for /api/llm-stats/export
+_llm_provider_stats: Dict[str, Dict] = {}
+
+def _record_llm_call(engine: str, latency_s: float, success: bool):
+    """Track per-provider stats for latency histograms and cost."""
+    s = _llm_provider_stats.setdefault(engine, {
+        "total_requests": 0, "successes": 0, "failures": 0,
+        "latencies": [], "total_cost_usd": 0.0,
+    })
+    s["total_requests"] += 1
+    if success:
+        s["successes"] += 1
+        s["latencies"].append(latency_s)
+        # Keep last 500 latencies for percentile calculation
+        if len(s["latencies"]) > 500:
+            s["latencies"] = s["latencies"][-500:]
+        cost = _LLM_COST_PER_CALL.get(engine, 0.005)
+        s["total_cost_usd"] += cost
+        PROM_LLM_COST_USD.labels(engine=engine).inc(cost)
+    else:
+        s["failures"] += 1
+
 PROM_LLM_CACHE_OPERATIONS = Counter(
     "smartcity_ids_llm_cache_total",
     "LLM cache operations (hits/misses).",
@@ -1759,10 +1799,8 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
                 
                 # Store throttled alert in database for audit
                 db.add_throttled_alert(
-                    source=source,
-                    rule=alert.rule,
-                    throttle_reason=throttle_reason.value,
-                    raw_alert=alert.dict()
+                    alert={**alert.dict(), "source": source},
+                    throttle_reason=throttle_reason.value
                 )
                 
                 await request_queue.dequeue()
@@ -2075,10 +2113,8 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
                 PROM_ALERTS_PROCESSED_TOTAL.labels(result="throttled").inc()
                 PROM_ALERTS_THROTTLED_TOTAL.labels(reason=throttle_reason.value).inc()
                 db.add_throttled_alert(
-                    source=source,
-                    rule=alert.rule,
-                    throttle_reason=throttle_reason.value,
-                    raw_alert=alert.dict()
+                    alert={**alert.dict(), "source": source},
+                    throttle_reason=throttle_reason.value
                 )
                 return AlertResponse(
                     status="throttled",
@@ -2518,6 +2554,48 @@ async def get_iot_events(limit: int = 50, device_id: Optional[str] = None):
         "total": len(filtered),
         "showing": min(limit, len(filtered)),
         "events": filtered[-limit:]
+    }
+
+# ============== LLM STATS EXPORT ==============
+
+@app.get("/api/llm-stats/export")
+async def export_llm_stats():
+    """Export per-engine LLM performance stats for paper figures.
+
+    Returns aggregated stats: total_requests, success_rate, avg_latency,
+    p50/p95/p99 latency, total_estimated_cost — per engine.
+    """
+    import statistics
+
+    engines_out = {}
+    for engine, s in _llm_provider_stats.items():
+        lats = s.get("latencies", [])
+        n = s["total_requests"]
+        succ = s["successes"]
+        fail = s["failures"]
+        engines_out[engine] = {
+            "total_requests": n,
+            "successes": succ,
+            "failures": fail,
+            "success_rate": round(succ / n, 4) if n else 0,
+            "avg_latency_s": round(statistics.mean(lats), 4) if lats else 0,
+            "p50_latency_s": round(statistics.median(lats), 4) if lats else 0,
+            "p95_latency_s": round(sorted(lats)[int(len(lats) * 0.95)] if len(lats) >= 2 else (lats[0] if lats else 0), 4),
+            "p99_latency_s": round(sorted(lats)[int(len(lats) * 0.99)] if len(lats) >= 2 else (lats[0] if lats else 0), 4),
+            "total_estimated_cost_usd": round(s["total_cost_usd"], 6),
+            "cost_per_call_usd": _LLM_COST_PER_CALL.get(engine, 0.005),
+        }
+
+    # Also include runtime_stats from LLM manager for richer context
+    mgr_stats = {}
+    if llm_manager:
+        mgr_stats = llm_manager.runtime_stats
+
+    return {
+        "engines": engines_out,
+        "manager_runtime_stats": mgr_stats,
+        "cost_model": _LLM_COST_PER_CALL,
+        "note": "Latencies are in seconds. Cost is estimated based on per-call pricing model.",
     }
 
 # ============== ALERT ENDPOINTS ==============
