@@ -366,10 +366,12 @@ function connectLiveFeed(){
       var a=d.analysis||{};
       var reasoning=a.reasoning||a.detailed_analysis||'';
       var confidence=a.confidence_score||a.confidence||'';
-      var impact=a.potential_impact||'';
-      var indicators=(a.indicators||a.ioc||[]);
+      var impact=a.business_impact||a.potential_impact||'';
+      var indicators=(a.key_indicators||a.indicators||a.ioc||[]);
+      var mitigating=(a.mitigating_factors||[]);
       var recs=(a.recommendations||[]);
       var actions=(a.automated_actions||d.automated_actions||[]);
+      var mitre=a.mitre_technique||'';
 
       var line='';
       line+='┌─────────────────────────────────────────────────────────────\n';
@@ -380,6 +382,7 @@ function connectLiveFeed(){
       line+='│  Engine:      '+engine+'\n';
       line+='│  Severity:    <span style="color:'+sevColor+';font-weight:bold">'+sev+'/10</span>\n';
       line+='│  Threat Type: '+threat+'\n';
+      if(mitre) line+='│  MITRE:       '+mitre+'\n';
       if(confidence) line+='│  Confidence:  '+confidence+'\n';
       if(procTime) line+='│  Processed:   '+procTime+'\n';
       if(summary) line+='│  Summary:     '+summary+'\n';
@@ -388,12 +391,16 @@ function connectLiveFeed(){
         line+='│  '+reasoning.replace(/\n/g,'\n│  ')+'\n';
       }
       if(impact){
-        line+='├── Impact ────────────────────────────────────────────────────\n';
+        line+='├── Business Impact ───────────────────────────────────────────\n';
         line+='│  '+impact.replace(/\n/g,'\n│  ')+'\n';
       }
       if(indicators.length){
-        line+='├── Indicators ────────────────────────────────────────────────\n';
+        line+='├── Key Indicators ───────────────────────────────────────────\n';
         indicators.forEach(function(ind){line+='│  • '+ind+'\n'});
+      }
+      if(mitigating.length){
+        line+='├── Mitigating Factors ───────────────────────────────────────\n';
+        mitigating.forEach(function(m){line+='│  ◦ '+m+'\n'});
       }
       if(recs.length){
         line+='├── Recommendations ──────────────────────────────────────────\n';
@@ -401,7 +408,7 @@ function connectLiveFeed(){
       }
       if(actions.length){
         var actSev=sev>=8?'<span style="color:#ef4444;font-weight:bold">EXECUTING</span>':sev>=6?'<span style="color:#f59e0b;font-weight:bold">EXECUTING</span>':'<span style="color:var(--text3)">Below threshold</span>';
-        line+='├── Automated Actions ────────────────────────────────────────\n';
+        line+='├── Automated Response ───────────────────────────────────────\n';
         actions.forEach(function(act){line+='│  ⚡ '+act+'  '+actSev+'\n'});
       }
       line+='└─────────────────────────────────────────────────────────────\n';
@@ -646,29 +653,26 @@ function renderK8sTables(){
 }
 
 function loadIoT(){
-  Promise.all([apiNoAuth('/api/metrics'),apiNoAuth('/api/iot/devices')]).then(function(r){
-    var m=r[0],devices=r[1];
+  Promise.all([apiNoAuth('/api/metrics'),apiNoAuth('/api/iot/pods')]).then(function(r){
+    var m=r[0],podData=r[1];
+    var pods=(podData&&podData.pods)?podData.pods:[];
+    var totalPods=podData&&podData.total||0;
+    var runningPods=podData&&podData.running||0;
+    var types=podData&&podData.types?Object.keys(podData.types).length:0;
+    var healthPct=totalPods>0?Math.round((runningPods/totalPods)*100):0;
     document.getElementById('iotStats').innerHTML=
-      '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">'+(m&&m.iot_devices_active||0)+'</div><div class="stat-sub">Reporting to cluster</div></div>'+
-      '<div class="stat-card blue"><div class="stat-label">Registered</div><div class="stat-value">'+(devices&&devices.total||0)+'</div><div class="stat-sub">In device registry</div></div>'+
-      '<div class="stat-card purple"><div class="stat-label">Device Types</div><div class="stat-value">4</div><div class="stat-sub">Camera, Healthcare, Parking, MQTT Simulator</div></div>'+
-      '<div class="stat-card yellow"><div class="stat-label">Fleet Health</div><div class="stat-value">100%</div><div class="stat-sub">All devices operational</div></div>';
-    // Real IoT pods from k8s-manifests (accurate names and replica counts)
-    var iotPods=[
-      ['traffic-camera (x2)','Camera','Running','smart-city','10.42.1.x'],
-      ['healthcare-api (x2)','Healthcare','Running','smart-city','10.42.1.x'],
-      ['parking-system (x2)','Parking','Running','smart-city','10.42.1.x'],
-      ['iot-devices-enhanced (x10)','MQTT Simulator','Running','smart-city','10.42.1.x'],
-      ['iot-simulator-high (x4)','MQTT High-Freq','Running','smart-city','10.42.1.x'],
-      ['iot-simulator-medium (x5)','MQTT Med-Freq','Running','smart-city','10.42.1.x'],
-      ['iot-simulator-burst','MQTT Burst','Running','smart-city','10.42.1.x'],
-      ['mqtt-broker','Message Broker','Running','smart-city','10.42.1.x']
-    ];
+      '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">'+runningPods+'</div><div class="stat-sub">Running in cluster</div></div>'+
+      '<div class="stat-card blue"><div class="stat-label">Total Pods</div><div class="stat-value">'+totalPods+'</div><div class="stat-sub">IoT workloads deployed</div></div>'+
+      '<div class="stat-card purple"><div class="stat-label">Device Types</div><div class="stat-value">'+types+'</div><div class="stat-sub">'+Object.keys(podData&&podData.types||{}).join(', ')+'</div></div>'+
+      '<div class="stat-card '+(healthPct>=90?'green':healthPct>=50?'yellow':'red')+'"><div class="stat-label">Fleet Health</div><div class="stat-value">'+healthPct+'%</div><div class="stat-sub">'+runningPods+'/'+totalPods+' pods running</div></div>';
     var ih='';
-    if(devices&&devices.devices&&devices.devices.length){
-      devices.devices.forEach(function(d){ih+='<tr><td>'+esc(d.device_id||d.name||'unknown')+'</td><td>'+esc(d.type||'sensor')+'</td><td><span class="dot dot-green"></span>'+(d.status||'active')+'</td><td>smart-city</td><td>'+(d.ip||'-')+'</td></tr>'});
+    if(pods.length>0){
+      pods.forEach(function(p){
+        var dotCls=p.status==='Running'?'dot-green':p.status==='Pending'?'dot-yellow':'dot-red';
+        ih+='<tr><td>'+esc(p.name)+'</td><td><span class="badge badge-info">'+esc(p.type)+'</span></td><td><span class="dot '+dotCls+'"></span>'+esc(p.status)+'</td><td>'+esc(p.namespace)+'</td><td>'+esc(p.ip)+'</td></tr>';
+      });
     }else{
-      iotPods.forEach(function(d){ih+='<tr><td>'+d[0]+'</td><td><span class="badge badge-info">'+d[1]+'</span></td><td><span class="dot dot-green"></span>'+d[2]+'</td><td>'+d[3]+'</td><td>'+d[4]+'</td></tr>'});
+      ih='<tr><td colspan="5" style="text-align:center;color:var(--text3)">No IoT pods found — K8s API may be unreachable</td></tr>';
     }
     document.getElementById('iotTable').innerHTML=ih;
   });

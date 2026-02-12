@@ -83,8 +83,27 @@ class Database:
             return not self.use_memory
     
     def _init_tables(self):
-        """Create tables if they don't exist."""
+        """Create tables if they don't exist. Handles schema migration from older versions."""
         with self.conn.cursor() as cur:
+            # ── Schema migration: detect old schema and drop stale tables ──
+            # Old schema had 'created_at' instead of 'timestamp', 'encrypted_alert_data' etc.
+            # Since this is a demo, safe to drop and recreate with correct schema.
+            try:
+                cur.execute("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'alerts' AND table_schema = 'public'
+                """)
+                existing_cols = {row[0] for row in cur.fetchall()}
+                if existing_cols and 'timestamp' not in existing_cols:
+                    logger.warning("⚠️ Detected old alerts schema (missing 'timestamp' column) — migrating...")
+                    # Drop dependent tables first (foreign keys)
+                    for tbl in ['throttled_alerts', 'system_logs', 'iot_events', 'iot_devices',
+                                'audit_logs', 'automation_actions', 'analysis_results', 'alerts']:
+                        cur.execute(f"DROP TABLE IF EXISTS {tbl} CASCADE")
+                    logger.info("✅ Old tables dropped — recreating with current schema")
+            except Exception as e:
+                logger.warning(f"Schema migration check failed (non-fatal): {e}")
+
             # Alerts table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS alerts (

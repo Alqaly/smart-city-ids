@@ -502,27 +502,38 @@ def detect_alert_source(alert: "Alert") -> str:
 
 # Cache for refresh_iot_active_metric to avoid blocking event loop
 # Pre-seed with 0 and expired cache so first call computes real count instantly
-# (Safe now — K8s API calls removed, only fast local counting)
-_iot_metric_cache = {"value": 0, "last_refresh": 0.0, "k8s_fail_until": 0.0}
-
-# Known IoT deployments (from k8s-manifests) - used as baseline when K8s API is unreachable
-_KNOWN_IOT_REPLICAS = 26  # 10 enhanced + 4 high + 5 medium + 1 burst + 2 cam + 2 health + 2 parking
+_iot_metric_cache = {"value": 0, "last_refresh": 0.0}
 
 def refresh_iot_active_metric() -> int:
-    """Keep IoT active gauge accurate even when simulators don't hit /api/iot/sensor.
-    Uses caching (120s TTL) to avoid blocking the async event loop with K8s API calls.
-    Falls back to known deployment replica count when no devices have registered."""
+    """Count real IoT pods via K8s API (cached 120s).
+    Falls back to DB / memory counts if K8s unavailable."""
     now = time.time()
-    # Return cached value if refreshed within last 120 seconds
     if now - _iot_metric_cache["last_refresh"] < 120:
         return _iot_metric_cache["value"]
 
+    # Try K8s API first (most accurate)
+    k8s_count = 0
+    if k8s_automation:
+        try:
+            pod_list = k8s_automation.core_v1.list_namespaced_pod(
+                namespace="smart-city", timeout_seconds=5
+            )
+            iot_prefixes = [
+                "traffic-camera", "healthcare-api", "parking-system",
+                "iot-devices-enhanced", "iot-simulator-high",
+                "iot-simulator-medium", "iot-simulator-burst", "mqtt-broker",
+            ]
+            for p in pod_list.items:
+                name = p.metadata.name
+                phase = (p.status.phase or "").lower()
+                if phase == "running" and any(name.startswith(pfx) for pfx in iot_prefixes):
+                    k8s_count += 1
+        except Exception:
+            pass
+
     db_count = db.get_iot_device_count()
     mem_count = len(iot_devices) if "iot_devices" in globals() else 0
-
-    # Use known replica count as baseline when neither DB nor memory has devices
-    # (K8s API is unreachable from pods so we can't count pods directly)
-    active_count = max(db_count, mem_count, _KNOWN_IOT_REPLICAS)
+    active_count = max(k8s_count, db_count, mem_count)
     PROM_IOT_DEVICES_ACTIVE.set(active_count)
     _iot_metric_cache["value"] = active_count
     _iot_metric_cache["last_refresh"] = now
@@ -2429,6 +2440,74 @@ async def get_iot_devices():
         "devices": list(iot_devices.values())
     }
 
+# IoT pod label patterns for K8s pod lookup
+_IOT_POD_PREFIXES = [
+    ("traffic-camera", "Camera"),
+    ("healthcare-api", "Healthcare"),
+    ("parking-system", "Parking"),
+    ("iot-devices-enhanced", "MQTT Simulator"),
+    ("iot-simulator-high", "MQTT High-Freq"),
+    ("iot-simulator-medium", "MQTT Med-Freq"),
+    ("iot-simulator-burst", "MQTT Burst"),
+    ("mqtt-broker", "Message Broker"),
+]
+
+@app.get("/api/iot/pods")
+async def get_iot_pods():
+    """List real IoT pods from Kubernetes with actual IPs and status."""
+    pods = []
+    if k8s_automation:
+        try:
+            pod_list = k8s_automation.core_v1.list_namespaced_pod(
+                namespace="smart-city", timeout_seconds=5
+            )
+            for p in pod_list.items:
+                name = p.metadata.name
+                # Match against IoT prefixes
+                device_type = None
+                for prefix, dtype in _IOT_POD_PREFIXES:
+                    if name.startswith(prefix):
+                        device_type = dtype
+                        break
+                if not device_type:
+                    continue  # Skip non-IoT pods (ids-api, postgres, etc.)
+                
+                phase = p.status.phase or "Unknown"
+                pod_ip = p.status.pod_ip or "-"
+                node = p.spec.node_name or "-"
+                ready = False
+                restarts = 0
+                if p.status.container_statuses:
+                    for cs in p.status.container_statuses:
+                        ready = ready or cs.ready
+                        restarts += cs.restart_count or 0
+                
+                pods.append({
+                    "name": name,
+                    "type": device_type,
+                    "status": phase,
+                    "ready": ready,
+                    "ip": pod_ip,
+                    "node": node,
+                    "restarts": restarts,
+                    "namespace": "smart-city",
+                })
+        except Exception as e:
+            logger.warning(f"Could not list IoT pods: {e}")
+    
+    # Compute type summary
+    type_counts = {}
+    for pod in pods:
+        t = pod["type"]
+        type_counts[t] = type_counts.get(t, 0) + 1
+    
+    return {
+        "total": len(pods),
+        "pods": pods,
+        "types": type_counts,
+        "running": sum(1 for p in pods if p["status"] == "Running"),
+    }
+
 @app.get("/api/iot/events")
 async def get_iot_events(limit: int = 50, device_id: Optional[str] = None):
     """Get recent IoT events"""
@@ -2466,6 +2545,14 @@ async def get_metrics():
     metrics["alerts_by_source"] = db_stats["alerts_by_source"]
     metrics["storage_type"] = db_stats["storage_type"]
     
+    # Get threat type breakdown from DB
+    try:
+        restore_data = db.get_prometheus_restore_data()
+        metrics["alerts_by_threat_type"] = restore_data.get("alerts_by_threat_type", {})
+        metrics["alerts_by_severity"] = restore_data.get("alerts_by_severity", {})
+    except Exception:
+        pass
+    
     PROM_UPTIME_SECONDS.set(uptime)
     metrics["iot_devices_active"] = refresh_iot_active_metric()
     return metrics
@@ -2477,27 +2564,36 @@ async def get_db_stats():
 
 
 @app.get("/api/deduplicator-stats")
-async def get_dedup_stats(token = Depends(verify_token)):
+async def get_dedup_stats():
     """Get alert deduplication cache statistics."""
     if not deduplicator:
         return {"error": "Deduplicator not initialized"}
     
     stats = deduplicator.get_stats()
+    total = stats.get("total_alerts", 0)
+    hits = stats.get("hits", 0)
+    misses = stats.get("misses", 0)
     
     # Calculate estimated cost savings
-    if stats["total_alerts"] > 0:
-        # Estimate: $0.001 per LLM call (xAI Grok-4 pricing)
-        cost_without_dedup = stats["total_alerts"] * 0.001
-        cost_with_dedup = stats["misses"] * 0.001
+    # Pricing estimate: ~$0.005 per LLM API call (avg across providers)
+    cost_per_call = 0.005
+    if total > 0:
+        cost_without_dedup = total * cost_per_call
+        cost_with_dedup = misses * cost_per_call
         cost_saved = cost_without_dedup - cost_with_dedup
+        hit_rate = round((hits / total) * 100, 1) if total > 0 else 0
     else:
+        cost_without_dedup = 0
+        cost_with_dedup = 0
         cost_saved = 0
+        hit_rate = 0
     
     return {
         **stats,
+        "hit_rate_percent": hit_rate,
         "cost_saved_usd": round(cost_saved, 4),
-        "estimated_cost_without_dedup": round(cost_without_dedup if stats["total_alerts"] > 0 else 0, 4),
-        "estimated_cost_with_dedup": round(cost_with_dedup if stats["total_alerts"] > 0 else 0, 4),
+        "estimated_cost_without_dedup": round(cost_without_dedup, 4),
+        "estimated_cost_with_dedup": round(cost_with_dedup, 4),
     }
 
 

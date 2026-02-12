@@ -415,8 +415,9 @@ else
   echo -e "  ${RED}✗ IDS API unreachable (HTTP ${CODE}) — check ${IDS_API}/health${RESET}"
   exit 1
 fi
-POD_COUNT=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -c Running || echo 0)
-echo -e "  ${GREEN}✓ ${POD_COUNT} pods running in ${NAMESPACE}${RESET}"
+POD_COUNT=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -cE '(traffic-camera|healthcare-api|parking-system|iot-devices|iot-simulator|mqtt-broker).*Running' || echo 0)
+TOTAL_PODS=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -c Running || echo 0)
+echo -e "  ${GREEN}✓ ${POD_COUNT} IoT device pods running (${TOTAL_PODS} total in ${NAMESPACE})${RESET}"
 echo ""
 
 # ── Execute ──

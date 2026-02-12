@@ -27,7 +27,9 @@ class LLMAnalysisResponse(BaseModel):
     
     All LLM engines must return data conforming to this schema.
     This ensures consistent behavior regardless of which engine responds.
+    Extra fields (e.g. mitre_technique, analysis_engine) are preserved.
     """
+    model_config = {"extra": "allow"}
     
     summary: str = Field(
         ...,
@@ -45,13 +47,19 @@ class LLMAnalysisResponse(BaseModel):
     
     threat_type: Literal[
         "DDoS",
+        "Denial of Service",
         "Privilege Escalation", 
         "Data Exfiltration",
+        "Credential Access",
         "Malware",
         "Policy Violation",
         "Reconnaissance",
+        "Lateral Movement",
+        "Initial Access",
+        "Command and Control",
         "Unauthorized Access",
         "Configuration Error",
+        "Unclassified",
         "Unknown"
     ] = Field(
         default="Unknown",
@@ -79,13 +87,13 @@ class LLMAnalysisResponse(BaseModel):
     
     business_impact: str = Field(
         default="Unknown impact",
-        max_length=300,
+        max_length=800,
         description="Effect on Smart City operations"
     )
     
     reasoning: str = Field(
         default="",
-        max_length=1000,
+        max_length=2000,
         description="Detailed explanation of threat assessment"
     )
     
@@ -139,7 +147,6 @@ class LLMAnalysisResponse(BaseModel):
         mapping = {
             "ddos": "DDoS",
             "dos": "DDoS",
-            "denial of service": "DDoS",
             "privilege escalation": "Privilege Escalation",
             "priv esc": "Privilege Escalation",
             "data exfiltration": "Data Exfiltration",
@@ -157,6 +164,14 @@ class LLMAnalysisResponse(BaseModel):
             "unauthorized": "Unauthorized Access",
             "config error": "Configuration Error",
             "misconfiguration": "Configuration Error",
+            "denial of service": "Denial of Service",
+            "credential access": "Credential Access",
+            "credential theft": "Credential Access",
+            "lateral movement": "Lateral Movement",
+            "initial access": "Initial Access",
+            "command and control": "Command and Control",
+            "c2": "Command and Control",
+            "c&c": "Command and Control",
         }
         
         for key, value in mapping.items():
@@ -167,7 +182,10 @@ class LLMAnalysisResponse(BaseModel):
         valid_types = [
             "DDoS", "Privilege Escalation", "Data Exfiltration",
             "Malware", "Policy Violation", "Reconnaissance",
-            "Unauthorized Access", "Configuration Error", "Unknown"
+            "Unauthorized Access", "Configuration Error",
+            "Denial of Service", "Credential Access",
+            "Lateral Movement", "Initial Access",
+            "Command and Control", "Unclassified", "Unknown",
         ]
         if v in valid_types:
             return v
