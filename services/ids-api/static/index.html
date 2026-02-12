@@ -256,6 +256,22 @@ tr:hover td{background:rgba(0,212,255,.03)}
 
 </div>
 
+<!-- Live Pipeline Feed — SSE real-time, visible from ALL tabs -->
+<div class="card" id="liveFeedCard" style="margin:0 24px 16px;border:1px solid var(--accent);border-radius:8px">
+  <div class="card-header" style="cursor:pointer" onclick="toggleLiveFeed()">
+    <h3><span id="liveFeedDot" class="dot dot-yellow" style="margin-right:6px"></span>Live Pipeline Feed</h3>
+    <span style="font-size:11px;color:var(--text3);margin-left:8px" id="liveFeedStatus">Connecting...</span>
+    <span class="badge badge-info" id="liveFeedCount" style="margin-left:8px">0</span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearLiveFeed()">Clear</button>
+      <button class="btn btn-outline btn-sm" id="liveFeedToggleBtn" onclick="event.stopPropagation();toggleLiveFeed()">▼</button>
+    </div>
+  </div>
+  <div class="card-body" id="liveFeedBody" style="display:block">
+    <pre id="liveFeedLog" style="font-size:11.5px;color:var(--text2);max-height:500px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to live event stream...</pre>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modalContent"></div>
 </div>
@@ -300,6 +316,119 @@ function showDashboard(){
   document.getElementById('dashboard').style.display='block';
   refreshAll();
   refreshTimer=setInterval(refreshAll,10000);
+  connectLiveFeed();
+}
+
+/* ─── SSE Live Pipeline Feed ─── */
+var _sse=null;
+var _sseFeedCount=0;
+var _sseFeedOpen=true;
+
+function connectLiveFeed(){
+  if(_sse){try{_sse.close()}catch(e){}}
+  var dot=document.getElementById('liveFeedDot');
+  var status=document.getElementById('liveFeedStatus');
+  dot.className='dot dot-yellow'; status.textContent='Connecting...';
+
+  _sse=new EventSource(API+'/api/alerts/live');
+
+  _sse.onopen=function(){
+    dot.className='dot dot-green'; status.textContent='Connected — streaming all alert processing';
+  };
+
+  _sse.addEventListener('alert',function(ev){
+    try{
+      var d=JSON.parse(ev.data);
+      _sseFeedCount++;
+      document.getElementById('liveFeedCount').textContent=_sseFeedCount;
+
+      var log=document.getElementById('liveFeedLog');
+      var ts=new Date().toLocaleTimeString();
+      var sev=d.severity||'?';
+      var sevColor=sev>=8?'#ef4444':sev>=5?'#f59e0b':'#22c55e';
+      var engine=d.llm_engine||d.engine||'unknown';
+      var threat=d.threat_type||'Unknown';
+      var summary=d.summary||'';
+      var source=d.source||'api';
+      var rule=d.rule||'';
+      var container=d.container_name||'';
+      var procTime=d.processing_time_ms?d.processing_time_ms+'ms':'';
+
+      // Extract analysis details if present
+      var a=d.analysis||{};
+      var reasoning=a.reasoning||a.detailed_analysis||'';
+      var confidence=a.confidence_score||a.confidence||'';
+      var impact=a.potential_impact||'';
+      var indicators=(a.indicators||a.ioc||[]);
+      var recs=(a.recommendations||[]);
+      var actions=(a.automated_actions||d.automated_actions||[]);
+
+      var line='';
+      line+='┌─────────────────────────────────────────────────────────────\n';
+      line+='│  ['+ts+']  LIVE ALERT — Source: '+source.toUpperCase()+'\n';
+      if(rule) line+='│  Rule: '+rule+'\n';
+      if(container) line+='│  Container: '+container+'\n';
+      line+='├── LLM Analysis ──────────────────────────────────────────────\n';
+      line+='│  Engine:      '+engine+'\n';
+      line+='│  Severity:    <span style="color:'+sevColor+';font-weight:bold">'+sev+'/10</span>\n';
+      line+='│  Threat Type: '+threat+'\n';
+      if(confidence) line+='│  Confidence:  '+confidence+'\n';
+      if(procTime) line+='│  Processed:   '+procTime+'\n';
+      if(summary) line+='│  Summary:     '+summary+'\n';
+      if(reasoning){
+        line+='├── Reasoning ─────────────────────────────────────────────────\n';
+        line+='│  '+reasoning.replace(/\n/g,'\n│  ')+'\n';
+      }
+      if(impact){
+        line+='├── Impact ────────────────────────────────────────────────────\n';
+        line+='│  '+impact.replace(/\n/g,'\n│  ')+'\n';
+      }
+      if(indicators.length){
+        line+='├── Indicators ────────────────────────────────────────────────\n';
+        indicators.forEach(function(ind){line+='│  • '+ind+'\n'});
+      }
+      if(recs.length){
+        line+='├── Recommendations ──────────────────────────────────────────\n';
+        recs.forEach(function(r){line+='│  → '+r+'\n'});
+      }
+      if(actions.length){
+        var actSev=sev>=8?'<span style="color:#ef4444;font-weight:bold">EXECUTING</span>':sev>=6?'<span style="color:#f59e0b;font-weight:bold">EXECUTING</span>':'<span style="color:var(--text3)">Below threshold</span>';
+        line+='├── Automated Actions ────────────────────────────────────────\n';
+        actions.forEach(function(act){line+='│  ⚡ '+act+'  '+actSev+'\n'});
+      }
+      line+='└─────────────────────────────────────────────────────────────\n';
+
+      // Prepend new events at top
+      var old=log.innerHTML;
+      if(old==='Connecting to live event stream...')old='';
+      log.innerHTML=line+'\n'+old;
+
+      // Flash the card border briefly
+      var card=document.getElementById('liveFeedCard');
+      card.style.borderColor=sevColor;
+      setTimeout(function(){card.style.borderColor='var(--accent)'},1500);
+
+      // Also refresh the overview alert counters after a short delay
+      setTimeout(refreshAll,2000);
+    }catch(e){console.warn('SSE parse error',e)}
+  });
+
+  _sse.onerror=function(){
+    dot.className='dot dot-red'; status.textContent='Disconnected — reconnecting...';
+    // EventSource auto-reconnects; update status when it does
+  };
+}
+
+function toggleLiveFeed(){
+  _sseFeedOpen=!_sseFeedOpen;
+  document.getElementById('liveFeedBody').style.display=_sseFeedOpen?'block':'none';
+  document.getElementById('liveFeedToggleBtn').textContent=_sseFeedOpen?'▼':'▲';
+}
+
+function clearLiveFeed(){
+  document.getElementById('liveFeedLog').innerHTML='Waiting for alerts...';
+  _sseFeedCount=0;
+  document.getElementById('liveFeedCount').textContent='0';
 }
 
 document.querySelectorAll('.tab-btn').forEach(function(b){

@@ -6,7 +6,7 @@ Production-ready with rate limiting, circuit breaker, and comprehensive monitori
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 from typing import List, Dict, Any, Optional, Union
@@ -18,6 +18,7 @@ import os
 import hashlib
 from collections import OrderedDict
 import asyncio
+import json as json_mod
 from enum import Enum
 
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
@@ -43,6 +44,22 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ─── SSE Live Event Stream ───────────────────────────────────────────────────
+# Clients connect to /api/alerts/live (SSE) to receive real-time alert events
+# from any source (CLI scripts, Falco forwarder, Suricata forwarder, dashboard).
+_sse_clients: list = []  # list of asyncio.Queue
+
+async def _sse_broadcast(event: dict):
+    """Push an event to all connected SSE clients."""
+    dead = []
+    for q in _sse_clients:
+        try:
+            q.put_nowait(event)
+        except asyncio.QueueFull:
+            dead.append(q)
+    for q in dead:
+        _sse_clients.remove(q)
 
 # Initialize FastAPI
 app = FastAPI(
@@ -1081,6 +1098,49 @@ async def health():
         "storage_type": db_status
     }
 
+# ─── SSE Live Alert Stream ───────────────────────────────────────────────
+@app.get("/api/alerts/live")
+async def alerts_live_stream():
+    """Server-Sent Events stream of real-time alert processing.
+    
+    Every alert processed by any source (Falco forwarder, Suricata forwarder,
+    CLI scripts, dashboard buttons) is pushed to this stream with full LLM
+    analysis, severity, actions, reasoning, etc.
+    
+    No auth required — operator dashboard connects automatically.
+    """
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _sse_clients.append(q)
+    logger.info(f"SSE client connected (total: {len(_sse_clients)})")
+
+    async def event_generator():
+        try:
+            # Send a connection confirmation
+            yield f"event: connected\ndata: {json_mod.dumps({'type': 'connected', 'message': 'Live pipeline stream connected', 'clients': len(_sse_clients)})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"event: alert\ndata: {json_mod.dumps(event, default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive to prevent connection drop
+                    yield f": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if q in _sse_clients:
+                _sse_clients.remove(q)
+            logger.info(f"SSE client disconnected (remaining: {len(_sse_clients)})")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
 @app.get("/api/safety")
 async def get_safety_status():
     """Get safety controls status - for demo verification"""
@@ -1756,7 +1816,7 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         
         logger.info(f"✅ Alert processed: ID={alert_id}, Severity={severity}, Storage={db.get_stats()['storage_type']}")
         
-        return AlertResponse(
+        resp = AlertResponse(
             status="processed",
             alert_id=alert_id,
             analysis=analysis,
@@ -1767,6 +1827,14 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
             llm_engine=llm_used,
             processing_time_ms=int((time.perf_counter() - started) * 1000)
         )
+        # Push to SSE live stream
+        await _sse_broadcast({
+            "type": "alert_processed",
+            "source": source,
+            "endpoint": "/api/alerts",
+            **resp.dict()
+        })
+        return resp
         
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -2028,7 +2096,7 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         
         logger.info(f"✅ Alert processed: ID={alert_id}, Severity={severity}")
         
-        return AlertResponse(
+        resp = AlertResponse(
             status="processed",
             alert_id=alert_id,
             analysis=analysis,
@@ -2039,6 +2107,19 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
             llm_engine=llm_used,
             processing_time_ms=int((time.perf_counter() - started) * 1000)
         )
+        # Push to SSE live stream
+        await _sse_broadcast({
+            "type": "alert_processed",
+            "source": source,
+            "endpoint": "/api/alerts/internal",
+            "rule": alert.rule,
+            "priority": alert.priority,
+            "output": alert.output,
+            "output_fields": alert.output_fields,
+            "container_name": (alert.output_fields or {}).get("container.name", ""),
+            **resp.dict()
+        })
+        return resp
         
     except Exception as e:
         logger.error(f"Error: {e}")
