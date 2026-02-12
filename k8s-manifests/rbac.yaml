@@ -1,0 +1,106 @@
+# RBAC — Smart City IDS
+# Defines ClusterRoles and RoleBindings for IDS components
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ids-api
+  namespace: smart-city
+  labels:
+    app: ids-api
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ids-api-role
+  labels:
+    app: ids-api
+rules:
+# Pod management for automated response (isolate/evict/restart)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "delete"]
+- apiGroups: [""]
+  resources: ["pods/eviction"]
+  verbs: ["create"]
+# Deployment scaling for automated response
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: ["apps"]
+  resources: ["deployments/scale"]
+  verbs: ["get", "patch"]
+# ConfigMap read access for configuration
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list"]
+# Service read access for endpoint discovery
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+# Namespace list for multi-namespace awareness
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+# Node read access for cluster health
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ids-api-binding
+  labels:
+    app: ids-api
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ids-api-role
+subjects:
+- kind: ServiceAccount
+  name: ids-api
+  namespace: smart-city
+
+---
+# Falco forwarder needs read access to pods for alert enrichment
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: falco-forwarder
+  namespace: falco-system
+  labels:
+    app: falco-forwarder
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: falco-forwarder-role
+  labels:
+    app: falco-forwarder
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: falco-forwarder-binding
+  labels:
+    app: falco-forwarder
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: falco-forwarder-role
+subjects:
+- kind: ServiceAccount
+  name: falco-forwarder
+  namespace: falco-system

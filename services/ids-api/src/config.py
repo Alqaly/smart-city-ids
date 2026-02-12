@@ -50,6 +50,12 @@ class Config:
     ALERT_CACHE_TTL_SECONDS: int = int(os.getenv("ALERT_CACHE_TTL_SECONDS", "60"))
     ALERT_CACHE_MAX_SIZE: int = int(os.getenv("ALERT_CACHE_MAX_SIZE", "100"))
     
+    # Security / Auth
+    SECRET_KEY: str = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET_KEY", "smart-city-ids-demo-secret-change-in-production"))
+    
+    # Database
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:idspassword@postgres:5432/smartcity_ids")
+    
     # Application
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
     APP_PORT: int = int(os.getenv("APP_PORT", "8000"))
@@ -70,18 +76,76 @@ class Config:
         return True
     
     @classmethod
-    def get_available_engines(cls) -> list:
-        """Return list of available LLM engines based on configured API keys"""
-        engines = []
+    def is_valid_api_key(cls, key: str, provider: str) -> bool:
+        """
+        Check if an API key appears valid (format check, not API call).
+        This helps identify placeholder or malformed keys early.
+        """
+        if not key or key == "placeholder" or len(key) < 10:
+            return False
+        
+        # Provider-specific format checks
+        if provider == "xai":
+            # xAI keys typically start with 'xai-'
+            return key.startswith("xai-") and len(key) > 20
+        elif provider == "openai":
+            # OpenAI keys start with 'sk-' (old) or 'sk-proj-' (new)
+            return (key.startswith("sk-") or key.startswith("sk-proj-")) and len(key) > 30
+        elif provider == "anthropic":
+            # Anthropic keys start with 'sk-ant-'
+            return key.startswith("sk-ant-") and len(key) > 30
+        elif provider == "gemini":
+            # Google API keys start with 'AIza'
+            return key.startswith("AIza") and len(key) > 30
+        elif provider == "kimi":
+            # Kimi/Moonshot keys start with 'sk-'
+            return key.startswith("sk-") and len(key) > 30
+        
+        return True  # Unknown provider, assume valid
+    
+    @classmethod
+    def get_valid_engines(cls) -> dict:
+        """
+        Return dict of engines with validation status.
+        Helps identify which keys are likely valid vs placeholders.
+        """
+        engines = {}
+        
         if cls.XAI_API_KEY:
-            engines.append("xai")
-        if cls.ANTHROPIC_API_KEY:
-            engines.append("anthropic")
+            valid = cls.is_valid_api_key(cls.XAI_API_KEY, "xai")
+            engines["xai"] = {"configured": True, "valid_format": valid}
+        
         if cls.OPENAI_API_KEY:
-            engines.append("openai")
+            valid = cls.is_valid_api_key(cls.OPENAI_API_KEY, "openai")
+            engines["openai"] = {"configured": True, "valid_format": valid}
+        
+        if cls.ANTHROPIC_API_KEY:
+            valid = cls.is_valid_api_key(cls.ANTHROPIC_API_KEY, "anthropic")
+            engines["anthropic"] = {"configured": True, "valid_format": valid}
+        
         if cls.GEMINI_API_KEY:
-            engines.append("gemini")
+            valid = cls.is_valid_api_key(cls.GEMINI_API_KEY, "gemini")
+            engines["gemini"] = {"configured": True, "valid_format": valid}
+        
         if cls.KIMI_API_KEY:
+            valid = cls.is_valid_api_key(cls.KIMI_API_KEY, "kimi")
+            engines["kimi"] = {"configured": True, "valid_format": valid}
+        
+        return engines
+    
+    @classmethod
+    def get_available_engines(cls) -> list:
+        """Return list of available LLM engines based on configured AND valid API keys"""
+        engines = []
+        if cls.XAI_API_KEY and cls.is_valid_api_key(cls.XAI_API_KEY, "xai"):
+            engines.append("xai")
+        if cls.ANTHROPIC_API_KEY and cls.is_valid_api_key(cls.ANTHROPIC_API_KEY, "anthropic"):
+            engines.append("anthropic")
+        if cls.OPENAI_API_KEY and cls.is_valid_api_key(cls.OPENAI_API_KEY, "openai"):
+            engines.append("openai")
+        if cls.GEMINI_API_KEY and cls.is_valid_api_key(cls.GEMINI_API_KEY, "gemini"):
+            engines.append("gemini")
+        if cls.KIMI_API_KEY and cls.is_valid_api_key(cls.KIMI_API_KEY, "kimi"):
             engines.append("kimi")
         return engines
     
@@ -90,7 +154,7 @@ class Config:
         """Return ordered list of engines to try based on LLM_PRIORITY and available keys"""
         priority = [e.strip() for e in cls.LLM_PRIORITY.split(",")]
         available = cls.get_available_engines()
-        # Return only engines that are both in priority list and have keys
+        # Return only engines that are both in priority list and have valid keys
         return [e for e in priority if e in available]
 
 # Validate on import

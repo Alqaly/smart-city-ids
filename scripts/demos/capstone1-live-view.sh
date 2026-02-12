@@ -2,6 +2,18 @@
 # Capstone I – LIVE OBSERVABILITY VIEW
 # Opens 4-pane tmux for live demo monitoring
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: bash scripts/demos/capstone1-live-view.sh"
+    echo "Opens interactive tmux live view (requires a TTY)."
+    exit 0
+fi
+
+if [[ ! -t 0 || ! -t 1 ]]; then
+    echo "This script requires an interactive terminal (tmux attach)."
+    echo "Run it directly in a terminal session."
+    exit 0
+fi
+
 SESSION="capstone1-demo"
 
 # Kill existing session

@@ -4,6 +4,159 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [v2.2.0] Unified LLM Engine Manager - 2026-02-05
+
+### Engineering Improvement: Unified LLM Manager
+
+**Problem with v2.1.0:**
+- Hardcoded "single engine mode" vs "failover mode" logic
+- Special case code paths based on engine count
+- Not scalable - what if user has 1, 2, 3, or 5 engines?
+
+**Solution:**
+- Removed all special-case logic
+- **One unified code path** for ANY number of engines (1, 2, or N)
+- Uses `LLMEngineManager` class in `llm_manager.py`
+- Behavior emerges from configuration, not hardcoded conditions
+
+### How It Works Now
+
+```python
+# OLD (bad engineering):
+if single_engine_mode:
+    # special path for 1 engine
+else:
+    # different path for N engines
+
+# NEW (proper engineering):
+result = await llm_manager.analyze(alert)  # Same for 1, 2, or 100 engines
+```
+
+### Startup Logs (Clean)
+
+```
+🔧 LLM Engine Configuration:
+   Configured engines: ['kimi']
+   Priority order: kimi
+   ✅ kimi: Ready
+✅ LLM Manager ready with 1 engine(s)
+✅ IDS API ready with 1 LLM engine(s): ['kimi']
+```
+
+Or with multiple engines:
+
+```
+🔧 LLM Engine Configuration:
+   Configured engines: ['xai', 'anthropic', 'gemini']
+   Priority order: xai → anthropic → gemini
+   ✅ xai: Ready
+   ✅ anthropic: Ready
+   ✅ gemini: Ready
+✅ LLM Manager ready with 3 engine(s)
+```
+
+### Files Changed
+- `services/ids-api/src/main.py` - Uses `LLMEngineManager`, removed special cases
+- `services/ids-api/src/config.py` - Removed `is_single_engine_mode()`, `get_engine_status_summary()`
+- `services/ids-api/src/llm_manager.py` - Unified manager (already existed)
+
+### API Endpoint Update
+
+**`GET /api/llm/status`** now returns:
+
+```json
+{
+  "engine_count": 1,
+  "engines": ["kimi"],
+  "priority_order": ["kimi"],
+  "primary_engine": "kimi",
+  "engine_details": {
+    "kimi": {"initialized": true, "model": "moonshot-v1-128k"}
+  },
+  "message": "Unified LLM Manager with 1 engine(s) - same behavior regardless of count"
+}
+```
+
+---
+
+## [v2.1.0] Alert Rate Limiting - 2026-02-05
+- New `alert_rate_limiter.py` module prevents alert storms
+- Configurable limits: per-rule (10/min), per-source (100/min), global (500/min)
+- Throttled alerts saved to database for audit (not lost)
+- New endpoints: `/api/rate-limiter/status`, `/api/rate-limiter/reset`
+- Prometheus metric: `smartcity_ids_alerts_throttled_total`
+
+**3. Enhanced Database Persistence**
+- New `system_logs` table for debugging and audit
+- New `throttled_alerts` table tracks rate-limited alerts
+- Methods: `add_system_log()`, `add_throttled_alert()`, `get_throttle_stats()`
+
+**4. Operator Interface Improvements**
+- New `/api/operator/dashboard` endpoint for full dashboard data
+- New `/api/operator/search` endpoint with filters
+- `get_full_dashboard_data()` returns summary, distributions, timeline
+- `search_incidents()` filters by query, severity, threat type
+
+### Configuration Changes
+
+```bash
+# Single Engine Mode (only one key needed)
+export KIMI_API_KEY="sk-..."  # System auto-detects and uses Kimi only
+
+# Rate Limiter Settings
+export ALERT_RATE_LIMIT_WINDOW=60        # Window in seconds
+export ALERT_RATE_LIMIT_PER_RULE=10      # Max alerts per rule per window
+export ALERT_RATE_LIMIT_PER_SOURCE=100   # Max alerts per source per window
+export ALERT_RATE_LIMIT_GLOBAL=500       # Max total alerts per window
+```
+
+### API Endpoints Added
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/llm/status` | GET | LLM engine status, mode, health |
+| `/api/rate-limiter/status` | GET | Rate limiter stats and config |
+| `/api/rate-limiter/reset` | POST | Reset rate limiter counters |
+| `/api/operator/dashboard` | GET | Full dashboard data |
+| `/api/operator/search` | GET | Search/filter incidents |
+
+### Files Modified
+- `services/ids-api/src/config.py` - Added `is_single_engine_mode()`, `get_engine_status_summary()`
+- `services/ids-api/src/main.py` - Single engine mode, rate limiting integration, new endpoints
+- `services/ids-api/src/alert_rate_limiter.py` - NEW: Rate limiting module
+- `services/ids-api/src/database.py` - Added system_logs, throttled_alerts tables
+- `services/ids-api/src/operator_interface.py` - Added dashboard and search methods
+
+### How Single Engine Mode Works
+
+```
+Startup with ONLY KIMI_API_KEY set:
+
+🔑 LLM Engine Configuration:
+   Available engines: ['kimi']
+   Primary engine: kimi
+   Failover enabled: False
+   ⚡ SINGLE ENGINE MODE: Using only kimi
+   ✅ kimi: Initialized
+✅ LLM engines ready: ['kimi']
+⚡ Running in SINGLE ENGINE MODE with: kimi
+```
+
+### Verification Commands
+
+```bash
+# Check LLM status
+curl http://localhost:8000/api/llm/status | jq
+
+# Check rate limiter
+curl http://localhost:8000/api/rate-limiter/status | jq
+
+# Check operator dashboard
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/api/operator/dashboard | jq
+```
+
+---
+
 ## [Capstone Final] Complete Observability Stack & Multi-LLM Support - 2026-02-04
 
 ### Major Changes

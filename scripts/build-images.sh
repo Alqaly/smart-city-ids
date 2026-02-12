@@ -7,25 +7,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
-source "$SCRIPT_DIR/lib/script-utils.sh"
-
-init_script "$0" "Docker Image Builder"
-
-PUSH_IMAGES=0
-NO_CACHE=""
-REGISTRY="${DOCKER_REGISTRY:-localhost}"
-
-#!/bin/bash
-# =============================================================================
-# Smart City IDS - Docker Image Builder
-# Professional-grade container image building with registry support
-# Usage: bash scripts/build-images.sh [--push] [--registry REGISTRY] [--help]
-# =============================================================================
-
-set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
 init_script "$0" "Docker Image Builder"
@@ -44,9 +26,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ensure_command docker
+ensure_commands docker
 
-PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DOCKER_DIR="${PROJECT_ROOT}/docker"
 
 log_section "BUILD CONFIGURATION"
@@ -71,34 +53,37 @@ BUILD_FAILED=0
 
 for image_spec in "${IMAGES[@]}"; do
     IFS=':' read -r image_name image_desc <<< "$image_spec"
-    
+
     log_subsection "$image_desc"
     DOCKERFILE="${DOCKER_DIR}/${image_name}/Dockerfile"
     IMAGE_TAG="${REGISTRY}/smart-city-ids/${image_name}:latest"
-    
+
     if [[ ! -f "$DOCKERFILE" ]]; then
         log_error "Dockerfile not found: $DOCKERFILE"
-        ((BUILD_FAILED++))
+        ((BUILD_FAILED+=1))
         continue
     fi
-    
+
     log_info "Building: $IMAGE_TAG"
-    
+
     if docker build \
         --file "$DOCKERFILE" \
         --tag "$IMAGE_TAG" $NO_CACHE \
         "${DOCKER_DIR}/${image_name}" >/dev/null 2>&1
     then
-        log_info "✓ Built: $IMAGE_TAG"
-        ((BUILD_SUCCESS++))
-        
+        log_info "Built: $IMAGE_TAG"
+        ((BUILD_SUCCESS+=1))
+
         if [[ $PUSH_IMAGES -eq 1 ]]; then
             log_info "Pushing to registry..."
-            docker push "$IMAGE_TAG" || log_error "Push failed"
+            docker push "$IMAGE_TAG" || {
+                log_error "Push failed: $IMAGE_TAG"
+                ((BUILD_FAILED+=1))
+            }
         fi
     else
-        log_error "✗ Build failed"
-        ((BUILD_FAILED++))
+        log_error "Build failed: $IMAGE_TAG"
+        ((BUILD_FAILED+=1))
     fi
     echo ""
 done
@@ -109,9 +94,8 @@ echo "Failed: $BUILD_FAILED"
 echo ""
 
 if [[ $BUILD_FAILED -eq 0 ]]; then
-    log_info "✅ All images built successfully"
+    log_info "All images built successfully"
     exit 0
 else
-    log_error "Some builds failed"
-    exit 1
+    die "Some builds failed"
 fi

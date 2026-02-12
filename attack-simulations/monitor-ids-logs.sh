@@ -1,5 +1,14 @@
 #!/bin/bash
 
+set -euo pipefail
+
+if [[ -n "${KUBECONFIG:-}" && ! -r "${KUBECONFIG}" && -r "$HOME/.kube/config" ]]; then
+    export KUBECONFIG="$HOME/.kube/config"
+fi
+
+command -v kubectl >/dev/null 2>&1 || { echo "❌ kubectl not found"; exit 1; }
+kubectl cluster-info >/dev/null 2>&1 || { echo "❌ Kubernetes cluster not reachable"; exit 1; }
+
 echo "📊 REAL-TIME IDS MONITORING DASHBOARD"
 echo "======================================"
 
@@ -40,4 +49,3 @@ while true; do
     echo "🔄 Refreshing in 5 seconds... (Press Ctrl+C to stop)"
     sleep 5
 done
-

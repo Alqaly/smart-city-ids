@@ -41,8 +41,9 @@ from typing import Optional, Dict, Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
+from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry, REGISTRY
 
 # ============================================================================
 # Configuration
@@ -98,46 +99,112 @@ app = FastAPI(title="Suricata Forwarder", version="1.0.0")
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
+    """Health check endpoint with IDS API connectivity check.
+    
+    METRIC SEMANTICS (fixes UP/DOWN confusion):
+    - suricata_forwarder_up = 1: This forwarder process is running (always 1 if scrape succeeds)
+    - suricata_forwarder_ids_api_connected: Can we reach the IDS API? (the meaningful health check)
+    
+    The "status" field reflects IDS API connectivity:
+    - "healthy" = IDS API reachable, forwarding works
+    - "degraded" = IDS API unreachable, alerts will queue/fail
+    """
+    ids_api_healthy = False
+    ids_api_error = None
+    
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{IDS_API_URL.replace('/api/alerts', '')}/health")
+            ids_api_healthy = response.status_code == 200
+    except Exception as e:
+        ids_api_error = str(e)
+    
+    # Update Prometheus metrics with clear semantics:
+    # - suricata_forwarder_up: Always 1 (we're running, or you couldn't scrape this)
+    # - suricata_forwarder_ids_api_connected: Actual connectivity to IDS API
+    suricata_forwarder_up.set(1)  # Process is running
+    suricata_forwarder_ids_api_connected.set(1 if ids_api_healthy else 0)  # IDS API reachable?
+    
     return {
-        "status": "healthy",
+        "status": "healthy" if ids_api_healthy else "degraded",
         "service": "suricata-forwarder",
-        "alerts_forwarded": alerts_forwarded_count
+        "process_running": True,  # Always true if you can call this endpoint
+        "ids_api_connected": ids_api_healthy,  # The meaningful health indicator
+        "alerts_forwarded": alerts_forwarded_count,
+        "ids_api_error": ids_api_error,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "metric_semantics": {
+            "suricata_forwarder_up": "Process is running (always 1 if scrape works)",
+            "suricata_forwarder_ids_api_connected": "Can reach IDS API (1=yes, 0=no)"
+        }
     }
 
 
 @app.get("/metrics")
 async def metrics():
-    """Prometheus metrics endpoint"""
-    return {
-        "suricata_alerts_received": alerts_received_count,
-        "suricata_alerts_forwarded": alerts_forwarded_count,
-        "suricata_forward_failures": forward_failures_count
-    }
+    """Prometheus metrics endpoint - returns text/plain format"""
+    return Response(content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
 
 
 # ============================================================================
-# Metrics
+# Prometheus Metrics
 # ============================================================================
 
+# Counters for tracking alerts
+suricata_alerts_received = Counter(
+    'suricata_forwarder_alerts_received_total',
+    'Total Suricata alerts received',
+    ['severity', 'category']
+)
+
+suricata_alerts_forwarded = Counter(
+    'suricata_forwarder_alerts_forwarded_total',
+    'Total Suricata alerts forwarded to IDS API',
+    ['status']
+)
+
+suricata_forward_errors = Counter(
+    'suricata_forwarder_errors_total',
+    'Total forwarding errors',
+    ['error_type']
+)
+
+# Health metrics - SEMANTIC CLARITY:
+# - suricata_forwarder_up: Is this forwarder process running? (always 1 if you can scrape this)
+# - suricata_forwarder_ids_api_connected: Can we reach the IDS API? (the important health check)
+suricata_forwarder_up = Gauge(
+    'suricata_forwarder_up',
+    'Suricata forwarder process is running (1=yes, scraped from /metrics)'
+)
+suricata_forwarder_up.set(1)
+
+suricata_forwarder_ids_api_connected = Gauge(
+    'suricata_forwarder_ids_api_connected',
+    'Suricata forwarder can reach IDS API (1=connected, 0=disconnected)'
+)
+
+# Legacy counters for health endpoint
 alerts_received_count = 0
 alerts_forwarded_count = 0
 forward_failures_count = 0
 
 
-def increment_received():
+def increment_received(severity='unknown', category='unknown'):
     global alerts_received_count
     alerts_received_count += 1
+    suricata_alerts_received.labels(severity=severity, category=category).inc()
 
 
-def increment_forwarded():
+def increment_forwarded(status='success'):
     global alerts_forwarded_count
     alerts_forwarded_count += 1
+    suricata_alerts_forwarded.labels(status=status).inc()
 
 
-def increment_failed():
+def increment_failed(error_type='unknown'):
     global forward_failures_count
     forward_failures_count += 1
+    suricata_forward_errors.labels(error_type=error_type).inc()
 
 
 # ============================================================================

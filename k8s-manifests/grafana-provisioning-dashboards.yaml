@@ -424,7 +424,7 @@ data:
                 "type": "prometheus",
                 "uid": "Prometheus"
               },
-              "expr": "avg_over_time(iot_device_active[15m])",
+              "expr": "max(smartcity_ids_iot_devices_active) or on() vector(0)",
               "legendFormat": "Devices",
               "refId": "A"
             }
@@ -489,6 +489,62 @@ data:
             }
           ],
           "title": "System Uptime",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0 } ] },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 },
+          "id": 110,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "Prometheus" },
+              "expr": "up{job=\"falco-forwarder\"} or vector(0)",
+              "legendFormat": "Falco Forwarder",
+              "refId": "A"
+            }
+          ],
+          "title": "Falco Forwarder",
+          "type": "stat"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0 } ] },
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 4, "w": 3, "x": 24, "y": 1 },
+          "id": 111,
+          "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto" },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "Prometheus" },
+              "expr": "up{job=\"suricata-forwarder\"} or vector(0)",
+              "legendFormat": "Suricata Forwarder",
+              "refId": "A"
+            }
+          ],
+          "title": "Suricata Forwarder",
           "type": "stat"
         },
         {
@@ -949,7 +1005,7 @@ data:
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "description": "Circuit breaker: 0=CLOSED (healthy), 1=HALF_OPEN, 2=OPEN (failing)",
+          "description": "Circuit breaker: 0=HEALTHY, 1=TESTING, 2=FAILING, 3=UNCONFIGURED",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -985,7 +1041,17 @@ data:
                     }
                   },
                   "type": "value"
+                },
+            {
+              "options": {
+                "3": {
+                  "color": "gray",
+                  "index": 3,
+                  "text": "UNCONFIGURED"
                 }
+              },
+              "type": "value"
+            }
               ],
               "thresholds": {
                 "mode": "absolute",
@@ -1001,7 +1067,11 @@ data:
                   {
                     "color": "red",
                     "value": 2
-                  }
+                  },
+              {
+                "color": "gray",
+                "value": 3
+              }
                 ]
               }
             },
@@ -1034,7 +1104,7 @@ data:
                 "type": "prometheus",
                 "uid": "Prometheus"
               },
-              "expr": "smartcity_ids_circuit_breaker_state{engine=\"xai-grok-4\"}",
+              "expr": "smartcity_ids_circuit_breaker_state{engine=\"xai\"}",
               "legendFormat": "xAI",
               "refId": "A"
             }
@@ -1047,7 +1117,7 @@ data:
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "description": "Circuit breaker: 0=CLOSED (healthy), 1=HALF_OPEN, 2=OPEN (failing)",
+          "description": "Circuit breaker: 0=HEALTHY, 1=TESTING, 2=FAILING, 3=UNCONFIGURED",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -1083,7 +1153,17 @@ data:
                     }
                   },
                   "type": "value"
+                },
+            {
+              "options": {
+                "3": {
+                  "color": "gray",
+                  "index": 3,
+                  "text": "UNCONFIGURED"
                 }
+              },
+              "type": "value"
+            }
               ],
               "thresholds": {
                 "mode": "absolute",
@@ -1099,7 +1179,11 @@ data:
                   {
                     "color": "red",
                     "value": 2
-                  }
+                  },
+              {
+                "color": "gray",
+                "value": 3
+              }
                 ]
               }
             },
@@ -1488,7 +1572,7 @@ data:
                 "type": "prometheus",
                 "uid": "Prometheus"
               },
-              "expr": "increase(smartcity_ids_llm_requests_total[5m])",
+              "expr": "sum by (engine, result) (increase(smartcity_ids_llm_requests_total[5m]))",
               "legendFormat": "{{engine}} - {{result}}",
               "refId": "A"
             }
@@ -2369,7 +2453,7 @@ data:
                 "type": "prometheus",
                 "uid": "Prometheus"
               },
-              "expr": "avg_over_time(iot_device_active[15m])",
+              "expr": "max(smartcity_ids_iot_devices_active) or on() vector(0)",
               "legendFormat": "Active",
               "refId": "A"
             }

@@ -7,22 +7,24 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
 init_script "$0" "Scalability Test Suite"
 
 NAMESPACE="smart-city"
-RESULTS_DIR="${PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}/scalability-results"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+RESULTS_DIR="${PROJECT_ROOT}/scalability-results"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:31701}"
 IDS_API_URL="${IDS_API_URL:-http://localhost:30800}"
 WAIT_SECONDS=60
-SCALE_LEVELS="${SCALE_LEVELS:-10,100,500,1000}"
+SCALE_LEVELS_CSV="${SCALE_LEVELS:-10,100,500,1000}"
+RUN_ID="${RUN_ID:-scalability-$(date +%Y%m%d-%H%M%S)}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --scales)       SCALE_LEVELS="$2"; shift 2 ;;
+        --scales)       SCALE_LEVELS_CSV="$2"; shift 2 ;;
         --duration)     WAIT_SECONDS="$2"; shift 2 ;;
         --results-dir)  RESULTS_DIR="$2"; shift 2 ;;
         --help)         print_help "scalability-test.sh [--scales LEVELS] [--duration SECONDS]"; exit 0 ;;
@@ -31,12 +33,36 @@ while [[ $# -gt 0 ]]; do
 done
 
 ensure_command kubectl
+ensure_command jq
+ensure_kubeconfig
+cluster_ok=0
+for _ in 1 2 3 4 5; do
+    if kubectl cluster-info >/dev/null 2>&1; then
+        cluster_ok=1
+        break
+    fi
+    sleep 2
+done
+[[ $cluster_ok -eq 1 ]] || die "Cannot connect to Kubernetes cluster"
+
+NODE_IP=$(get_node_ip)
+if [[ "${PROMETHEUS_URL:-}" == "http://localhost:31701" ]]; then
+    PROM_PORT=$(get_service_nodeport "prometheus" "monitoring" "31701")
+    PROMETHEUS_URL="http://${NODE_IP}:${PROM_PORT}"
+fi
+if [[ "${IDS_API_URL:-}" == "http://localhost:30800" ]]; then
+    IDS_PORT=$(get_service_nodeport "ids-api-service" "smart-city" "30800")
+    IDS_API_URL="http://${NODE_IP}:${IDS_PORT}"
+fi
 
 mkdir -p "$RESULTS_DIR"
 
+IFS=',' read -r -a SCALE_LEVELS <<< "$SCALE_LEVELS_CSV"
+[[ ${#SCALE_LEVELS[@]} -gt 0 ]] || die "No scale levels provided"
+
 log_section "SCALABILITY TEST CONFIGURATION"
 log_info "Namespace: $NAMESPACE"
-log_info "Scale Levels: $SCALE_LEVELS"
+log_info "Scale Levels: $SCALE_LEVELS_CSV"
 log_info "Duration per Scale: ${WAIT_SECONDS}s"
 log_info "Results Directory: $RESULTS_DIR"
 log_info "Prometheus URL: $PROMETHEUS_URL"
@@ -59,7 +85,7 @@ cat > "$REPORT_FILE" << EOF
 
 **Run ID:** $RUN_ID
 **Date:** $(date -Iseconds)
-**Test Levels:** ${SCALE_LEVELS[*]} devices
+**Test Levels:** ${SCALE_LEVELS_CSV} devices
 
 ## Executive Summary
 
@@ -189,8 +215,8 @@ EOF
     },
     "health": {
         "running_pods": $running_pods,
-        "rate_limit_healthy": $rate_limit_healthy,
-        "queue_healthy": $queue_healthy,
+        "rate_limit_healthy": "$rate_limit_healthy",
+        "queue_healthy": "$queue_healthy",
         "queue_size": "$queue_size",
         "cpu_usage": "$cpu_usage",
         "memory_usage": "$mem_usage"
@@ -242,6 +268,9 @@ if ! command -v kubectl &> /dev/null; then
 fi
 
 if ! kubectl cluster-info &> /dev/null; then
+    sleep 2
+fi
+if ! kubectl cluster-info &> /dev/null; then
     echo -e "${RED}❌ Cannot connect to Kubernetes cluster${NC}"
     exit 1
 fi
@@ -259,10 +288,10 @@ for scale in "${SCALE_LEVELS[@]}"; do
     echo "════════════════════════════════════════════════════════════"
     
     # Scale to target
-    scale_iot $scale
+    scale_iot "$scale"
     
     # Record metrics
-    record_metrics $scale
+    record_metrics "$scale"
     
     echo ""
 done

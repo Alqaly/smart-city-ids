@@ -11,6 +11,7 @@ falco:
   json_include_output_property: true
   json_include_output_fields_property: true
   json_include_tags_property: true
+  watch_config_files: false
   log_stderr: true
   log_syslog: false
   log_level: info

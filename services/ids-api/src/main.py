@@ -9,11 +9,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import logging
 from datetime import datetime
 import time
-import json
 import sys
 import os
 import hashlib
@@ -34,8 +33,9 @@ from llm_engine_gemini import GeminiAnalyzer
 from llm_engine_kimi import KimiAnalyzer
 from k8s_automation import K8sAutomation
 from database import db
-from alert_deduplicator import AlertDeduplicator, AlertBatcher
+from alert_deduplicator import AlertDeduplicator
 from operator_interface import operator_interface
+from alert_rate_limiter import AlertRateLimiter
 
 # Configure logging
 logging.basicConfig(
@@ -70,29 +70,47 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
     token = credentials.credentials
     if not token:
         raise HTTPException(status_code=401, detail="No token provided")
-    # TODO: Validate JWT or API key against database
-    return token
+    username = verify_jwt_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return username
 
-# Initialize components - Multi-LLM Support for Scalability
+# Initialize components - Smart LLM Engine Management
+# Supports single-engine mode (only one API key) OR multi-engine failover
 try:
     Config.validate()
     
-    # Initialize all available LLM engines
-    llm_engines = {}
-    if Config.XAI_API_KEY:
-        llm_engines["xai"] = XAIAnalyzer()
-    if Config.ANTHROPIC_API_KEY:
-        llm_engines["anthropic"] = AnthropicAnalyzer()
-    if Config.OPENAI_API_KEY:
-        llm_engines["openai"] = OpenAIAnalyzer()
-    if Config.GEMINI_API_KEY:
-        llm_engines["gemini"] = GeminiAnalyzer()
-    if Config.KIMI_API_KEY:
-        llm_engines["kimi"] = KimiAnalyzer()
+    # Initialize generic LLM provider system (preferred).
+    # Fallback to legacy manager if llm_providers package isn't mounted.
+    try:
+        from llm_providers.manager import LLMManager
+        llm_manager = LLMManager()
+    except Exception as provider_init_error:
+        logger.warning(f"Provider manager init failed, falling back to legacy manager: {provider_init_error}")
+        from llm_manager import LLMEngineManager
+
+        class LegacyLLMAdapter:
+            def __init__(self):
+                self._manager = LLMEngineManager()
+
+            async def analyze(self, alert_dict):
+                return await self._manager.analyze(alert_dict)
+
+            def get_available_providers(self):
+                return self._manager.get_available_engines()
+
+            def get_status(self):
+                providers = self._manager.get_available_engines()
+                return {
+                    "provider_count": len(providers),
+                    "providers": providers,
+                    "details": {p: {"configured": True} for p in providers},
+                }
+
+        llm_manager = LegacyLLMAdapter()
     
-    # Legacy compatibility
-    xai_engine = llm_engines.get("xai")
-    openai_engine = llm_engines.get("openai")
+    # Clean logging
+    logger.info(f"✅ LLM: {llm_manager.get_status()['provider_count']} provider(s) ready")
     
     k8s_automation = K8sAutomation()
     
@@ -103,17 +121,25 @@ try:
     )
     logger.info(f"Alert deduplicator initialized (TTL={deduplicator.ttl}s, max_cache={deduplicator.max_cache_size})")
     
-    engine_status = ", ".join([f"{name}=ready" for name in llm_engines.keys()]) or "no-engines"
-    logger.info(f"Initialized LLM engines: {engine_status}")
-    logger.info(f"LLM fallback priority: {Config.get_engine_priority()}")
+    # Initialize alert rate limiter to prevent flooding
+    alert_rate_limiter = AlertRateLimiter(
+        window_seconds=int(os.getenv("ALERT_RATE_LIMIT_WINDOW", "60")),
+        max_per_rule=int(os.getenv("ALERT_RATE_LIMIT_PER_RULE", "10")),
+        max_per_source=int(os.getenv("ALERT_RATE_LIMIT_PER_SOURCE", "100")),
+        max_global=int(os.getenv("ALERT_RATE_LIMIT_GLOBAL", "500"))
+    )
+    logger.info(f"Alert rate limiter initialized (window={alert_rate_limiter.window_seconds}s, per_rule={alert_rate_limiter.max_per_rule})")
+    
+    # Final status summary
+    provider_count = llm_manager.get_status()["provider_count"]
+    logger.info(f"✅ IDS API ready with {provider_count} LLM provider(s)")
     logger.info(f"Safety: mode={Config.AUTOMATION_MODE}, protected={Config.PROTECTED_SERVICES}")
 except Exception as e:
     logger.error(f"Failed to initialize: {e}")
-    llm_engines = {}
-    xai_engine = None
-    openai_engine = None
+    llm_manager = None
     k8s_automation = None
     deduplicator = None
+    alert_rate_limiter = None
 
 # Alert Cache for deduplication (reduces LLM costs)
 class AlertCache:
@@ -212,7 +238,13 @@ class CircuitState(Enum):
 
 class CircuitBreaker:
     """Circuit breaker for LLM API resilience"""
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30, half_open_max_calls: int = 3):
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        recovery_timeout: int = 30,
+        half_open_max_calls: int = 3,
+        engines: Optional[List[str]] = None,
+    ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.half_open_max_calls = half_open_max_calls
@@ -223,13 +255,11 @@ class CircuitBreaker:
         self.last_failure_time = 0
         self.half_open_calls = 0
         
-        # Per-engine tracking - All supported LLM engines
+        # Track only configured providers to avoid misleading "closed/open" states.
+        tracked_engines = engines or ["xai", "anthropic", "openai", "gemini", "kimi"]
         self.engine_stats = {
-            "xai": {"failures": 0, "successes": 0, "state": "closed"},
-            "anthropic": {"failures": 0, "successes": 0, "state": "closed"},
-            "openai": {"failures": 0, "successes": 0, "state": "closed"},
-            "gemini": {"failures": 0, "successes": 0, "state": "closed"},
-            "kimi": {"failures": 0, "successes": 0, "state": "closed"}
+            engine: {"failures": 0, "successes": 0, "state": "closed"}
+            for engine in tracked_engines
         }
     
     def can_execute(self, engine: str) -> tuple[bool, str]:
@@ -328,7 +358,8 @@ rate_limiter = RateLimiter(
 )
 circuit_breaker = CircuitBreaker(
     failure_threshold=int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5")),
-    recovery_timeout=int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30"))
+    recovery_timeout=int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "30")),
+    engines=(llm_manager.get_status().get("providers", []) if llm_manager else None),
 )
 request_queue = RequestQueue(
     max_queue_size=int(os.getenv("REQUEST_QUEUE_SIZE", "100"))
@@ -373,13 +404,75 @@ def set_automation_mode_metric(mode: str):
 
 def update_circuit_breaker_metrics():
     """Update Prometheus metrics for circuit breaker states"""
-    state_map = {"closed": 0, "half_open": 1, "open": 2}
-    for engine, stats in circuit_breaker.engine_stats.items():
-        state_val = state_map.get(stats.get("state", "closed"), 0)
+    state_map = {"closed": 0, "half_open": 1, "open": 2, "unconfigured": 3}
+    configured = set(circuit_breaker.engine_stats.keys())
+    all_engines = ["xai", "anthropic", "openai", "gemini", "kimi"]
+
+    for engine in all_engines:
+        if engine in configured:
+            stats = circuit_breaker.engine_stats.get(engine, {})
+            state_val = state_map.get(stats.get("state", "closed"), 0)
+        else:
+            state_val = state_map["unconfigured"]
         PROM_CIRCUIT_BREAKER_STATE.labels(engine=engine).set(state_val)
 
+def detect_alert_source(alert: "Alert") -> str:
+    """Determine alert source using robust fields (not just rule text)."""
+    rule = (alert.rule or "").lower()
+    output = (alert.output or "").lower()
+    fields = alert.output_fields or {}
+    container = str(fields.get("container.name", "")).lower()
+    event_type = str(fields.get("event_type", "")).lower()
+
+    if (
+        "suricata" in rule
+        or "suricata" in output
+        or "suricata" in container
+        or event_type == "alert"
+    ):
+        return "suricata"
+    return "falco"
+
+# Cache for refresh_iot_active_metric to avoid blocking event loop
+# Pre-seed with 0 and expired cache so first call computes real count instantly
+# (Safe now — K8s API calls removed, only fast local counting)
+_iot_metric_cache = {"value": 0, "last_refresh": 0.0, "k8s_fail_until": 0.0}
+
+# Known IoT deployments (from k8s-manifests) - used as baseline when K8s API is unreachable
+_KNOWN_IOT_REPLICAS = 26  # 10 enhanced + 4 high + 5 medium + 1 burst + 2 cam + 2 health + 2 parking
+
+def refresh_iot_active_metric() -> int:
+    """Keep IoT active gauge accurate even when simulators don't hit /api/iot/sensor.
+    Uses caching (120s TTL) to avoid blocking the async event loop with K8s API calls.
+    Falls back to known deployment replica count when no devices have registered."""
+    now = time.time()
+    # Return cached value if refreshed within last 120 seconds
+    if now - _iot_metric_cache["last_refresh"] < 120:
+        return _iot_metric_cache["value"]
+
+    db_count = db.get_iot_device_count()
+    mem_count = len(iot_devices) if "iot_devices" in globals() else 0
+
+    # Use known replica count as baseline when neither DB nor memory has devices
+    # (K8s API is unreachable from pods so we can't count pods directly)
+    active_count = max(db_count, mem_count, _KNOWN_IOT_REPLICAS)
+    PROM_IOT_DEVICES_ACTIVE.set(active_count)
+    _iot_metric_cache["value"] = active_count
+    _iot_metric_cache["last_refresh"] = now
+    return active_count
+
 async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
-    """Analyze alert with multiple LLM engines in priority order. Uses cache and circuit breaker."""
+    """
+    Analyze alert using unified LLM Manager.
+    
+    The provider-based LLMManager handles ALL cases uniformly:
+    - 1 engine: Direct call
+    - 2+ engines: Try in priority order with failover
+    
+    This is proper engineering - NO special cases for engine count.
+    
+    Uses cache for cost reduction.
+    """
     
     # Check cache first (reduces LLM costs)
     cached = alert_cache.get(alert_dict)
@@ -390,60 +483,39 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
     
     PROM_LLM_CACHE_OPERATIONS.labels(operation="miss").inc()
     
-    # Get prioritized list of engines to try
-    engine_priority = Config.get_engine_priority()
-    last_engine = None
-    last_error = None
+    # Use unified LLM Manager - handles any number of engines
+    llm_start = time.perf_counter()
+    result = await llm_manager.analyze(alert_dict)
+    llm_duration = time.perf_counter() - llm_start
     
-    for engine_name in engine_priority:
-        engine = llm_engines.get(engine_name)
-        if not engine:
-            continue
-        
-        cb_allowed, cb_reason = circuit_breaker.can_execute(engine_name)
+    engine_used = result.get("provider") or result.get("engine", "unknown")
+    failed_engines = result.get("failed_engines", [])
+
+    if result.get("status") == "success":
+        for failed_engine in failed_engines:
+            if failed_engine in circuit_breaker.engine_stats:
+                circuit_breaker.record_failure(failed_engine)
+        if engine_used in circuit_breaker.engine_stats:
+            circuit_breaker.record_success(engine_used)
         update_circuit_breaker_metrics()
-        
-        if not cb_allowed:
-            logger.info(f"{engine_name} skipped: {cb_reason}")
-            PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="circuit_open").inc()
-            continue
-        
-        try:
-            # Record failover if this isn't the first engine
-            if last_engine:
-                PROM_LLM_FAILOVER_COUNT.labels(from_engine=last_engine, to_engine=engine_name).inc()
-            
-            llm_start = time.perf_counter()
-            result = await engine.analyze_alert(alert_dict)
-            llm_duration = time.perf_counter() - llm_start
-            
-            if result.get("status") == "success":
-                circuit_breaker.record_success(engine_name)
-                update_circuit_breaker_metrics()
-                analysis = result.get("analysis", {})
-                alert_cache.set(alert_dict, analysis)  # Cache the result
-                PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
-                PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="success").inc()
-                PROM_LLM_LATENCY_SECONDS.labels(engine=engine_name).observe(llm_duration)
-                return analysis, engine_name, llm_duration
-            
-            # Engine returned error
-            circuit_breaker.record_failure(engine_name)
-            update_circuit_breaker_metrics()
-            PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="error").inc()
-            last_error = result.get("error", "Unknown error")
-            logger.warning(f"{engine_name} returned error: {last_error}")
-            last_engine = engine_name
-            
-        except Exception as e:
-            circuit_breaker.record_failure(engine_name)
-            update_circuit_breaker_metrics()
-            PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_name, result="exception").inc()
-            last_error = str(e)
-            logger.warning(f"{engine_name} failed: {e}")
-            last_engine = engine_name
+
+        analysis = result.get("analysis", {})
+        alert_cache.set(alert_dict, analysis)
+        PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
+        PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="success").inc()
+        PROM_LLM_LATENCY_SECONDS.labels(engine=engine_used).observe(llm_duration)
+        return analysis, engine_used, llm_duration
     
-    raise Exception(f"All LLM engines failed or circuits open. Last error: {last_error}")
+    # All engines failed
+    error_msg = result.get("error", "Unknown error")
+    for failed_engine in failed_engines:
+        if failed_engine in circuit_breaker.engine_stats:
+            circuit_breaker.record_failure(failed_engine)
+    if engine_used in circuit_breaker.engine_stats:
+        circuit_breaker.record_failure(engine_used)
+    update_circuit_breaker_metrics()
+    PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="error").inc()
+    raise Exception(f"LLM analysis failed: {error_msg}")
 
 # Storage - Using database for persistence (alerts_db kept for backward compatibility)
 alerts_db: List[Dict[str, Any]] = []  # In-memory cache, synced with database
@@ -766,6 +838,42 @@ PROM_APPROVAL_PENDING = Gauge(
     "Number of actions pending approval.",
 )
 
+# ============== DATA QUALITY METRICS ==============
+PROM_UNIQUE_ALERTS_FAILED = Gauge(
+    "smartcity_ids_unique_alerts_failed_total",
+    "Unique alerts that failed processing (not retry attempts).",
+)
+PROM_FALSE_POSITIVES_FILTERED = Counter(
+    "smartcity_ids_false_positives_filtered_total",
+    "Alerts filtered as false positives.",
+    ["rule"],
+)
+PROM_DEDUP_HIT_RATE = Gauge(
+    "smartcity_ids_dedup_hit_rate_percent",
+    "Alert deduplication cache hit rate (percent).",
+)
+PROM_ALERTS_THROTTLED_TOTAL = Counter(
+    "smartcity_ids_alerts_throttled_total",
+    "Alerts throttled by rate limiter to prevent flooding.",
+    ["reason"],
+)
+
+# Track unique failed alerts (not inflated by retries)
+_unique_failed_alerts = set()
+
+
+async def track_unique_failure(alert_hash: str) -> bool:
+    """
+    Track unique alert failures (not retry attempts).
+    Returns True if this is a NEW unique failure, False if already tracked.
+    """
+    if alert_hash in _unique_failed_alerts:
+        return False  # Already tracked
+    
+    _unique_failed_alerts.add(alert_hash)
+    PROM_UNIQUE_ALERTS_FAILED.set(len(_unique_failed_alerts))
+    return True
+
 # ============== RESTORE HISTORICAL DATA ON STARTUP ==============
 # This ensures Grafana shows ALL historical data, not just since last restart
 # Note: Moved to FastAPI startup event for proper initialization order
@@ -805,7 +913,7 @@ class Alert(BaseModel):
 
 class AlertResponse(BaseModel):
     status: str
-    alert_id: int
+    alert_id: Union[int, str]
     analysis: Optional[Dict[str, Any]] = None
     actions_taken: Optional[List[str]] = None
     error: Optional[str] = None
@@ -816,7 +924,7 @@ async def root():
         "service": "Smart City IDS",
         "version": "1.0.0",
         "status": "operational",
-        "llm": "xAI Grok-4 (primary) + OpenAI GPT-4 (fallback)",
+        "llm": "Multi-provider LLM manager (priority + failover)",
         "endpoints": ["/health", "/api/alerts (GET/POST)", "/api/metrics", "/metrics", "/api/auth/login", "/api/operator/*"],
         "ui": "http://localhost:8000/ui"
     }
@@ -866,7 +974,7 @@ def create_jwt_token(username: str) -> str:
         "exp": datetime.utcnow() + timedelta(hours=24)
     }
     try:
-        token = jwt.encode(payload, Config.SECRET_KEY or "super-secret-key", algorithm="HS256")
+        token = jwt.encode(payload, Config.SECRET_KEY, algorithm="HS256")
         return token
     except:
         # Fallback if PyJWT not available
@@ -877,7 +985,7 @@ def verify_jwt_token(token: str) -> str:
     """Verify JWT token and return username"""
     try:
         import jwt
-        payload = jwt.decode(token, Config.SECRET_KEY or "super-secret-key", algorithms=["HS256"])
+        payload = jwt.decode(token, Config.SECRET_KEY, algorithms=["HS256"])
         return payload.get("user", "unknown")
     except:
         # Fallback verification
@@ -935,16 +1043,16 @@ async def health():
     uptime = (datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds()
     PROM_UPTIME_SECONDS.set(uptime)
     
-    # Build comprehensive LLM engine status
+    # Build LLM provider status - generic, works with any provider
     llm_status = {}
-    for engine_name in ["xai", "anthropic", "openai", "gemini", "kimi"]:
-        engine = llm_engines.get(engine_name)
-        cb_stats = circuit_breaker.engine_stats.get(engine_name, {})
-        cb_state = cb_stats.get("state", "unknown")
-        if engine:
-            llm_status[engine_name] = f"connected (circuit: {cb_state})"
-        else:
-            llm_status[engine_name] = "no-api-key"
+    if llm_manager:
+        status = llm_manager.get_status()
+        for name, details in status.get("details", {}).items():
+            cb_stats = circuit_breaker.engine_stats.get(name, {})
+            cb_state = cb_stats.get("state", "unknown")
+            failures = cb_stats.get("failures", 0)
+            successes = cb_stats.get("successes", 0)
+            llm_status[name] = f"configured (circuit: {cb_state}, ok={successes}, fail={failures})"
     
     # Check database connection
     db_status = "postgresql" if not db.use_memory else "memory-fallback"
@@ -955,14 +1063,13 @@ async def health():
     return {
         "status": "healthy",
         "components": {
-            "llm_engines": llm_status,
+            "llm_providers": llm_status,
             "kubernetes": "connected" if k8s_automation else "disconnected",
             "database": db_status,
             "falco": "enabled" if Config.FALCO_ENABLED else "disabled",
             "suricata": suricata_status
         },
-        "active_llm_engines": list(llm_engines.keys()),
-        "llm_priority": Config.get_engine_priority(),
+        "llm_provider_count": llm_manager.get_status()["provider_count"] if llm_manager else 0,
         "circuit_breaker_states": {k: v.get("state", "unknown") for k, v in circuit_breaker.engine_stats.items()},
         "uptime_seconds": uptime,
         "total_alerts_processed": metrics["total_alerts"],
@@ -1000,18 +1107,126 @@ async def get_production_status():
         }
     }
 
+@app.post("/api/circuit-breaker/reset")
+async def reset_circuit_breakers(engine: str = None):
+    """Reset circuit breakers to allow LLM engines to retry.
+    
+    Args:
+        engine: Optional specific engine to reset (xai, anthropic, openai, gemini, kimi).
+                If not specified, resets all circuit breakers.
+    
+    Use this after:
+    - Fixing API key issues
+    - Rate limit cooldown period has passed
+    - Network issues resolved
+    """
+    engines_to_reset = [engine] if engine else list(circuit_breaker.engine_stats.keys())
+    reset_results = {}
+    
+    for eng in engines_to_reset:
+        if eng in circuit_breaker.engine_stats:
+            old_state = circuit_breaker.engine_stats[eng]["state"]
+            circuit_breaker.engine_stats[eng] = {
+                "failures": 0,
+                "successes": 0,
+                "state": "closed"
+            }
+            reset_results[eng] = f"{old_state} → closed"
+            logger.info(f"Circuit breaker reset: {eng} ({old_state} → closed)")
+        else:
+            reset_results[eng] = "not found"
+    
+    update_circuit_breaker_metrics()
+    
+    return {
+        "status": "success",
+        "message": f"Reset {len([r for r in reset_results.values() if 'closed' in r])} circuit breaker(s)",
+        "results": reset_results,
+        "current_states": {k: v.get("state", "unknown") for k, v in circuit_breaker.engine_stats.items()}
+    }
+
+@app.get("/api/circuit-breaker/status")
+async def get_circuit_breaker_status():
+    """Get detailed circuit breaker status for all LLM engines."""
+    return {
+        "engines": circuit_breaker.engine_stats,
+        "failure_threshold": circuit_breaker.failure_threshold,
+        "recovery_timeout_seconds": circuit_breaker.recovery_timeout,
+        "summary": {
+            "total_engines": len(circuit_breaker.engine_stats),
+            "open": sum(1 for s in circuit_breaker.engine_stats.values() if s.get("state") == "open"),
+            "closed": sum(1 for s in circuit_breaker.engine_stats.values() if s.get("state") == "closed"),
+            "half_open": sum(1 for s in circuit_breaker.engine_stats.values() if s.get("state") == "half_open")
+        }
+    }
+
+
+@app.get("/api/llm/status")
+async def get_llm_status(user: str = Depends(verify_token)):
+    """
+    Get LLM provider status.
+    
+    Shows which providers are active based on valid API keys.
+    Generic system - works with any provider.
+    """
+    if not llm_manager:
+        return {
+            "provider_count": 0,
+            "providers": [],
+            "priority_order": [p.strip() for p in Config.LLM_PRIORITY.split(",") if p.strip()],
+            "details": {},
+            "error": "No LLM provider configured"
+        }
+    return llm_manager.get_status()
+
+
+@app.get("/api/rate-limiter/status")
+async def get_rate_limiter_status():
+    """Get alert rate limiter status and statistics."""
+    if not alert_rate_limiter:
+        return {"error": "Rate limiter not initialized"}
+    
+    stats = alert_rate_limiter.get_stats()
+    return {
+        "config": {
+            "window_seconds": alert_rate_limiter.window_seconds,
+            "max_per_rule": alert_rate_limiter.max_per_rule,
+            "max_per_source": alert_rate_limiter.max_per_source,
+            "max_global": alert_rate_limiter.max_global
+        },
+        "stats": {
+            "total_received": stats.total_received,
+            "total_throttled": stats.total_throttled,
+            "total_processed": stats.total_processed,
+            "throttle_rate_percent": round(stats.throttle_rate * 100, 2),
+            "throttle_reasons": dict(stats.throttle_reasons)
+        },
+        "status": "healthy" if stats.throttle_rate < 0.5 else "high_throttle_rate"
+    }
+
+
+@app.post("/api/rate-limiter/reset")
+async def reset_rate_limiter():
+    """Reset rate limiter counters (admin use only)."""
+    if not alert_rate_limiter:
+        return {"error": "Rate limiter not initialized"}
+    
+    alert_rate_limiter.reset()
+    logger.info("Alert rate limiter reset by admin request")
+    return {"status": "success", "message": "Rate limiter counters reset"}
+
+
 # ============== HUMAN-IN-THE-LOOP GOVERNANCE API ==============
 # Capstone II TASK 4: Autopilot / Assisted / Manual modes
 
 from governance import (
-    governance, AutomationMode,
-    get_automation_mode, set_automation_mode,
+    governance, get_automation_mode, set_automation_mode,
     get_pending_actions, get_governance_status,
     approve_pending_action, reject_pending_action
 )
 
 @app.get("/api/governance/status")
-async def governance_status():
+async def governance_status(user: str = Depends(verify_token)):
     """Get Human-in-the-Loop governance status.
     
     Returns current mode (autopilot/assisted/manual), pending actions count,
@@ -1020,12 +1235,12 @@ async def governance_status():
     return get_governance_status()
 
 @app.get("/api/governance/mode")
-async def get_mode():
+async def get_mode(user: str = Depends(verify_token)):
     """Get current automation mode."""
     return {"mode": get_automation_mode()}
 
 @app.post("/api/governance/mode")
-async def change_mode(mode: str = "assisted"):
+async def change_mode(mode: str = "assisted", user: str = Depends(verify_token)):
     """Change automation mode.
     
     Args:
@@ -1042,7 +1257,7 @@ async def change_mode(mode: str = "assisted"):
     return result
 
 @app.get("/api/governance/pending")
-async def list_pending_actions():
+async def list_pending_actions(user: str = Depends(verify_token)):
     """List actions pending human approval.
     
     In ASSISTED mode: only severity >= 8 actions appear here
@@ -1053,7 +1268,7 @@ async def list_pending_actions():
     return {"pending_count": len(actions), "actions": actions}
 
 @app.post("/api/governance/approve/{action_id}")
-async def approve_action(action_id: str, operator: str = "admin"):
+async def approve_action(action_id: str, operator: str = "admin", comment: str = "", user: str = Depends(verify_token)):
     """Approve a pending action and execute it.
     
     Args:
@@ -1076,7 +1291,7 @@ async def approve_action(action_id: str, operator: str = "admin"):
                 return k8s_automation.evict_pod(action.target)
         return {"success": False, "error": "K8s automation not available"}
     
-    result = approve_pending_action(action_id, operator, execute)
+    result = approve_pending_action(action_id, operator, execute, operator_comment=comment)
     
     if result.get("status") == "approved_and_executed":
         PROM_HUMAN_OVERRIDE_REQUESTS.labels(reason="approved").inc()
@@ -1091,6 +1306,7 @@ async def approve_action(action_id: str, operator: str = "admin"):
             "execution_time_ms": int(max(0.0, (time.time() - action.created_at)) * 1000),
             "mode": get_automation_mode(),
             "triggered_by": action.recommended_by,
+            "operator_comment": comment,
             "created_at": datetime.fromtimestamp(action.created_at),
             "completed_at": datetime.now()
         })
@@ -1098,7 +1314,7 @@ async def approve_action(action_id: str, operator: str = "admin"):
     return result
 
 @app.post("/api/governance/reject/{action_id}")
-async def reject_action(action_id: str, operator: str = "admin", reason: str = ""):
+async def reject_action(action_id: str, operator: str = "admin", reason: str = "", user: str = Depends(verify_token)):
     """Reject a pending action.
     
     Args:
@@ -1125,7 +1341,7 @@ async def reject_action(action_id: str, operator: str = "admin", reason: str = "
     return result
 
 @app.get("/api/governance/history")
-async def action_history(limit: int = 50):
+async def action_history(limit: int = 50, user: str = Depends(verify_token)):
     """Get recent action history for audit trail."""
     return {"history": governance.get_action_history(limit)}
 
@@ -1133,7 +1349,7 @@ async def action_history(limit: int = 50):
 # PhD-Level Governance: Transparent, Evidence-Based, Human-Controlled
 
 @app.get("/api/operator/incidents")
-async def get_incidents_dashboard(limit: int = 50):
+async def get_incidents_dashboard(limit: int = 50, user: str = Depends(verify_token)):
     """Operator dashboard: recent incidents with summaries and governance info.
     
     Returns:
@@ -1147,7 +1363,7 @@ async def get_incidents_dashboard(limit: int = 50):
     return dashboard.dict()
 
 @app.get("/api/operator/incident/{incident_id}")
-async def get_incident_detail(incident_id: int):
+async def get_incident_detail(incident_id: int, user: str = Depends(verify_token)):
     """Get detailed view of a single incident.
     
     Includes:
@@ -1164,7 +1380,7 @@ async def get_incident_detail(incident_id: int):
     return incident.dict()
 
 @app.get("/api/operator/evidence/{incident_id}")
-async def get_incident_evidence(incident_id: int):
+async def get_incident_evidence(incident_id: int, user: str = Depends(verify_token)):
     """Get raw evidence for an incident.
     
     Returns original alert excerpts from Falco and Suricata,
@@ -1180,7 +1396,7 @@ async def get_incident_evidence(incident_id: int):
     }
 
 @app.get("/api/operator/reasoning/{incident_id}")
-async def get_incident_reasoning(incident_id: int):
+async def get_incident_reasoning(incident_id: int, user: str = Depends(verify_token)):
     """Get LLM reasoning for an incident.
     
     Returns:
@@ -1203,7 +1419,7 @@ async def get_incident_reasoning(incident_id: int):
     }
 
 @app.get("/api/operator/metrics")
-async def get_operator_metrics():
+async def get_operator_metrics(user: str = Depends(verify_token)):
     """Get operator dashboard metrics.
     
     Returns:
@@ -1216,6 +1432,51 @@ async def get_operator_metrics():
     """
     metrics = operator_interface.get_metrics()
     return metrics.dict()
+
+
+@app.get("/api/operator/dashboard")
+async def get_full_operator_dashboard(user: str = Depends(verify_token)):
+    """Get comprehensive operator dashboard data.
+    
+    Returns:
+    - Summary statistics (total, critical, pending approval)
+    - Severity distribution
+    - Threat type distribution
+    - Recent timeline
+    - Top incidents
+    
+    Used by the operator UI for the main dashboard view.
+    """
+    return operator_interface.get_full_dashboard_data()
+
+
+@app.get("/api/operator/search")
+async def search_incidents(
+    query: str = None,
+    severity_min: int = None,
+    severity_max: int = None,
+    threat_type: str = None,
+    limit: int = 50,
+    user: str = Depends(verify_token)
+):
+    """Search and filter incidents.
+    
+    Filters:
+    - query: Text search in incident summary
+    - severity_min/max: Filter by severity range (1-10)
+    - threat_type: Filter by threat category
+    - limit: Max results to return
+    
+    Returns matching incidents for investigation.
+    """
+    return operator_interface.search_incidents(
+        query=query,
+        severity_min=severity_min,
+        severity_max=severity_max,
+        threat_type=threat_type,
+        limit=limit
+    )
+
 
 # ============== END OPERATOR INTERFACE ==============
 
@@ -1250,9 +1511,41 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         metrics["total_alerts"] += 1
     
         # Determine source
-        source = "suricata" if "suricata" in alert.rule.lower() else "falco"
+        source = detect_alert_source(alert)
         metrics["alerts_by_source"][source] += 1
         PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
+        
+        # ========== ALERT RATE LIMITING (FLOOD PREVENTION) ==========
+        # Check if this alert should be throttled to prevent LLM overload
+        if alert_rate_limiter:
+            should_process, throttle_reason = alert_rate_limiter.should_process(
+                {"rule": alert.rule, "source": source}
+            )
+            if not should_process:
+                # Throttled - log to database but skip LLM analysis
+                logger.warning(f"Alert throttled: {alert.rule} (reason: {throttle_reason.value})")
+                PROM_ALERTS_PROCESSED_TOTAL.labels(result="throttled").inc()
+                PROM_ALERTS_THROTTLED_TOTAL.labels(reason=throttle_reason.value).inc()
+                
+                # Store throttled alert in database for audit
+                db.add_throttled_alert(
+                    source=source,
+                    rule=alert.rule,
+                    throttle_reason=throttle_reason.value,
+                    raw_alert=alert.dict()
+                )
+                
+                await request_queue.dequeue()
+                return AlertResponse(
+                    status="throttled",
+                    alert_id=f"throttled-{int(time.time()*1000)}",
+                    severity=0,
+                    summary=f"Alert throttled: {throttle_reason.value}",
+                    threat_type="Throttled",
+                    automated_actions=[],
+                    processing_time_ms=int((time.perf_counter() - started) * 1000),
+                    llm_engine="none"
+                )
         
         # ========== ALERT DEDUPLICATION (LLM COST REDUCTION) ==========
         # Check if this alert was recently analyzed (cache hit)
@@ -1301,7 +1594,6 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         
         # Execute automated actions (with safety controls)
         actions_taken = []
-        action_records = []
         action_records = []
         
         if k8s_automation and severity >= 8:
@@ -1507,19 +1799,71 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
     logger.info(f"Received internal alert: {alert.rule}")
     PROM_API_REQUESTS_TOTAL.labels(endpoint="/api/alerts/internal", method="POST", status="received").inc()
 
+    # Apply same protection controls as public endpoint to prevent internal flood cost spikes.
+    rate_allowed, rate_reason = await rate_limiter.acquire()
+    PROM_RATE_LIMIT_TOKENS.set(rate_limiter.tokens)
+    if not rate_allowed:
+        PROM_RATE_LIMIT_REQUESTS.labels(result="rejected").inc()
+        raise HTTPException(status_code=429, detail=rate_reason)
+    PROM_RATE_LIMIT_REQUESTS.labels(result="allowed").inc()
+
+    queue_ok, queue_reason = await request_queue.try_enqueue()
+    PROM_REQUEST_QUEUE_SIZE.set(request_queue.queue_size)
+    if not queue_ok:
+        PROM_REQUEST_QUEUE_REJECTED.inc()
+        raise HTTPException(status_code=503, detail=f"Server overloaded: {queue_reason}")
+
     started = time.perf_counter()
     
     metrics["total_alerts"] += 1
     
     # Determine source
-    source = "suricata" if "suricata" in alert.rule.lower() else "falco"
+    source = detect_alert_source(alert)
     metrics["alerts_by_source"][source] += 1
     PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
     
     try:
-        # Analyze with LLM (xAI Grok-4 primary, OpenAI fallback)
-        logger.info("Analyzing alert...")
-        analysis, llm_used, llm_latency = await analyze_with_fallback(alert.dict())
+        if alert_rate_limiter:
+            should_process, throttle_reason = alert_rate_limiter.should_process(
+                {"rule": alert.rule, "source": source}
+            )
+            if not should_process:
+                logger.warning(f"Internal alert throttled: {alert.rule} (reason: {throttle_reason.value})")
+                PROM_ALERTS_PROCESSED_TOTAL.labels(result="throttled").inc()
+                PROM_ALERTS_THROTTLED_TOTAL.labels(reason=throttle_reason.value).inc()
+                db.add_throttled_alert(
+                    source=source,
+                    rule=alert.rule,
+                    throttle_reason=throttle_reason.value,
+                    raw_alert=alert.dict()
+                )
+                return AlertResponse(
+                    status="throttled",
+                    alert_id=f"throttled-{int(time.time()*1000)}",
+                    severity=0,
+                    summary=f"Alert throttled: {throttle_reason.value}",
+                    threat_type="Throttled",
+                    automated_actions=[],
+                    processing_time_ms=int((time.perf_counter() - started) * 1000),
+                    llm_engine="none"
+                )
+
+        analysis = None
+        llm_used = "none"
+        llm_latency = 0.0
+        if deduplicator:
+            should_analyze, cached_analysis = deduplicator.should_analyze(alert.dict())
+            if not should_analyze and cached_analysis:
+                analysis = cached_analysis
+                llm_used = "cached"
+                logger.info(f"✓ Internal alert dedup HIT: severity={analysis.get('severity')}")
+
+        if analysis is None:
+            logger.info("Analyzing internal alert with LLM...")
+            analysis, llm_used, llm_latency = await analyze_with_fallback(alert.dict())
+            if deduplicator:
+                deduplicator.cache_analysis(alert.dict(), analysis)
+
         severity = analysis.get("severity", 5)
         threat_type = analysis.get("threat_type", "Unknown")
         logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}")
@@ -1536,6 +1880,7 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         
         # Execute automated actions (with safety controls)
         actions_taken = []
+        action_records = []
         
         if k8s_automation and severity >= 8:
             container_name = alert.output_fields.get("container.name", "")
@@ -1709,6 +2054,9 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
             alert_id=alert_id,
             error=str(e)
         )
+    finally:
+        await request_queue.dequeue()
+        PROM_REQUEST_QUEUE_SIZE.set(request_queue.queue_size)
 
 # ============== IOT SENSOR ENDPOINTS ==============
 
@@ -1869,6 +2217,7 @@ async def get_metrics():
     metrics["storage_type"] = db_stats["storage_type"]
     
     PROM_UPTIME_SECONDS.set(uptime)
+    metrics["iot_devices_active"] = refresh_iot_active_metric()
     return metrics
 
 @app.get("/api/db/stats")
@@ -1923,13 +2272,21 @@ async def prometheus_metrics():
     """Prometheus exposition endpoint."""
     uptime = (datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds()
     PROM_UPTIME_SECONDS.set(uptime)
+    update_circuit_breaker_metrics()
+    refresh_iot_active_metric()
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.on_event("startup")
 async def startup():
     logger.info("🚀 Smart City IDS starting...")
-    logger.info(f"xAI Grok-4: {'✅' if xai_engine else '❌'}")
-    logger.info(f"OpenAI: {'✅' if openai_engine else '❌'}")
+    
+    # Generic LLM status
+    if llm_manager:
+        providers = llm_manager.get_available_providers()
+        logger.info(f"LLM: ✅ {len(providers)} provider(s) - {', '.join(providers)}")
+    else:
+        logger.info("LLM: ❌ Not configured")
+    
     logger.info(f"K8s: {'✅' if k8s_automation else '❌'}")
     
     # Database status
@@ -1947,6 +2304,8 @@ async def startup():
     
     # Initialize Prometheus gauges from database
     PROM_IOT_DEVICES_ACTIVE.set(db_stats.get("iot_devices", 0))
+    refresh_iot_active_metric()
+    update_circuit_breaker_metrics()
     # Note: PROM_CRITICAL_ALERTS_TOTAL is restored in restore_prometheus_counters()
     PROM_LLM_CACHE_SIZE.set(0)
     

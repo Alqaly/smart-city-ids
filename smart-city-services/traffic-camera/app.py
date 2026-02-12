@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-Healthcare API Service - Smart City IDS
-Manages patient data and prescriptions (intentionally vulnerable for demo)
+Traffic Camera Service - Smart City IDS
+Simulates traffic camera feeds and vehicle detection (intentionally vulnerable for demo)
 """
 
 from flask import Flask, jsonify, request
+import time
+import random
+import os
 import logging
-from datetime import datetime
 
 app = Flask(__name__)
 
@@ -14,23 +16,17 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Simulated patient database (UNENCRYPTED!)
-PATIENTS = {
-    "P001": {
-        "name": "John Smith",
-        "ssn": "123-45-6789",
-        "age": 45,
-        "conditions": ["Hypertension", "Diabetes"]
-    },
-    "P002": {
-        "name": "Jane Doe",
-        "ssn": "987-65-4321",
-        "age": 32,
-        "conditions": ["Asthma"]
-    },
+# Simulated camera feeds (UNPROTECTED!)
+CAMERAS = {
+    "CAM_001": {"location": "Main St & 1st Ave", "status": "active", "vehicles_detected": 0},
+    "CAM_002": {"location": "Highway 101 On-Ramp", "status": "active", "vehicles_detected": 0},
+    "CAM_003": {"location": "Downtown Parking Garage", "status": "active", "vehicles_detected": 0},
 }
 
-PRESCRIPTIONS = {}
+# Simulated license plate log (SENSITIVE!)
+LICENSE_PLATES = []
+
+request_count = 0
 
 
 @app.route('/health', methods=['GET'])
@@ -38,79 +34,104 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "healthcare-api",
-        "timestamp": datetime.now().isoformat()
+        "service": "traffic-camera",
+        "timestamp": time.time()
     }), 200
 
 
-@app.route('/api/patients', methods=['GET'])
-def get_patients():
-    """List all patients - VULNERABLE: No authentication!"""
-    logger.warning("GET /api/patients - EXPOSING SENSITIVE PATIENT DATA (HIPAA VIOLATION!)")
+@app.route('/api/cameras', methods=['GET'])
+def get_cameras():
+    """List all cameras - VULNERABLE: No authentication!"""
+    global request_count
+    request_count += 1
+
+    # Simulate real-time vehicle counts
+    for cam in CAMERAS.values():
+        cam["vehicles_detected"] += random.randint(0, 5)
+
     return jsonify({
-        "patients": PATIENTS,
-        "count": len(PATIENTS)
+        "cameras": CAMERAS,
+        "count": len(CAMERAS)
     }), 200
 
 
-@app.route('/api/patient/<patient_id>', methods=['GET'])
-def get_patient(patient_id):
-    """Get individual patient data - VULNERABLE: No auth"""
-    if patient_id not in PATIENTS:
-        return jsonify({"error": "Patient not found"}), 404
-    
-    logger.warning(f"GET /api/patient/{patient_id} - EXPOSING PII!")
-    return jsonify(PATIENTS[patient_id]), 200
+@app.route('/api/camera/<camera_id>', methods=['GET'])
+def get_camera(camera_id):
+    """Get individual camera data - VULNERABLE: No auth"""
+    global request_count
+    request_count += 1
+
+    if camera_id not in CAMERAS:
+        return jsonify({"error": "Camera not found"}), 404
+
+    return jsonify({
+        "camera_id": camera_id,
+        "data": CAMERAS[camera_id],
+        "timestamp": time.time()
+    }), 200
 
 
-@app.route('/api/prescriptions/<patient_id>', methods=['POST'])
-def add_prescription(patient_id):
-    """Add prescription - VULNERABLE: No input validation!"""
-    if patient_id not in PATIENTS:
-        return jsonify({"error": "Patient not found"}), 404
-    
+@app.route('/api/plates', methods=['GET'])
+def get_plates():
+    """Get license plate log - VULNERABLE: Exposes PII without auth!"""
+    global request_count
+    request_count += 1
+
+    logger.warning("GET /api/plates - EXPOSING SENSITIVE LICENSE PLATE DATA!")
+    return jsonify({
+        "plates": LICENSE_PLATES[-50:],
+        "total": len(LICENSE_PLATES)
+    }), 200
+
+
+@app.route('/api/plates', methods=['POST'])
+def add_plate():
+    """Log a plate detection - VULNERABLE: No input validation!"""
+    global request_count
+    request_count += 1
+
     data = request.get_json()
-    
+
     # NO VALIDATION! Attacker can inject anything
-    logger.critical(f"Adding prescription for {patient_id}: {data}")
-    
-    prescription_id = f"RX-{len(PRESCRIPTIONS) + 1}"
-    PRESCRIPTIONS[prescription_id] = {
-        "patient_id": patient_id,
-        "drug": data.get("drug"),
-        "dosage": data.get("dosage"),
-        "duration": data.get("duration"),
-        "timestamp": datetime.now().isoformat()
+    plate = {
+        "plate": data.get("plate", "UNKNOWN"),
+        "camera_id": data.get("camera_id", "CAM_001"),
+        "timestamp": time.time(),
+        "speed": data.get("speed", random.randint(20, 80))
     }
-    
+    LICENSE_PLATES.append(plate)
+
     return jsonify({
-        "prescription_id": prescription_id,
-        "status": "created"
+        "status": "logged",
+        "plate": plate
     }), 201
 
 
-@app.route('/api/prescriptions/<patient_id>', methods=['GET'])
-def get_prescriptions(patient_id):
-    """Get patient prescriptions - VULNERABLE: No auth"""
-    patient_rxs = [rx for rx in PRESCRIPTIONS.values() if rx['patient_id'] == patient_id]
-    return jsonify(patient_rxs), 200
+@app.route('/api/analytics', methods=['GET'])
+def get_analytics():
+    """Traffic analytics - VULNERABLE: No auth"""
+    global request_count
+    request_count += 1
 
-
-@app.route('/admin/logs', methods=['GET'])
-def admin_logs():
-    """Admin logs - VULNERABLE: Exposes all activities"""
-    logger.warning("GET /admin/logs - UNAUTHORIZED ACCESS TO LOGS!")
+    total_vehicles = sum(cam["vehicles_detected"] for cam in CAMERAS.values())
     return jsonify({
-        "logs": [
-            "Patient P001 accessed",
-            "Prescription added for P002",
-            "Admin config changed"
-        ]
+        "total_vehicles": total_vehicles,
+        "active_cameras": sum(1 for c in CAMERAS.values() if c["status"] == "active"),
+        "plates_logged": len(LICENSE_PLATES),
+        "avg_speed": round(random.uniform(25, 55), 1)
+    }), 200
+
+
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    return jsonify({
+        "requests_total": request_count,
+        "active_cameras": len(CAMERAS),
+        "service": "traffic-camera"
     }), 200
 
 
 if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 5001))
-    logger.info(f"Starting Healthcare API on port {port}")
+    port = int(os.environ.get('PORT', 5000))
+    logger.info(f"Starting Traffic Camera Service on port {port}")
     app.run(host='0.0.0.0', port=port, debug=True)

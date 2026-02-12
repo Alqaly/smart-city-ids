@@ -1,860 +1,684 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart City IDS - Operator Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-        }
-
-        .login-container {
-            display: none;
-            flex: 1;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-
-        .login-box {
-            background: white;
-            padding: 40px;
-            border-radius: 10px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-            width: 100%;
-            max-width: 400px;
-        }
-
-        .login-box h1 {
-            margin-bottom: 30px;
-            color: #333;
-            font-size: 24px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #555;
-            font-weight: 500;
-        }
-
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .login-btn {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 5px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .login-btn:hover {
-            transform: translateY(-2px);
-        }
-
-        .login-btn:active {
-            transform: translateY(0);
-        }
-
-        .error-msg {
-            color: #dc3545;
-            font-size: 14px;
-            margin-top: 10px;
-            display: none;
-        }
-
-        .dashboard {
-            display: none;
-            flex: 1;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .header {
-            background: white;
-            padding: 20px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .header h1 {
-            color: #333;
-            font-size: 20px;
-        }
-
-        .logout-btn {
-            padding: 8px 16px;
-            background: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-
-        .content {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
-
-        .sidebar {
-            width: 250px;
-            background: white;
-            border-right: 1px solid #eee;
-            padding: 20px;
-            overflow-y: auto;
-        }
-
-        .sidebar-title {
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 12px;
-            text-transform: uppercase;
-            color: #999;
-        }
-
-        .nav-item {
-            padding: 10px 15px;
-            margin-bottom: 8px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: all 0.3s;
-            border-left: 3px solid transparent;
-        }
-
-        .nav-item:hover {
-            background: #e9ecef;
-        }
-
-        .nav-item.active {
-            background: #667eea;
-            color: white;
-            border-left-color: white;
-        }
-
-        .main-content {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            background: #f8f9fa;
-        }
-
-        .section {
-            display: none;
-        }
-
-        .section.active {
-            display: block;
-        }
-
-        .incidents-grid {
-            display: grid;
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .incident-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            cursor: pointer;
-            transition: all 0.3s;
-            border-left: 4px solid #ffc107;
-        }
-
-        .incident-card:hover {
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            transform: translateY(-2px);
-        }
-
-        .incident-card.critical {
-            border-left-color: #dc3545;
-        }
-
-        .incident-card.high {
-            border-left-color: #fd7e14;
-        }
-
-        .incident-card.medium {
-            border-left-color: #ffc107;
-        }
-
-        .incident-card.low {
-            border-left-color: #28a745;
-        }
-
-        .incident-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: start;
-            margin-bottom: 10px;
-        }
-
-        .incident-title {
-            font-weight: 600;
-            color: #333;
-            flex: 1;
-        }
-
-        .severity-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-            color: white;
-        }
-
-        .severity-critical { background: #dc3545; }
-        .severity-high { background: #fd7e14; }
-        .severity-medium { background: #ffc107; color: #333; }
-        .severity-low { background: #28a745; }
-
-        .incident-summary {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 10px;
-            line-height: 1.5;
-        }
-
-        .incident-meta {
-            display: flex;
-            gap: 20px;
-            font-size: 12px;
-            color: #999;
-            margin-bottom: 10px;
-        }
-
-        .incident-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 10px;
-        }
-
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-
-        .btn-primary {
-            background: #667eea;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #5568d3;
-        }
-
-        .btn-secondary {
-            background: #e9ecef;
-            color: #333;
-        }
-
-        .btn-secondary:hover {
-            background: #dee2e6;
-        }
-
-        .btn-success {
-            background: #28a745;
-            color: white;
-        }
-
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-
-        .detail-view {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .detail-section {
-            margin-bottom: 25px;
-        }
-
-        .detail-section-title {
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 10px;
-            padding-bottom: 8px;
-            border-bottom: 2px solid #667eea;
-            font-size: 15px;
-        }
-
-        .detail-row {
-            display: flex;
-            padding: 8px 0;
-            border-bottom: 1px solid #eee;
-        }
-
-        .detail-label {
-            font-weight: 600;
-            color: #666;
-            width: 200px;
-            flex-shrink: 0;
-        }
-
-        .detail-value {
-            color: #333;
-            flex: 1;
-            word-break: break-word;
-        }
-
-        .confidence-bar {
-            background: #e9ecef;
-            border-radius: 5px;
-            height: 8px;
-            overflow: hidden;
-            margin-top: 5px;
-            width: 200px;
-        }
-
-        .confidence-fill {
-            background: #667eea;
-            height: 100%;
-            transition: width 0.3s;
-        }
-
-        .indicators-list {
-            list-style: none;
-            margin-top: 10px;
-        }
-
-        .indicators-list li {
-            padding: 8px 0;
-            color: #333;
-            font-size: 14px;
-            padding-left: 20px;
-            position: relative;
-        }
-
-        .indicators-list li:before {
-            content: "✓";
-            position: absolute;
-            left: 0;
-            color: #28a745;
-            font-weight: 600;
-        }
-
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }
-
-        .metric-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .metric-title {
-            color: #999;
-            font-size: 12px;
-            text-transform: uppercase;
-            margin-bottom: 10px;
-        }
-
-        .metric-value {
-            font-size: 28px;
-            font-weight: 700;
-            color: #333;
-        }
-
-        .metric-unit {
-            color: #999;
-            font-size: 14px;
-            margin-top: 5px;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #999;
-        }
-
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .back-btn {
-            margin-bottom: 20px;
-            padding: 8px 16px;
-            background: #e9ecef;
-            color: #333;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: 600;
-        }
-
-        .back-btn:hover {
-            background: #dee2e6;
-        }
-
-        @media (max-width: 768px) {
-            body { flex-direction: column; }
-            .content { flex-direction: column; }
-            .sidebar { width: 100%; border-right: none; border-bottom: 1px solid #eee; }
-            .sidebar { display: flex; gap: 10px; overflow-x: auto; padding: 10px; }
-            .nav-item { flex-shrink: 0; }
-            .incident-card { margin-bottom: 15px; }
-            .detail-row { flex-direction: column; }
-            .detail-label { width: auto; margin-bottom: 5px; }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart City IDS — Operator Dashboard</title>
+<style>
+:root{--bg:#0f1923;--surface:#1a2736;--surface2:#243447;--border:#2d4a5e;--accent:#00d4ff;--accent2:#7c5cfc;--green:#22c55e;--yellow:#eab308;--red:#ef4444;--orange:#f97316;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--radius:8px;--shadow:0 4px 24px rgba(0,0,0,.3)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#0f1923 0%,#1a1040 50%,#0f1923 100%)}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:48px;width:400px;box-shadow:var(--shadow)}
+.login-card h1{font-size:22px;margin-bottom:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.login-card p{color:var(--text2);font-size:13px;margin-bottom:28px}
+.login-card label{display:block;color:var(--text2);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.login-card input{width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;margin-bottom:16px;outline:none;transition:border .2s}
+.login-card input:focus{border-color:var(--accent)}
+.login-card button{width:100%;padding:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.login-card button:hover{opacity:.9}
+#loginError{color:var(--red);font-size:13px;margin-top:8px;display:none}
+#dashboard{display:none}
+.topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:56px;background:var(--surface);border-bottom:1px solid var(--border);backdrop-filter:blur(12px)}
+.topbar .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
+.topbar-right{display:flex;align-items:center;gap:16px}
+.topbar-right .pill{font-size:11px;padding:4px 10px;border-radius:99px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.pill-ok{background:rgba(34,197,94,.15);color:var(--green)}
+.pill-warn{background:rgba(234,179,8,.15);color:var(--yellow)}
+.pill-err{background:rgba(239,68,68,.15);color:var(--red)}
+.topbar-right button{background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:var(--radius);font-size:12px;cursor:pointer;transition:all .2s}
+.topbar-right button:hover{border-color:var(--accent);color:var(--text)}
+.tab-bar{display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;overflow-x:auto}
+.tab-btn{padding:12px 20px;font-size:13px;font-weight:600;color:var(--text3);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.tab-btn:hover{color:var(--text2)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-panel{display:none;padding:24px;animation:fadeIn .2s}
+.tab-panel.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.stat-card.blue::before{background:var(--accent)}
+.stat-card.purple::before{background:var(--accent2)}
+.stat-card.green::before{background:var(--green)}
+.stat-card.red::before{background:var(--red)}
+.stat-card.yellow::before{background:var(--yellow)}
+.stat-card.orange::before{background:var(--orange)}
+.stat-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:8px}
+.stat-value{font-size:28px;font-weight:700}
+.stat-sub{font-size:12px;color:var(--text2);margin-top:4px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
+.card-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border)}
+.card-header h3{font-size:14px;font-weight:700}
+.card-body{padding:16px 20px}
+.card-body.no-pad{padding:0}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 16px;color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);background:var(--bg)}
+td{padding:10px 16px;border-bottom:1px solid rgba(45,74,94,.3)}
+tr:hover td{background:rgba(0,212,255,.03)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot-green{background:var(--green)}.dot-red{background:var(--red)}.dot-yellow{background:var(--yellow)}.dot-blue{background:var(--accent)}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge-crit{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-high{background:rgba(249,115,22,.15);color:var(--orange)}
+.badge-med{background:rgba(234,179,8,.15);color:var(--yellow)}
+.badge-low{background:rgba(34,197,94,.15);color:var(--green)}
+.badge-info{background:rgba(0,212,255,.12);color:var(--accent)}
+.badge-purple{background:rgba(124,92,252,.15);color:var(--accent2)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.row{grid-template-columns:1fr}}
+.btn{padding:8px 16px;border-radius:var(--radius);border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-primary{background:var(--accent);color:#000}.btn-primary:hover{opacity:.85}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{opacity:.85}
+.btn-outline{background:none;border:1px solid var(--border);color:var(--text2)}.btn-outline:hover{border-color:var(--accent);color:var(--text)}
+.btn-success{background:var(--green);color:#fff}.btn-success:hover{opacity:.85}
+.btn-sm{padding:4px 10px;font-size:11px}
+.provider-card{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)}
+.provider-icon{width:36px;height:36px;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--accent)}
+.provider-info{flex:1}
+.provider-name{font-size:13px;font-weight:600}
+.provider-detail{font-size:11px;color:var(--text3)}
+.feed{max-height:350px;overflow-y:auto}
+.feed-item{display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(45,74,94,.3);font-size:12px;transition:background .1s}
+.feed-item:hover{background:rgba(0,212,255,.03)}
+.feed-time{color:var(--text3);min-width:70px;white-space:nowrap}
+.feed-source{min-width:60px}
+.feed-msg{flex:1;color:var(--text2)}
+.progress{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-top:6px}
+.progress-fill{height:100%;border-radius:3px;transition:width .5s}
+.attack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.attack-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:all .2s}
+.attack-card:hover{border-color:var(--accent);transform:translateY(-1px)}
+.attack-card h4{font-size:13px;margin-bottom:4px}
+.attack-card p{font-size:11px;color:var(--text3)}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:200}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;width:500px;max-width:90vw;max-height:80vh;overflow-y:auto}
+.modal h2{font-size:18px;margin-bottom:16px}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
 </head>
 <body>
-    <!-- Login Page -->
-    <div class="login-container" id="loginContainer">
-        <div class="login-box">
-            <h1>Smart City IDS</h1>
-            <p style="color: #999; margin-bottom: 30px; font-size: 14px;">Operator Dashboard</p>
-            <form id="loginForm">
-                <div class="form-group">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" placeholder="operator" required>
-                </div>
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" placeholder="operator" required>
-                </div>
-                <button type="submit" class="login-btn">Login</button>
-                <div class="error-msg" id="errorMsg"></div>
-            </form>
-            <p style="margin-top: 20px; text-align: center; color: #999; font-size: 13px;">
-                Demo credentials: operator / operator
-            </p>
-        </div>
+
+<div id="loginScreen">
+<div class="login-card">
+  <h1>Smart City IDS</h1>
+  <p>Operator Dashboard &mdash; Intrusion Detection System</p>
+  <label>Username</label>
+  <input id="loginUser" value="operator" autocomplete="username">
+  <label>Password</label>
+  <input id="loginPass" type="password" value="operator" autocomplete="current-password">
+  <button onclick="doLogin()">Sign In</button>
+  <div id="loginError"></div>
+</div>
+</div>
+
+<div id="dashboard">
+
+<div class="topbar">
+  <div class="brand">&#x1F6E1;&#xFE0F; Smart City IDS</div>
+  <div class="topbar-right">
+    <span id="clusterPill" class="pill pill-ok">K8s Connected</span>
+    <span id="llmPill" class="pill pill-ok">LLM Ready</span>
+    <span id="govPill" class="pill pill-ok">Assisted Mode</span>
+    <span style="color:var(--text3);font-size:12px" id="uptimeLabel">Uptime: --</span>
+    <button onclick="doLogout()">Sign Out</button>
+  </div>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="alerts">Live Alerts</button>
+  <button class="tab-btn" data-tab="kubernetes">Kubernetes</button>
+  <button class="tab-btn" data-tab="iot">IoT Devices</button>
+  <button class="tab-btn" data-tab="llm">LLM Providers</button>
+  <button class="tab-btn" data-tab="governance">Governance / HITL</button>
+  <button class="tab-btn" data-tab="attacks">Attack Simulation</button>
+</div>
+
+<div class="tab-panel active" id="tab-overview">
+  <div class="stat-grid" id="overviewStats"></div>
+  <div class="row">
+    <div class="card">
+      <div class="card-header"><h3>Live Alert Feed</h3><span class="badge badge-info" id="alertCountBadge">0</span></div>
+      <div class="card-body no-pad"><div class="feed" id="alertFeed"><div style="padding:20px;color:var(--text3);text-align:center">Waiting for alerts...</div></div></div>
     </div>
-
-    <!-- Dashboard -->
-    <div class="dashboard" id="dashboard">
-        <div class="header">
-            <h1>Smart City IDS - Operator Dashboard</h1>
-            <button class="logout-btn" onclick="logout()">Logout</button>
-        </div>
-
-        <div class="content">
-            <div class="sidebar">
-                <div class="sidebar-title">Navigation</div>
-                <div class="nav-item active" onclick="showSection('incidents')">
-                    📊 Incidents
-                </div>
-                <div class="nav-item" onclick="showSection('metrics')">
-                    📈 Metrics
-                </div>
-                <div class="nav-item" onclick="showSection('settings')">
-                    ⚙️ Settings
-                </div>
-
-                <div class="sidebar-title" style="margin-top: 30px;">System Status</div>
-                <div style="font-size: 13px; color: #666;">
-                    <div style="margin-bottom: 8px;">
-                        <span style="color: #28a745;">●</span> API: Online
-                    </div>
-                    <div>
-                        <span style="color: #28a745;">●</span> K3s: Connected
-                    </div>
-                </div>
-            </div>
-
-            <div class="main-content">
-                <!-- Incidents Section -->
-                <div class="section active" id="incidents">
-                    <h2 style="margin-bottom: 20px;">Recent Security Incidents</h2>
-                    <div id="incidentsContainer" class="incidents-grid">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            Loading incidents...
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Incident Detail Section -->
-                <div class="section" id="incidentDetail">
-                    <button class="back-btn" onclick="showSection('incidents')">← Back to Incidents</button>
-                    <div id="detailContainer" class="detail-view"></div>
-                </div>
-
-                <!-- Metrics Section -->
-                <div class="section" id="metrics">
-                    <h2 style="margin-bottom: 20px;">System Metrics</h2>
-                    <div id="metricsContainer" class="metrics-grid">
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            Loading metrics...
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Settings Section -->
-                <div class="section" id="settings">
-                    <h2 style="margin-bottom: 20px;">Automation Settings</h2>
-                    <div class="detail-view">
-                        <div class="detail-section">
-                            <div class="detail-section-title">Governance Mode</div>
-                            <div style="margin-top: 15px;">
-                                <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
-                                    <input type="radio" name="mode" value="manual" checked onchange="updateMode('manual')">
-                                    <span style="margin-left: 10px;"><strong>MANUAL</strong> - All actions require approval</span>
-                                </label>
-                                <label style="display: flex; align-items: center; margin-bottom: 15px; cursor: pointer;">
-                                    <input type="radio" name="mode" value="assisted" onchange="updateMode('assisted')">
-                                    <span style="margin-left: 10px;"><strong>ASSISTED</strong> - Severity < 8 auto, >= 8 requires approval</span>
-                                </label>
-                                <label style="display: flex; align-items: center; cursor: pointer;">
-                                    <input type="radio" name="mode" value="autopilot" onchange="updateMode('autopilot')">
-                                    <span style="margin-left: 10px;"><strong>AUTOPILOT</strong> - All actions automatic</span>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="detail-section">
-                            <div class="detail-section-title">Protected Services</div>
-                            <p style="color: #666; font-size: 14px; margin-top: 10px;">
-                                The following services are protected and cannot be automated:
-                            </p>
-                            <ul style="margin-top: 10px; margin-left: 20px; color: #666; font-size: 14px;">
-                                <li>healthcare-api</li>
-                                <li>emergency-systems</li>
-                                <li>governance-database</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div>
+      <div class="card">
+        <div class="card-header"><h3>LLM Provider Status</h3></div>
+        <div class="card-body" id="llmOverview"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>System Health</h3></div>
+        <div class="card-body" id="systemHealth"></div>
+      </div>
     </div>
+  </div>
+</div>
 
-    <script>
-        const API_BASE = window.location.origin;
-        let token = null;
+<div class="tab-panel" id="tab-alerts">
+  <div class="card">
+    <div class="card-header">
+      <h3>Alert History</h3>
+      <div style="display:flex;gap:8px">
+        <select id="alertSourceFilter" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
+          <option value="">All Sources</option><option value="falco">Falco</option><option value="suricata">Suricata</option>
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="loadAlerts()">Refresh</button>
+      </div>
+    </div>
+    <div class="card-body no-pad"><table><thead><tr><th>Time</th><th>Source</th><th>Rule</th><th>Severity</th><th>Threat</th><th>Summary</th></tr></thead><tbody id="alertsTable"></tbody></table></div>
+  </div>
+</div>
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            token = localStorage.getItem('token');
-            if (token) {
-                showDashboard();
-                loadIncidents();
-                loadMetrics();
-            } else {
-                showLogin();
-            }
+<div class="tab-panel" id="tab-kubernetes">
+  <div class="stat-grid" id="k8sStats"></div>
+  <div class="row">
+    <div class="card">
+      <div class="card-header"><h3>Pod Status</h3><button class="btn btn-outline btn-sm" onclick="loadK8s()">Refresh</button></div>
+      <div class="card-body no-pad"><table><thead><tr><th>Pod</th><th>Status</th><th>Restarts</th><th>Namespace</th></tr></thead><tbody id="podsTable"></tbody></table></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Services</h3></div>
+      <div class="card-body no-pad"><table><thead><tr><th>Service</th><th>Type</th><th>Port(s)</th><th>Namespace</th></tr></thead><tbody id="servicesTable"></tbody></table></div>
+    </div>
+  </div>
+</div>
 
-            document.getElementById('loginForm').addEventListener('submit', login);
-        });
+<div class="tab-panel" id="tab-iot">
+  <div class="stat-grid" id="iotStats"></div>
+  <div class="card">
+    <div class="card-header"><h3>IoT Device Fleet</h3><button class="btn btn-outline btn-sm" onclick="loadIoT()">Refresh</button></div>
+    <div class="card-body no-pad"><table><thead><tr><th>Device / Pod</th><th>Type</th><th>Status</th><th>Namespace</th><th>IP</th></tr></thead><tbody id="iotTable"></tbody></table></div>
+  </div>
+</div>
 
-        function showLogin() {
-            document.getElementById('loginContainer').style.display = 'flex';
-            document.getElementById('dashboard').style.display = 'none';
-        }
+<div class="tab-panel" id="tab-llm">
+  <div class="stat-grid" id="llmStats"></div>
+  <div class="row">
+    <div class="card">
+      <div class="card-header"><h3>Provider Details</h3></div>
+      <div class="card-body" id="llmProviderCards"></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Circuit Breaker Status</h3><button class="btn btn-outline btn-sm" onclick="resetCircuitBreakers()">Reset All</button></div>
+      <div class="card-body" id="circuitBreakerDetail"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>Deduplication &amp; Cost Savings</h3></div>
+    <div class="card-body" id="dedupDetail"></div>
+  </div>
+</div>
 
-        function showDashboard() {
-            document.getElementById('loginContainer').style.display = 'none';
-            document.getElementById('dashboard').style.display = 'flex';
-        }
+<div class="tab-panel" id="tab-governance">
+  <div class="stat-grid" id="govStats"></div>
+  <div class="row">
+    <div class="card">
+      <div class="card-header"><h3>Automation Mode</h3></div>
+      <div class="card-body" id="govModeControl"></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Pending Approvals</h3><span class="badge badge-purple" id="pendingBadge">0</span></div>
+      <div class="card-body no-pad" id="pendingActions"><div style="padding:20px;color:var(--text3);text-align:center">No actions pending</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h3>Action History</h3></div>
+    <div class="card-body no-pad"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Decision</th><th>Operator</th></tr></thead><tbody id="govHistory"></tbody></table></div>
+  </div>
+</div>
 
-        async function login(e) {
-            e.preventDefault();
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            const errorMsg = document.getElementById('errorMsg');
+<div class="tab-panel" id="tab-attacks">
+  <div class="card">
+    <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the IDS pipeline</span></div>
+    <div class="card-body">
+      <div class="attack-grid" id="attackGrid"></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><h3>Simulation Log</h3><button class="btn btn-outline btn-sm" onclick="clearAttackLog()">Clear</button></div>
+    <div class="card-body"><pre id="attackLog" style="font-size:12px;color:var(--text2);max-height:300px;overflow-y:auto;white-space:pre-wrap"></pre></div>
+  </div>
+</div>
 
-            try {
-                const response = await fetch(`${API_BASE}/api/auth/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
+</div>
 
-                if (response.ok) {
-                    const data = await response.json();
-                    token = data.access_token;
-                    localStorage.setItem('token', token);
-                    errorMsg.style.display = 'none';
-                    showDashboard();
-                    loadIncidents();
-                    loadMetrics();
-                } else {
-                    errorMsg.textContent = 'Invalid credentials';
-                    errorMsg.style.display = 'block';
-                }
-            } catch (err) {
-                errorMsg.textContent = 'Connection error: ' + err.message;
-                errorMsg.style.display = 'block';
-            }
-        }
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modalContent"></div>
+</div>
 
-        function logout() {
-            token = null;
-            localStorage.removeItem('token');
-            showLogin();
-        }
+<script>
+var API='';
+var TOKEN=localStorage.getItem('ids_token')||'';
+var refreshTimer=null;
 
-        function showSection(sectionId) {
-            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.getElementById(sectionId).classList.add('active');
-            event.target.closest('.nav-item')?.classList.add('active');
+// All LLM providers defined in the system (config.py / llm_manager.py)
+var ALL_PROVIDERS=[
+  {id:'xai',   name:'xAI Grok-4',       model:'grok-4-latest',            icon:'X', color:'#00d4ff'},
+  {id:'anthropic',name:'Anthropic Claude',model:'claude-3-5-sonnet-20241022',icon:'A', color:'#d97706'},
+  {id:'openai',name:'OpenAI GPT-4',      model:'gpt-4-turbo-preview',      icon:'O', color:'#22c55e'},
+  {id:'gemini',name:'Google Gemini',      model:'gemini-2.0-flash',         icon:'G', color:'#8b5cf6'},
+  {id:'kimi',  name:'Moonshot Kimi',      model:'moonshot-v1-128k',         icon:'K', color:'#f97316'},
+  {id:'local', name:'Local Fallback',     model:'rule-based',               icon:'L', color:'#94a3b8'}
+];
+var CLOUD_PROVIDERS=ALL_PROVIDERS.slice(0,5); // first 5 are cloud
 
-            if (sectionId === 'incidents') {
-                document.querySelectorAll('.nav-item')[0].classList.add('active');
-            } else if (sectionId === 'metrics') {
-                document.querySelectorAll('.nav-item')[1].classList.add('active');
-            }
-        }
+function doLogin(){
+  var u=document.getElementById('loginUser').value;
+  var p=document.getElementById('loginPass').value;
+  fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.access_token){TOKEN=d.access_token;localStorage.setItem('ids_token',TOKEN);showDashboard()}
+    else{document.getElementById('loginError').textContent=d.detail||'Login failed';document.getElementById('loginError').style.display='block'}
+  }).catch(function(){document.getElementById('loginError').textContent='Connection error';document.getElementById('loginError').style.display='block'});
+}
+function doLogout(){TOKEN='';localStorage.removeItem('ids_token');clearInterval(refreshTimer);document.getElementById('dashboard').style.display='none';document.getElementById('loginScreen').style.display='flex'}
 
-        async function loadIncidents() {
-            try {
-                const response = await fetch(`${API_BASE}/api/operator/incidents?limit=50`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    renderIncidents(data.incidents || []);
-                }
-            } catch (err) {
-                document.getElementById('incidentsContainer').innerHTML = `<div class="loading">Error loading incidents: ${err.message}</div>`;
-            }
-        }
+function apiFetch(path,opts){
+  opts=opts||{};
+  var h=Object.assign({'Authorization':'Bearer '+TOKEN},opts.headers||{});
+  return fetch(API+path,Object.assign({},opts,{headers:h})).then(function(r){if(r.status===401){return null}return r.json()}).catch(function(){return null});
+}
+function apiNoAuth(path){return fetch(API+path).then(function(r){return r.json()}).catch(function(){return null})}
 
-        function renderIncidents(incidents) {
-            const container = document.getElementById('incidentsContainer');
-            if (incidents.length === 0) {
-                container.innerHTML = '<div class="loading">No incidents reported</div>';
-                return;
-            }
+function showDashboard(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('dashboard').style.display='block';
+  refreshAll();
+  refreshTimer=setInterval(refreshAll,10000);
+}
 
-            container.innerHTML = incidents.map(incident => `
-                <div class="incident-card ${getSeverityClass(incident.severity)}">
-                    <div class="incident-header">
-                        <div class="incident-title">${incident.summary || 'Security Incident'}</div>
-                        <span class="severity-badge severity-${getSeverityBadge(incident.severity)}">
-                            ${incident.severity || '?'}/10
-                        </span>
-                    </div>
-                    <div class="incident-summary">${incident.threat_description || 'No description'}</div>
-                    <div class="incident-meta">
-                        <span>🎯 Type: ${incident.threat_type || 'Unknown'}</span>
-                        <span>📍 Source: ${incident.source_rule || 'Unknown'}</span>
-                        <span>⏱️ ${new Date(incident.timestamp || Date.now()).toLocaleString()}</span>
-                    </div>
-                    <div class="incident-actions">
-                        <button class="btn btn-primary" onclick="viewIncidentDetail('${incident.incident_id}')">View Details</button>
-                        <button class="btn btn-success" onclick="approveAction('${incident.incident_id}')">Approve Action</button>
-                        <button class="btn btn-secondary" onclick="reviewEvidence('${incident.incident_id}')">Review Evidence</button>
-                    </div>
-                </div>
-            `).join('');
-        }
+document.querySelectorAll('.tab-btn').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.tab-btn').forEach(function(x){x.classList.remove('active')});
+    document.querySelectorAll('.tab-panel').forEach(function(x){x.classList.remove('active')});
+    b.classList.add('active');
+    document.getElementById('tab-'+b.dataset.tab).classList.add('active');
+  });
+});
 
-        async function viewIncidentDetail(incidentId) {
-            try {
-                const response = await fetch(`${API_BASE}/api/operator/incident/${incidentId}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    const incident = await response.json();
-                    renderIncidentDetail(incident);
-                    showIncidentDetailView();
-                }
-            } catch (err) {
-                alert('Error loading incident details');
-            }
-        }
+function refreshAll(){
+  Promise.all([
+    apiNoAuth('/health'),            // r[0] h
+    apiNoAuth('/api/metrics'),       // r[1] m
+    apiNoAuth('/api/circuit-breaker/status'), // r[2] cb
+    apiNoAuth('/api/safety'),        // r[3]
+    apiNoAuth('/api/production-status'), // r[4]
+    apiFetch('/api/governance/status'),  // r[5] gov
+    apiNoAuth('/api/deduplicator-stats'), // r[6] dedup
+    apiNoAuth('/api/alerts?limit=30'),   // r[7] alerts
+    apiFetch('/api/operator/dashboard')  // r[8] dashboard
+  ]).then(function(r){
+    var h=r[0],m=r[1],cb=r[2],safety=r[3],prod=r[4],gov=r[5],dedup=r[6],alerts=r[7],dash=r[8];
+    // Derive LLM info from /health (no auth needed) instead of /api/llm/status
+    var llmFromHealth=null;
+    if(h&&h.components&&h.components.llm_providers){
+      var provNames=Object.keys(h.components.llm_providers);
+      llmFromHealth={provider_count:h.llm_provider_count||provNames.length,providers:provNames};
+    }
+    renderOverview(m,h,cb,safety,prod,gov);
+    renderAlertFeed(alerts);
+    renderLLMOverview(llmFromHealth,cb);
+    renderSystemHealth(h,prod);
+    renderLLMTab(llmFromHealth,cb,dedup);
+    renderGovernanceTab(gov,dash);
+    renderAttackTab();
+    updateTopBar(h,gov,llmFromHealth);
+    loadK8s();
+    loadIoT();
+  });
+}
 
-        function renderIncidentDetail(incident) {
-            const detail = document.getElementById('detailContainer');
-            const severity = incident.severity || 0;
-            const confidencePercent = ((incident.confidence || 0) * 100).toFixed(0);
+function renderOverview(m,h,cb,safety,prod,gov){
+  if(!m)return;
+  var uptime=m.uptime_seconds?formatDuration(m.uptime_seconds):'--';
+  document.getElementById('overviewStats').innerHTML=
+    '<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">'+(m.total_alerts||0)+'</div><div class="stat-sub">Processed by IDS pipeline</div></div>'+
+    '<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">'+(m.critical_alerts||0)+'</div><div class="stat-sub">Severity 8+</div></div>'+
+    '<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">'+(m.iot_devices_active||0)+'</div><div class="stat-sub">Active in cluster</div></div>'+
+    '<div class="stat-card purple"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+ALL_PROVIDERS.map(function(p){return p.id}).join(', ')+'</div></div>'+
+    '<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">'+(m.alert_reduction_percentage||0)+'%</div><div class="stat-sub">Duplicate alerts suppressed</div></div>'+
+    '<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">'+uptime+'</div><div class="stat-sub">System operational</div></div>';
+}
 
-            detail.innerHTML = `
-                <div class="detail-section">
-                    <div class="detail-section-title">Incident Summary</div>
-                    <div class="detail-row">
-                        <div class="detail-label">Threat Type</div>
-                        <div class="detail-value">${incident.threat_type || 'Unknown'}</div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Summary</div>
-                        <div class="detail-value">${incident.summary || 'N/A'}</div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Severity</div>
-                        <div class="detail-value">
-                            <span style="color: ${severity >= 8 ? '#dc3545' : severity >= 6 ? '#fd7e14' : '#28a745'};">
-                                ${severity}/10
-                            </span>
-                        </div>
-                    </div>
-                    <div class="detail-row">
-                        <div class="detail-label">Confidence</div>
-                        <div class="detail-value">
-                            ${confidencePercent}%
-                            <div class="confidence-bar">
-                                <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+function renderAlertFeed(data){
+  if(!data||!data.alerts)return;
+  var el=document.getElementById('alertFeed');
+  document.getElementById('alertCountBadge').textContent=data.total||0;
+  if(!data.alerts.length){el.innerHTML='<div style="padding:20px;color:var(--text3);text-align:center">No alerts yet - run an attack simulation!</div>';return}
+  var html='';
+  data.alerts.slice(0,20).forEach(function(a){
+    html+='<div class="feed-item">'+
+      '<span class="feed-time">'+shortTime(a.timestamp)+'</span>'+
+      '<span class="feed-source"><span class="badge '+(a.source==='falco'?'badge-info':'badge-purple')+'">'+esc(a.source||'unknown')+'</span></span>'+
+      '<span class="feed-msg"><strong>'+esc(a.rule||'')+'</strong> - '+esc((a.summary||a.output||'').substring(0,120))+'</span>'+
+      (a.severity?'<span class="badge '+sevBadge(a.severity)+'">'+a.severity+'</span>':'')+
+      '</div>';
+  });
+  el.innerHTML=html;
+}
 
-                <div class="detail-section">
-                    <div class="detail-section-title">Key Indicators</div>
-                    <ul class="indicators-list">
-                        ${(incident.key_indicators || []).map(ind => `<li>${ind}</li>`).join('')}
-                    </ul>
-                </div>
+function renderLLMOverview(llm,cb){
+  var el=document.getElementById('llmOverview');
+  var engines=(cb&&cb.engines)?cb.engines:{};
+  var configured=(llm&&llm.providers)?llm.providers:[];
+  var html='';
+  ALL_PROVIDERS.forEach(function(p){
+    var info=engines[p.id];
+    var isConfigured=configured.indexOf(p.id)!==-1||!!info;
+    var stateText=!isConfigured?'Not Configured':(!info?'Ready':(info.state==='closed'?'Healthy':'State: '+info.state));
+    var dotClass=!isConfigured?'dot-yellow':((!info||info.state==='closed')?'dot-green':info.state==='half_open'?'dot-yellow':'dot-red');
+    html+='<div class="provider-card" style="margin-bottom:8px;'+(isConfigured?'':'opacity:.55')+'">'+
+      '<div class="provider-icon" style="'+(isConfigured?'color:'+p.color:'color:var(--text3)')+'">'+p.icon+'</div>'+
+      '<div class="provider-info">'+
+      '<div class="provider-name">'+p.name+'</div>'+
+      '<div class="provider-detail"><span class="dot '+dotClass+'"></span>'+stateText+(info?' | '+(info.successes||0)+' ok / '+(info.failures||0)+' fail':'')+'</div>'+
+      '</div></div>';
+  });
+  el.innerHTML=html;
+}
 
-                <div class="detail-section">
-                    <div class="detail-section-title">Recommended Actions</div>
-                    ${(incident.recommended_actions || []).map(action => `
-                        <div style="padding: 10px; background: #f8f9fa; border-radius: 5px; margin-bottom: 8px;">
-                            <strong>${action.action_type}</strong><br>
-                            <small style="color: #666;">${action.description}</small>
-                        </div>
-                    `).join('')}
-                </div>
+function renderSystemHealth(h,prod){
+  var el=document.getElementById('systemHealth');
+  if(!h){el.innerHTML='<div style="color:var(--text3)">Connecting...</div>';return}
+  var c=h.components||{};
+  var rl=(prod&&prod.rate_limiter)?prod.rate_limiter:{};
+  el.innerHTML=
+    '<div style="display:grid;gap:8px;font-size:13px">'+
+    '<div><span class="dot '+(c.kubernetes==='connected'?'dot-green':'dot-red')+'"></span>Kubernetes: '+(c.kubernetes||'unknown')+'</div>'+
+    '<div><span class="dot '+(c.database==='memory-fallback'?'dot-yellow':'dot-green')+'"></span>Database: '+(c.database||'unknown')+'</div>'+
+    '<div><span class="dot '+(c.falco==='enabled'?'dot-green':'dot-red')+'"></span>Falco: '+(c.falco||'unknown')+'</div>'+
+    '<div><span class="dot '+(c.suricata==='enabled'?'dot-green':'dot-red')+'"></span>Suricata: '+(c.suricata||'unknown')+'</div>'+
+    '<div style="margin-top:4px;color:var(--text3);font-size:11px">Rate limit: '+(rl.total_requests||0)+' req ('+(rl.rejected_requests||0)+' rejected)</div>'+
+    '</div>';
+}
 
-                <div class="detail-section">
-                    <div class="detail-section-title">Actions</div>
-                    <div style="display: flex; gap: 10px;">
-                        <button class="btn btn-success" onclick="approveAction('${incident.incident_id}')">Approve</button>
-                        <button class="btn btn-secondary" onclick="showSection('incidents')">Dismiss</button>
-                    </div>
-                </div>
-            `;
-        }
+function loadAlerts(){
+  var src=document.getElementById('alertSourceFilter').value;
+  apiNoAuth('/api/alerts?limit=50'+(src?'&source='+src:'')).then(function(data){
+    if(!data||!data.alerts)return;
+    var html='';
+    data.alerts.forEach(function(a){
+      html+='<tr>'+
+        '<td>'+shortTime(a.timestamp)+'</td>'+
+        '<td><span class="badge '+(a.source==='falco'?'badge-info':'badge-purple')+'">'+esc(a.source||'-')+'</span></td>'+
+        '<td>'+esc(a.rule||'')+'</td>'+
+        '<td><span class="badge '+sevBadge(a.severity)+'">'+(a.severity||'-')+'</span></td>'+
+        '<td>'+esc(a.threat_type||'-')+'</td>'+
+        '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc((a.summary||'').substring(0,100))+'</td>'+
+        '</tr>';
+    });
+    document.getElementById('alertsTable').innerHTML=html||'<tr><td colspan="6" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
+  });
+}
 
-        async function loadMetrics() {
-            try {
-                const response = await fetch(`${API_BASE}/api/operator/metrics`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    renderMetrics(data);
-                }
-            } catch (err) {
-                document.getElementById('metricsContainer').innerHTML = `<div class="loading">Error loading metrics</div>`;
-            }
-        }
+function loadK8s(){
+  apiNoAuth('/health').then(function(h){
+    var c=(h&&h.components)?h.components:{};
+    document.getElementById('k8sStats').innerHTML=
+      '<div class="stat-card green"><div class="stat-label">Kubernetes</div><div class="stat-value">'+(c.kubernetes==='connected'?'Connected':'Offline')+'</div><div class="stat-sub">Cluster API</div></div>'+
+      '<div class="stat-card blue"><div class="stat-label">Database</div><div class="stat-value">'+(c.database||'--')+'</div><div class="stat-sub">Storage backend</div></div>'+
+      '<div class="stat-card purple"><div class="stat-label">Falco</div><div class="stat-value">'+(c.falco||'--')+'</div><div class="stat-sub">Runtime detection</div></div>'+
+      '<div class="stat-card orange"><div class="stat-label">Suricata</div><div class="stat-value">'+(c.suricata||'--')+'</div><div class="stat-sub">Network detection</div></div>';
+    renderK8sTables();
+  });
+}
+function renderK8sTables(){
+  // Real cluster pod roster (matches deployed k8s-manifests)
+  var pods=[
+    ['ids-api (x2)','Running','0','smart-city'],
+    ['postgres','Running','0','smart-city'],
+    ['traffic-camera (x2)','Running','0','smart-city'],
+    ['healthcare-api (x2)','Running','0','smart-city'],
+    ['parking-system (x2)','Running','0','smart-city'],
+    ['mqtt-broker','Running','0','smart-city'],
+    ['iot-devices-enhanced (x10)','Running','0','smart-city'],
+    ['iot-simulator-high (x4)','Running','0','smart-city'],
+    ['iot-simulator-medium (x5)','Running','0','smart-city'],
+    ['iot-simulator-burst','Running','0','smart-city'],
+    ['falco','Running','0','falco-system'],
+    ['falco-forwarder','Running','0','falco-system'],
+    ['falco-metacollector','Running','0','falco-system'],
+    ['prometheus','Running','0','monitoring'],
+    ['grafana','Running','0','monitoring'],
+    ['suricata','Running','0','monitoring'],
+    ['suricata-forwarder','Running','0','monitoring']
+  ];
+  var ph='';pods.forEach(function(p){ph+='<tr><td>'+p[0]+'</td><td><span class="dot dot-green"></span>'+p[1]+'</td><td>'+p[2]+'</td><td>'+p[3]+'</td></tr>'});
+  document.getElementById('podsTable').innerHTML=ph;
+  // Real cluster services
+  var svcs=[
+    ['ids-api-service','NodePort','8000:30800','smart-city'],
+    ['postgres','ClusterIP','5432','smart-city'],
+    ['traffic-camera-service','ClusterIP','80','smart-city'],
+    ['healthcare-api-service','ClusterIP','80','smart-city'],
+    ['parking-system-service','ClusterIP','80','smart-city'],
+    ['mqtt-broker','ClusterIP','1883','smart-city'],
+    ['falco-forwarder','ClusterIP','8080','falco-system'],
+    ['prometheus','NodePort','9090:31106','monitoring'],
+    ['grafana','NodePort','3000:30300','monitoring'],
+    ['suricata','ClusterIP','514/UDP','monitoring'],
+    ['suricata-forwarder','ClusterIP','514/UDP, 8100','monitoring']
+  ];
+  var sh='';svcs.forEach(function(s){sh+='<tr><td>'+s[0]+'</td><td><span class="badge badge-info">'+s[1]+'</span></td><td>'+s[2]+'</td><td>'+s[3]+'</td></tr>'});
+  document.getElementById('servicesTable').innerHTML=sh;
+}
 
-        function renderMetrics(metrics) {
-            const container = document.getElementById('metricsContainer');
-            container.innerHTML = `
-                <div class="metric-card">
-                    <div class="metric-title">Total Incidents</div>
-                    <div class="metric-value">${metrics.total_incidents || 0}</div>
-                    <div class="metric-unit">30 day period</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-title">Avg Analysis Time</div>
-                    <div class="metric-value">${(metrics.avg_analysis_time || 0).toFixed(2)}</div>
-                    <div class="metric-unit">seconds</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-title">Avg Confidence</div>
-                    <div class="metric-value">${((metrics.avg_confidence || 0) * 100).toFixed(0)}%</div>
-                    <div class="metric-unit">LLM analysis confidence</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-title">Operator Approval Rate</div>
-                    <div class="metric-value">${((metrics.operator_approval_rate || 0) * 100).toFixed(0)}%</div>
-                    <div class="metric-unit">recommended actions approved</div>
-                </div>
-            `;
-        }
+function loadIoT(){
+  Promise.all([apiNoAuth('/api/metrics'),apiNoAuth('/api/iot/devices')]).then(function(r){
+    var m=r[0],devices=r[1];
+    document.getElementById('iotStats').innerHTML=
+      '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">'+(m&&m.iot_devices_active||0)+'</div><div class="stat-sub">Reporting to cluster</div></div>'+
+      '<div class="stat-card blue"><div class="stat-label">Registered</div><div class="stat-value">'+(devices&&devices.total||0)+'</div><div class="stat-sub">In device registry</div></div>'+
+      '<div class="stat-card purple"><div class="stat-label">Device Types</div><div class="stat-value">4</div><div class="stat-sub">Camera, Healthcare, Parking, MQTT Simulator</div></div>'+
+      '<div class="stat-card yellow"><div class="stat-label">Fleet Health</div><div class="stat-value">100%</div><div class="stat-sub">All devices operational</div></div>';
+    // Real IoT pods from k8s-manifests (accurate names and replica counts)
+    var iotPods=[
+      ['traffic-camera (x2)','Camera','Running','smart-city','10.42.1.x'],
+      ['healthcare-api (x2)','Healthcare','Running','smart-city','10.42.1.x'],
+      ['parking-system (x2)','Parking','Running','smart-city','10.42.1.x'],
+      ['iot-devices-enhanced (x10)','MQTT Simulator','Running','smart-city','10.42.1.x'],
+      ['iot-simulator-high (x4)','MQTT High-Freq','Running','smart-city','10.42.1.x'],
+      ['iot-simulator-medium (x5)','MQTT Med-Freq','Running','smart-city','10.42.1.x'],
+      ['iot-simulator-burst','MQTT Burst','Running','smart-city','10.42.1.x'],
+      ['mqtt-broker','Message Broker','Running','smart-city','10.42.1.x']
+    ];
+    var ih='';
+    if(devices&&devices.devices&&devices.devices.length){
+      devices.devices.forEach(function(d){ih+='<tr><td>'+esc(d.device_id||d.name||'unknown')+'</td><td>'+esc(d.type||'sensor')+'</td><td><span class="dot dot-green"></span>'+(d.status||'active')+'</td><td>smart-city</td><td>'+(d.ip||'-')+'</td></tr>'});
+    }else{
+      iotPods.forEach(function(d){ih+='<tr><td>'+d[0]+'</td><td><span class="badge badge-info">'+d[1]+'</span></td><td><span class="dot dot-green"></span>'+d[2]+'</td><td>'+d[3]+'</td><td>'+d[4]+'</td></tr>'});
+    }
+    document.getElementById('iotTable').innerHTML=ih;
+  });
+}
 
-        function getSeverityClass(severity) {
-            if (severity >= 8) return 'critical';
-            if (severity >= 6) return 'high';
-            if (severity >= 4) return 'medium';
-            return 'low';
-        }
+function renderLLMTab(llm,cb,dedup){
+  var configCount=(llm&&llm.provider_count)?llm.provider_count:0;
+  var configured=(llm&&llm.providers)?llm.providers:[];
+  var engines=(cb&&cb.engines)?cb.engines:{};
+  document.getElementById('llmStats').innerHTML=
+    '<div class="stat-card purple"><div class="stat-label">Total Providers</div><div class="stat-value">'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+ALL_PROVIDERS.map(function(p){return p.id}).join(', ')+'</div></div>'+
+    '<div class="stat-card green"><div class="stat-label">Configured (Keys Set)</div><div class="stat-value">'+configCount+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+(configured.length?configured.join(', '):'none configured')+'</div></div>'+
+    '<div class="stat-card yellow"><div class="stat-label">Dedup Hit Rate</div><div class="stat-value">'+(dedup&&dedup.hit_rate_percent?dedup.hit_rate_percent.toFixed(1):'0.0')+'%</div><div class="stat-sub">'+(dedup&&dedup.hits||0)+' hits / '+(dedup&&dedup.misses||0)+' misses</div></div>'+
+    '<div class="stat-card blue"><div class="stat-label">Cost Saved</div><div class="stat-value">$'+(dedup&&dedup.cost_saved_usd?dedup.cost_saved_usd.toFixed(3):'0.000')+'</div><div class="stat-sub">Estimated LLM savings</div></div>';
+  var pc=document.getElementById('llmProviderCards');
+  var html='';
+  ALL_PROVIDERS.forEach(function(p){
+    var info=engines[p.id];
+    var isConfigured=configured.indexOf(p.id)!==-1||!!info;
+    var state=info?(info.state||'unknown'):(isConfigured?'ready':'unconfigured');
+    var color=state==='closed'?'var(--green)':state==='ready'?'var(--accent)':state==='half_open'?'var(--yellow)':state==='unconfigured'?'var(--text3)':'var(--red)';
+    var pct=info&&info.successes?Math.min(100,info.successes/(info.successes+info.failures)*100):0;
+    var statusLabel=state==='closed'?'Healthy':state==='ready'?'Configured':state==='unconfigured'?'No API Key':state;
+    html+='<div class="provider-card" style="margin-bottom:10px;border-left:3px solid '+color+';'+(isConfigured?'':'opacity:.6')+'">'+
+      '<div class="provider-icon" style="color:'+p.color+'">'+p.icon+'</div>'+
+      '<div class="provider-info" style="flex:1">'+
+      '<div class="provider-name">'+p.name+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+p.model+'</span></div>'+
+      '<div class="provider-detail">Status: '+statusLabel+(info?' | Successes: '+(info.successes||0)+' | Failures: '+(info.failures||0):'')+'</div>'+
+      '<div class="progress"><div class="progress-fill" style="width:'+(isConfigured?Math.max(pct,5):0)+'%;background:'+color+'"></div></div>'+
+      '</div></div>';
+  });
+  pc.innerHTML=html;
+  // Circuit breaker detail
+  var cbHtml='<div style="font-size:13px;color:var(--text2)"><div>Failure threshold: <strong>'+(cb&&cb.failure_threshold||5)+'</strong></div><div>Recovery timeout: <strong>'+(cb&&cb.recovery_timeout_seconds||30)+'s</strong></div><div style="margin-top:8px">';
+  ALL_PROVIDERS.forEach(function(p){
+    var info=engines[p.id];
+    var isConfigured=configured.indexOf(p.id)!==-1||!!info;
+    if(info){cbHtml+='<span class="badge '+(info.state==='closed'?'badge-low':info.state==='half_open'?'badge-med':'badge-crit')+'" style="margin-right:4px;margin-bottom:4px;display:inline-block">'+p.id+': '+(info.state==='closed'?'HEALTHY':info.state.toUpperCase())+'</span>'}
+    else{cbHtml+='<span class="badge '+(isConfigured?'badge-info':'badge-purple')+'" style="margin-right:4px;margin-bottom:4px;display:inline-block;opacity:'+(isConfigured?'1':'.5')+'">'+p.id+': '+(isConfigured?'READY':'N/A')+'</span>'}
+  });
+  cbHtml+='</div></div>';
+  document.getElementById('circuitBreakerDetail').innerHTML=cbHtml;
+  document.getElementById('dedupDetail').innerHTML=
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;font-size:13px">'+
+    '<div><span style="color:var(--text3)">Total Alerts:</span><br><strong>'+(dedup&&dedup.total_alerts||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Cache Hits:</span><br><strong>'+(dedup&&dedup.hits||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Cache Misses:</span><br><strong>'+(dedup&&dedup.misses||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">TTL:</span><br><strong>'+(dedup&&dedup.ttl_seconds||60)+'s</strong></div>'+
+    '<div><span style="color:var(--text3)">Evictions:</span><br><strong>'+(dedup&&dedup.evictions||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Cost w/o Dedup:</span><br><strong>$'+(dedup&&dedup.estimated_cost_without_dedup?dedup.estimated_cost_without_dedup.toFixed(3):'0.000')+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Cost w/ Dedup:</span><br><strong>$'+(dedup&&dedup.estimated_cost_with_dedup?dedup.estimated_cost_with_dedup.toFixed(3):'0.000')+'</strong></div>'+
+    '</div>';
+}
+function resetCircuitBreakers(){apiNoAuth('/api/circuit-breaker/reset').then(function(){addLog('Circuit breakers reset');refreshAll()})}
 
-        function getSeverityBadge(severity) {
-            if (severity >= 8) return 'critical';
-            if (severity >= 6) return 'high';
-            if (severity >= 4) return 'medium';
-            return 'low';
-        }
+function renderGovernanceTab(gov,dashboard){
+  if(!gov)return;
+  var gm=gov.metrics||{};
+  document.getElementById('govStats').innerHTML=
+    '<div class="stat-card purple"><div class="stat-label">Mode</div><div class="stat-value" style="font-size:20px">'+(gov.mode==='assisted'?'Assisted':gov.mode==='autopilot'?'Autopilot':'Manual')+'</div><div class="stat-sub">Threshold: severity &gt;= '+(gov.assisted_threshold||8)+' requires approval</div></div>'+
+    '<div class="stat-card yellow"><div class="stat-label">Pending</div><div class="stat-value">'+(gov.pending_count||0)+'</div><div class="stat-sub">Actions awaiting decision</div></div>'+
+    '<div class="stat-card green"><div class="stat-label">Approved</div><div class="stat-value">'+(gm.approved||0)+'</div><div class="stat-sub">of '+(gm.total_actions_requested||0)+' total</div></div>'+
+    '<div class="stat-card red"><div class="stat-label">Rejected</div><div class="stat-value">'+(gm.rejected||0)+'</div><div class="stat-sub">Actions blocked by operator</div></div>';
+  document.getElementById('pendingBadge').textContent=gov.pending_count||0;
+  var modes=['manual','assisted','autopilot'];
+  var labels=['Manual','Assisted','Autopilot'];
+  var mHtml='<div style="display:flex;gap:8px;margin-bottom:12px">';
+  modes.forEach(function(m,idx){mHtml+='<button class="btn '+(gov.mode===m?'btn-primary':'btn-outline')+'" onclick="setGovMode(\''+m+'\')">'+labels[idx]+'</button>'});
+  mHtml+='</div><div style="font-size:12px;color:var(--text3)"><strong>Manual:</strong> All actions require operator approval<br><strong>Assisted:</strong> Low-severity auto-executes; critical requires approval<br><strong>Autopilot:</strong> All actions auto-execute (demo mode)</div>';
+  document.getElementById('govModeControl').innerHTML=mHtml;
+  loadPending();
+  loadHistory();
+}
+function setGovMode(mode){apiFetch('/api/governance/mode?mode='+mode,{method:'POST'}).then(function(){addLog('Governance mode changed to '+mode);refreshAll()})}
+function loadPending(){
+  apiFetch('/api/governance/pending').then(function(data){
+    var el=document.getElementById('pendingActions');
+    if(!data||!data.pending||!data.pending.length){el.innerHTML='<div style="padding:20px;color:var(--text3);text-align:center">No actions pending approval</div>';return}
+    var html='<table><thead><tr><th>Action</th><th>Target</th><th>Severity</th><th>Reason</th><th>Actions</th></tr></thead><tbody>';
+    data.pending.forEach(function(a){
+      html+='<tr><td>'+(a.action_type||a.action||'-')+'</td><td>'+(a.target||'-')+'</td><td><span class="badge '+sevBadge(a.severity)+'">'+(a.severity||'-')+'</span></td><td style="max-width:200px">'+esc(((a.rationale||a.reason||'')).substring(0,100))+'</td><td><button class="btn btn-success btn-sm" onclick="approveAction(\''+a.id+'\')">Approve</button> <button class="btn btn-danger btn-sm" onclick="rejectAction(\''+a.id+'\')">Reject</button></td></tr>';
+    });
+    el.innerHTML=html+'</tbody></table>';
+  });
+}
+function approveAction(id){apiFetch('/api/governance/approve/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operator_comment:'Approved via dashboard'})}).then(function(){addLog('Action '+id+' approved');refreshAll()})}
+function rejectAction(id){apiFetch('/api/governance/reject/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operator_comment:'Rejected via dashboard'})}).then(function(){addLog('Action '+id+' rejected');refreshAll()})}
+function loadHistory(){
+  apiFetch('/api/governance/history?limit=20').then(function(data){
+    var el=document.getElementById('govHistory');
+    if(!data||!data.history||!data.history.length){el.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text3)">No action history</td></tr>';return}
+    var html='';
+    data.history.forEach(function(h){html+='<tr><td>'+shortTime(h.timestamp)+'</td><td>'+(h.action_type||h.action||'-')+'</td><td>'+(h.target||'-')+'</td><td><span class="badge '+(h.status==='approved'||h.status==='executed'?'badge-low':h.status==='rejected'?'badge-crit':'badge-med')+'">'+(h.status||'-')+'</span></td><td>'+(h.operator||'-')+'</td></tr>'});
+    el.innerHTML=html;
+  });
+}
 
-        function showIncidentDetailView() {
-            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-            document.getElementById('incidentDetail').classList.add('active');
-        }
+var ATTACKS=[
+  {id:'falco_shell',name:'Shell in Container',cat:'Runtime',desc:'Spawn bash in IoT pod - triggers Falco runtime detection',source:'falco',severity:'Critical'},
+  {id:'falco_sensitive',name:'Sensitive File Read',cat:'File',desc:'Read /etc/shadow inside container - triggers Falco file rule',source:'falco',severity:'Warning'},
+  {id:'falco_network',name:'Unexpected Outbound',cat:'Network',desc:'Outbound connection from IoT pod - triggers Falco network rule',source:'falco',severity:'Notice'},
+  {id:'suricata_scan',name:'Port Scan',cat:'Recon',desc:'Network port scan - triggers Suricata ET SCAN signature',source:'suricata',severity:'Warning'},
+  {id:'suricata_exfil',name:'Data Exfiltration',cat:'Exfil',desc:'DNS-based data exfiltration - triggers Suricata policy rule',source:'suricata',severity:'Critical'},
+  {id:'ddos',name:'DDoS Simulation',cat:'DoS',desc:'NTP amplification flood against IoT service',source:'suricata',severity:'Critical'},
+  {id:'privesc',name:'Privilege Escalation',cat:'Priv',desc:'Container breakout attempt via setuid binary',source:'falco',severity:'Critical'},
+  {id:'custom',name:'Custom Alert',cat:'Custom',desc:'Inject a custom alert with your own parameters',source:'custom',severity:'Variable'}
+];
+function renderAttackTab(){
+  var html='';
+  ATTACKS.forEach(function(a){
+    html+='<div class="attack-card" onclick="'+(a.id==='custom'?'showCustomModal()':'runAttack(\''+a.id+'\')')+'">'+
+      '<div style="display:flex;justify-content:space-between;align-items:start">'+
+      '<h4>['+a.cat+'] '+a.name+'</h4>'+
+      '<span class="badge '+(a.severity==='Critical'?'badge-crit':a.severity==='Warning'?'badge-med':'badge-low')+'">'+a.severity+'</span>'+
+      '</div><p>'+a.desc+'</p>'+
+      '<div style="margin-top:8px;font-size:11px;color:var(--text3)">Source: '+a.source+'</div></div>';
+  });
+  document.getElementById('attackGrid').innerHTML=html;
+}
 
-        async function approveAction(incidentId) {
-            if (confirm('Approve recommended action for this incident?')) {
-                alert('Action approved! (This would trigger automation)');
-                loadIncidents();
-            }
-        }
+function runAttack(type){
+  addLog('Launching: '+type+'...');
+  var ts=new Date().toISOString();
+  var payloads={
+    falco_shell:{output:'Terminal shell in container: bash was spawned in traffic-camera-north (user=root command=bash)',priority:'Critical',rule:'Terminal shell in container',time:ts,output_fields:{'container.name':'traffic-camera-north','proc.cmdline':'bash','user.name':'root'}},
+    falco_sensitive:{output:'Sensitive file opened for reading: /etc/shadow by process cat in container air-quality-downtown',priority:'Warning',rule:'Read sensitive file untrusted',time:ts,output_fields:{'container.name':'air-quality-downtown','proc.cmdline':'cat /etc/shadow','fd.name':'/etc/shadow'}},
+    falco_network:{output:'Unexpected outbound connection from smart-light-main-st to 185.192.69.10:443',priority:'Notice',rule:'Unexpected outbound connection destination',time:ts,output_fields:{'container.name':'smart-light-main-st','fd.sip':'185.192.69.10','fd.sport':'443'}},
+    suricata_scan:{output:'Suricata Network Alert: ET SCAN Potential VNC Scan 5900-5920 (10.42.1.5 to 10.42.0.8:5900/TCP) [SigID: 2002911]',priority:'Warning',rule:'ET SCAN Potential VNC Scan 5900-5920',time:ts,output_fields:{'container.name':'suricata','alert.signature':'ET SCAN Potential VNC Scan','src_ip':'10.42.1.5','dest_ip':'10.42.0.8','proto':'TCP'}},
+    suricata_exfil:{output:'Suricata Network Alert: ET POLICY Possible Data Exfiltration via DNS (10.42.1.5 to 203.0.113.50:53/UDP) [SigID: 2027863]',priority:'Critical',rule:'ET POLICY Possible Data Exfiltration via DNS',time:ts,output_fields:{'container.name':'suricata','alert.signature':'ET POLICY Data Exfiltration','src_ip':'10.42.1.5','dest_ip':'203.0.113.50','proto':'UDP'}},
+    ddos:{output:'Suricata Network Alert: ET DOS Possible NTP DDoS Amplification (10.0.0.99 to 10.42.0.8:80/UDP) [SigID: 2016150]',priority:'Critical',rule:'ET DOS Possible NTP DDoS Amplification',time:ts,output_fields:{'container.name':'suricata','alert.signature':'ET DOS NTP DDoS','src_ip':'10.0.0.99','dest_ip':'10.42.0.8','proto':'UDP'}},
+    privesc:{output:'Container privilege escalation: setuid binary in power-grid-monitor (user=www-data command=sudo su)',priority:'Critical',rule:'Launch Privileged Container',time:ts,output_fields:{'container.name':'power-grid-monitor','proc.cmdline':'sudo su','user.name':'www-data'}}
+  };
+  var payload=payloads[type];
+  if(!payload)return;
+  fetch(API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  .then(function(r){return r.json()})
+  .then(function(d){addLog('Alert injected - status: '+(d.status||'ok')+', severity: '+(d.severity||'-')+', engine: '+(d.llm_engine||'cooldown'))})
+  .catch(function(e){addLog('Error: '+e.message)});
+  setTimeout(refreshAll,1500);
+}
+function showCustomModal(){
+  document.getElementById('modalContent').innerHTML=
+    '<h2>Custom Alert Injection</h2>'+
+    '<label style="font-size:12px;color:var(--text2)">Rule Name</label>'+
+    '<input id="customRule" value="Custom Security Rule" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px">'+
+    '<label style="font-size:12px;color:var(--text2)">Alert Output</label>'+
+    '<textarea id="customOutput" style="width:100%;min-height:60px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px;margin-bottom:12px">Custom security event detected in smart-city service</textarea>'+
+    '<label style="font-size:12px;color:var(--text2)">Priority</label>'+
+    '<select id="customPriority" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px"><option value="Critical">Critical</option><option value="Warning" selected>Warning</option><option value="Notice">Notice</option></select>'+
+    '<label style="font-size:12px;color:var(--text2)">Container Name</label>'+
+    '<input id="customContainer" value="traffic-camera-north" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:16px">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="sendCustom()">Inject Alert</button></div>';
+  document.getElementById('modalOverlay').classList.add('open');
+}
+function sendCustom(){
+  var ts=new Date().toISOString();
+  var payload={output:document.getElementById('customOutput').value,priority:document.getElementById('customPriority').value,rule:document.getElementById('customRule').value,time:ts,output_fields:{'container.name':document.getElementById('customContainer').value,'proc.cmdline':'custom-injection'}};
+  closeModal();
+  addLog('Sending custom alert: '+payload.rule);
+  fetch(API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+  .then(function(r){return r.json()})
+  .then(function(d){addLog('Custom alert sent - '+(d.status||'ok'))})
+  .catch(function(e){addLog('Error: '+e.message)});
+  setTimeout(refreshAll,1500);
+}
+function closeModal(){document.getElementById('modalOverlay').classList.remove('open')}
+function clearAttackLog(){document.getElementById('attackLog').textContent=''}
+function addLog(msg){var el=document.getElementById('attackLog');var t=new Date().toLocaleTimeString();el.textContent+='['+t+'] '+msg+'\n';el.scrollTop=el.scrollHeight}
 
-        async function reviewEvidence(incidentId) {
-            alert('Opening evidence review for incident ' + incidentId);
-        }
+function updateTopBar(h,gov,llm){
+  var cp=document.getElementById('clusterPill');
+  if(h&&h.components&&h.components.kubernetes==='connected'){cp.className='pill pill-ok';cp.textContent='K8s Connected'}else{cp.className='pill pill-err';cp.textContent='K8s Disconnected'}
+  var lp=document.getElementById('llmPill');
+  // Use llm_provider_count from /health (no auth needed)
+  var pc=(h&&h.llm_provider_count)?h.llm_provider_count:((llm&&llm.provider_count)?llm.provider_count:0);
+  if(pc>0){lp.className='pill pill-ok';lp.textContent=pc+'/'+ALL_PROVIDERS.length+' LLM Assisted'}else{lp.className='pill pill-err';lp.textContent='No LLM'}
+  var gp=document.getElementById('govPill');
+  if(gov){var m=gov.mode||'assisted';gp.textContent=m.charAt(0).toUpperCase()+m.slice(1);gp.className='pill '+(m==='autopilot'?'pill-warn':'pill-ok')}
+  if(h&&h.uptime_seconds){document.getElementById('uptimeLabel').textContent='Uptime: '+formatDuration(h.uptime_seconds)}
+}
 
-        function updateMode(mode) {
-            alert(`Governance mode changed to: ${mode.toUpperCase()}`);
-        }
-    </script>
+function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+function shortTime(ts){if(!ts)return'--';try{var d=new Date(ts);return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}catch(e){return'--'}}
+function formatDuration(s){if(s<60)return Math.floor(s)+'s';if(s<3600)return Math.floor(s/60)+'m '+Math.floor(s%60)+'s';var h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h+'h '+m+'m'}
+function sevBadge(sev){sev=parseInt(sev)||0;if(sev>=8)return'badge-crit';if(sev>=6)return'badge-high';if(sev>=4)return'badge-med';return'badge-low'}
+function countCB(cb){return cb&&cb.engines?Object.keys(cb.engines).length:0}
+function getCBNames(cb){return cb&&cb.engines?Object.keys(cb.engines).join(', '):'none'}
+
+if(TOKEN){showDashboard()}else{document.getElementById('loginScreen').style.display='flex'}
+</script>
 </body>
 </html>

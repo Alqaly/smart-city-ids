@@ -884,7 +884,11 @@ END OF REPORT
         print(report)
         
         # Save report to file
-        report_path = f"/home/aka/smart-city-ids/docs/reports/STABILITY_TEST_REPORT_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        import pathlib
+        project_root = pathlib.Path(__file__).resolve().parent.parent.parent
+        reports_dir = project_root / "docs" / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        report_path = reports_dir / f"STABILITY_TEST_REPORT_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
         with open(report_path, 'w') as f:
             f.write(report)
         

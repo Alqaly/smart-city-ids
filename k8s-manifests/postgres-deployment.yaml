@@ -1,4 +1,39 @@
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-pv
+  labels:
+    app: postgres
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-path
+  hostPath:
+    path: /var/lib/smart-city/postgres-data
+    type: DirectoryOrCreate
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: smart-city
+  labels:
+    app: postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: local-path
+  volumeName: postgres-pv
+
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: postgres-credentials
@@ -227,10 +262,8 @@ spec:
           mountPath: /docker-entrypoint-initdb.d
       volumes:
       - name: postgres-data
-        emptyDir: {}  # ⚠️ WARNING: Using emptyDir loses data on pod restart
-                      # For production, use:
-                      # persistentVolumeClaim:
-                      #   claimName: postgres-pvc
+        persistentVolumeClaim:
+          claimName: postgres-pvc
       - name: postgres-migrations
         configMap:
           name: postgres-migrations

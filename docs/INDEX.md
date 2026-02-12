@@ -1,6 +1,6 @@
 # Smart City IDS - Documentation Index & Overview
 
-**Last Updated:** January 2025  
+**Last Updated:** February 2026  
 **Status:** Production Ready  
 **Version:** 1.0
 
@@ -64,6 +64,13 @@ The Smart City IDS project now has comprehensive, professional documentation org
 | Doc | Purpose |
 |-----|---------|
 | **[DEMO_READINESS_REPORT.md](DEMO_READINESS_REPORT.md)** | System readiness status |
+
+### 📦 Archive & Legacy
+
+| Doc | Purpose |
+|-----|---------|
+| **[ARCHIVE_INDEX.md](ARCHIVE_INDEX.md)** | Inventory of archived docs and reports |
+| **[_archive/](./_archive/)** | Historical reports, drafts, and legacy checklists |
 
 ---
 
@@ -212,6 +219,12 @@ The Smart City IDS project now has comprehensive, professional documentation org
 - **Contains:** Deployment success, test results, metrics
 - **Read When:** Need proof system is operational
 - **Size:** ~2,000 words
+
+### 📄 ARCHIVE_INDEX.md
+- **Purpose:** Guide to legacy docs and historical reports
+- **Contains:** Archive map, report index, relevance notes
+- **Read When:** You need historical evidence or previous drafts
+- **Size:** ~500 words
 
 ---
 
@@ -446,5 +459,5 @@ The documentation is comprehensive, organized by purpose, and suitable for immed
 ---
 
 **Documentation Status:** ✅ Complete and Ready for Publication  
-**Last Updated:** January 2025  
+**Last Updated:** February 2026  
 **Reviewed By:** Smart City IDS Documentation Team

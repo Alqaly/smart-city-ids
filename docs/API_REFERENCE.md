@@ -48,6 +48,16 @@ The Smart City IDS API provides a RESTful interface for:
 
 All API endpoints (except `/health` and `/metrics`) require authentication.
 
+### Enforced on Operator/Governance/LLM Endpoints
+
+As of February 11, 2026, these routes are explicitly protected with bearer-token dependencies:
+
+- `/api/operator/*`
+- `/api/governance/*`
+- `/api/llm/status`
+
+Calls without `Authorization: Bearer <access_token>` now return `401/403`.
+
 ### Login
 
 ```http

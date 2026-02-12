@@ -409,7 +409,7 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "avg_over_time(iot_device_active[15m])",
+          "expr": "max(smartcity_ids_iot_devices_active) or on() vector(0)",
           "legendFormat": "Devices",
           "refId": "A"
         }
@@ -934,7 +934,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Circuit breaker: 0=CLOSED (healthy), 1=HALF_OPEN, 2=OPEN (failing)",
+      "description": "Circuit breaker: 0=HEALTHY, 1=TESTING, 2=FAILING, 3=UNCONFIGURED",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -970,6 +970,16 @@
                 }
               },
               "type": "value"
+            },
+            {
+              "options": {
+                "3": {
+                  "color": "gray",
+                  "index": 3,
+                  "text": "UNCONFIGURED"
+                }
+              },
+              "type": "value"
             }
           ],
           "thresholds": {
@@ -986,6 +996,10 @@
               {
                 "color": "red",
                 "value": 2
+              },
+              {
+                "color": "gray",
+                "value": 3
               }
             ]
           }
@@ -1019,7 +1033,7 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "smartcity_ids_circuit_breaker_state{engine=\"xai-grok-4\"}",
+          "expr": "smartcity_ids_circuit_breaker_state{engine=\"xai\"}",
           "legendFormat": "xAI",
           "refId": "A"
         }
@@ -1032,7 +1046,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Circuit breaker: 0=CLOSED (healthy), 1=HALF_OPEN, 2=OPEN (failing)",
+      "description": "Circuit breaker: 0=HEALTHY, 1=TESTING, 2=FAILING, 3=UNCONFIGURED",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1068,6 +1082,16 @@
                 }
               },
               "type": "value"
+            },
+            {
+              "options": {
+                "3": {
+                  "color": "gray",
+                  "index": 3,
+                  "text": "UNCONFIGURED"
+                }
+              },
+              "type": "value"
             }
           ],
           "thresholds": {
@@ -1084,6 +1108,10 @@
               {
                 "color": "red",
                 "value": 2
+              },
+              {
+                "color": "gray",
+                "value": 3
               }
             ]
           }
@@ -2354,7 +2382,7 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "avg_over_time(iot_device_active[15m])",
+          "expr": "max(smartcity_ids_iot_devices_active) or on() vector(0)",
           "legendFormat": "Active",
           "refId": "A"
         }

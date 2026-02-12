@@ -15,25 +15,26 @@
 #        Default: 30 seconds per attack
 # =============================================================================
 
-set -e
+set -euo pipefail
 
 # Configuration
 DEMO_DURATION=${1:-30}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 ATTACK_SCRIPT="${PROJECT_ROOT}/attack-simulator/phase4-smart-city-attacks.py"
+source "${PROJECT_ROOT}/scripts/lib/script-utils.sh"
+ensure_kubeconfig
 
 # Get node IP
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
-GRAFANA_URL="http://${NODE_IP}:30300"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+NODE_IP=$(echo "$NODE_IP" | tr ' ' '\n' | head -1)
+GRAFANA_PORT=$(get_service_nodeport "grafana" "monitoring" "30300")
+PROMETHEUS_PORT=$(get_service_nodeport "prometheus" "monitoring" "31701")
+GRAFANA_URL="http://${NODE_IP}:${GRAFANA_PORT}"
+AUTO_CONFIRM=0
+if [[ ! -t 0 ]] || [[ "${AUTO_CONFIRM:-0}" == "1" ]]; then
+    AUTO_CONFIRM=1
+fi
 
 echo -e "${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║   PHASE 4: Smart City IDS - Full Attack & Detection Demo       ║${NC}"
@@ -71,8 +72,21 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-if ! kubectl cluster-info &> /dev/null; then
+cluster_ok=0
+for _ in 1 2 3 4 5; do
+    if kubectl cluster-info >/dev/null 2>&1; then
+        cluster_ok=1
+        break
+    fi
+    sleep 2
+done
+if [[ $cluster_ok -eq 0 ]]; then
     echo "❌ K3s cluster not responding"
+    exit 1
+fi
+
+if ! kubectl get deploy/ids-api -n smart-city &>/dev/null; then
+    echo "❌ ids-api deployment not found in smart-city namespace"
     exit 1
 fi
 
@@ -106,7 +120,11 @@ echo "   • LLM Performance - Analysis latency"
 echo "   • IoT Load - Device metrics"
 echo ""
 
-read -p "Press ENTER when Grafana is open, or Ctrl+C to cancel..."
+if [[ $AUTO_CONFIRM -eq 0 ]]; then
+    read -p "Press ENTER when Grafana is open, or Ctrl+C to cancel..."
+else
+    echo "Auto-confirm enabled (non-interactive mode)"
+fi
 echo ""
 
 # Phase 3: Attack sequence
@@ -115,7 +133,7 @@ echo ""
 
 # Capture before metrics
 BEFORE_ALERTS=$(kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-    | grep "smartcity_ids_alerts_received_total{" | awk -F'} ' '{sum+=$2} END {print sum+0}')
+    | awk '/^smartcity_ids_alerts_received_total\{/ {sum+=$NF} END {print sum+0}')
 
 # Record start time
 START_TIME=$(date +%s)
@@ -210,7 +228,7 @@ TOTAL_TIME=$((END_TIME - START_TIME))
 # Capture after metrics
 sleep 5  # Wait for pipeline
 AFTER_ALERTS=$(kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-    | grep "smartcity_ids_alerts_received_total{" | awk -F'} ' '{sum+=$2} END {print sum+0}')
+    | awk '/^smartcity_ids_alerts_received_total\{/ {sum+=$NF} END {print sum+0}')
 DELTA_ALERTS=$((AFTER_ALERTS - BEFORE_ALERTS))
 
 # Summary
@@ -239,7 +257,7 @@ echo ""
 
 echo "📈 Check Now:"
 echo "   Grafana:     $GRAFANA_URL"
-echo "   Prometheus:  http://${NODE_IP}:31701"
+echo "   Prometheus:  http://${NODE_IP}:${PROMETHEUS_PORT}"
 echo ""
 
 echo "📝 View Logs:"

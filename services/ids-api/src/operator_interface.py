@@ -181,6 +181,8 @@ class OperatorInterfaceService:
     
     def _humanize_alert(self, rule: str, output: str, container: Optional[str] = None, process: Optional[str] = None) -> str:
         """Convert technical alert into plain English"""
+        output_lower = output.lower() if output else ""
+        
         # Extract the meaningful part of the output
         if "Falco" in rule or "falco" in rule.lower():
             # Falco alert - extract key details
@@ -434,15 +436,136 @@ class OperatorInterfaceService:
         
         avg_time = sum(i.analysis_duration_ms for i in incidents) // len(incidents)
         avg_confidence = sum(i.reasoning.confidence_score for i in incidents) / len(incidents)
-        
+
+        # Pull governance outcomes for real approval/rejection metrics.
+        approved = 0
+        rejected = 0
+        auto_executed = 0
+        try:
+            from governance import governance
+            history = governance.get_action_history(limit=1000)
+            approved = sum(1 for h in history if h.get("status") == "approved")
+            rejected = sum(1 for h in history if h.get("status") == "rejected")
+            auto_executed = sum(1 for h in history if h.get("status") == "auto_executed")
+        except Exception as e:
+            logger.debug(f"Governance metrics unavailable: {e}")
+
+        terminal_human_decisions = approved + rejected
+        approval_rate = (approved / terminal_human_decisions) if terminal_human_decisions else 0.0
+        rejection_rate = (rejected / terminal_human_decisions) if terminal_human_decisions else 0.0
+        denominator = approved + rejected + auto_executed
+        override_rate = (rejected / denominator) if denominator else 0.0
+
+        now_ts = datetime.now().timestamp()
+        current_window = sum(1 for i in incidents if (now_ts - i.timestamp.timestamp()) <= 86400)
+        previous_window = sum(
+            1 for i in incidents
+            if 86400 < (now_ts - i.timestamp.timestamp()) <= 172800
+        )
+        if current_window > previous_window:
+            trend = "increasing"
+        elif current_window < previous_window:
+            trend = "decreasing"
+        else:
+            trend = "stable"
+
         return OperatorMetrics(
             avg_analysis_time_ms=avg_time,
             avg_confidence_score=avg_confidence,
-            approval_rate=0.8,  # Placeholder - would come from approval metrics
-            rejection_rate=0.05,  # Placeholder
-            override_rate=0.02,  # Placeholder
-            incident_volume_trend="stable"  # Placeholder
+            approval_rate=approval_rate,
+            rejection_rate=rejection_rate,
+            override_rate=override_rate,
+            incident_volume_trend=trend
         )
+
+    def get_full_dashboard_data(self) -> Dict:
+        """Get comprehensive dashboard data for operator UI."""
+        dashboard = self.get_dashboard()
+        metrics = self.get_metrics()
+        
+        # Build severity distribution
+        severity_dist = {}
+        for incident in self.incident_cache.values():
+            sev = incident.severity
+            severity_dist[sev] = severity_dist.get(sev, 0) + 1
+        
+        # Build threat type distribution
+        threat_dist = {}
+        for incident in self.incident_cache.values():
+            threat = incident.reasoning.threat_type if incident.reasoning else "Unknown"
+            threat_dist[threat] = threat_dist.get(threat, 0) + 1
+        
+        # Recent timeline
+        recent_timeline = []
+        for incident in list(self.incident_cache.values())[-20:]:
+            recent_timeline.append({
+                "id": incident.incident_id,
+                "timestamp": incident.timestamp.isoformat(),
+                "severity": incident.severity,
+                "summary": incident.incident_summary[:100],
+                "requires_approval": incident.automation_governance.requires_approval
+            })
+        
+        return {
+            "summary": {
+                "total_incidents": dashboard.total_incidents,
+                "critical_incidents": dashboard.critical_incidents,
+                "pending_approval": dashboard.pending_approval,
+                "avg_analysis_time_ms": metrics.avg_analysis_time_ms,
+                "avg_confidence": round(metrics.avg_confidence_score, 2)
+            },
+            "severity_distribution": severity_dist,
+            "threat_distribution": threat_dist,
+            "recent_timeline": recent_timeline,
+            "incidents": [
+                {
+                    "id": i.incident_id,
+                    "timestamp": i.timestamp.isoformat(),
+                    "severity": i.severity,
+                    "summary": i.incident_summary,
+                    "threat_type": i.reasoning.threat_type if i.reasoning else "Unknown",
+                    "confidence": i.reasoning.confidence_score if i.reasoning else 0,
+                    "requires_approval": i.automation_governance.requires_approval,
+                    "llm_model": i.llm_model_used,
+                    "business_impact": i.business_impact
+                }
+                for i in dashboard.incidents[:50]
+            ]
+        }
+
+    def search_incidents(self, query: str = None, severity_min: int = None, 
+                        severity_max: int = None, threat_type: str = None,
+                        limit: int = 50) -> List[Dict]:
+        """Search and filter incidents."""
+        results = []
+        
+        for incident in self.incident_cache.values():
+            # Apply filters
+            if severity_min and incident.severity < severity_min:
+                continue
+            if severity_max and incident.severity > severity_max:
+                continue
+            if threat_type and incident.reasoning.threat_type != threat_type:
+                continue
+            if query:
+                query_lower = query.lower()
+                if query_lower not in incident.incident_summary.lower() and \
+                   query_lower not in (incident.reasoning.threat_type or "").lower():
+                    continue
+            
+            results.append({
+                "id": incident.incident_id,
+                "timestamp": incident.timestamp.isoformat(),
+                "severity": incident.severity,
+                "summary": incident.incident_summary,
+                "threat_type": incident.reasoning.threat_type if incident.reasoning else "Unknown",
+                "confidence": incident.reasoning.confidence_score if incident.reasoning else 0,
+                "requires_approval": incident.automation_governance.requires_approval
+            })
+        
+        # Sort by timestamp descending
+        results.sort(key=lambda x: x["timestamp"], reverse=True)
+        return results[:limit]
 
 
 # Global instance

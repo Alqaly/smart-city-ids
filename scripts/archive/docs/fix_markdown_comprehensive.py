@@ -115,7 +115,7 @@ def fix_markdown_file(file_path):
 
 def main():
     """Fix all markdown files in docs/"""
-    docs_dir = Path('/home/aka/smart-city-ids/docs')
+    docs_dir = Path('/home/kali/smart-city-ids/docs')
     fixed_files = []
     
     for md_file in sorted(docs_dir.glob('*.md')):

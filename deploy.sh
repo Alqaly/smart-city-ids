@@ -266,12 +266,15 @@ deploy_manifests() {
     log_info "Creating namespaces..."
     kubectl apply -f k8s-manifests/namespace.yaml
     
-    # Create secrets for API keys
+    # Create secrets for API keys (match ids-api deployment key names)
     log_info "Creating secrets..."
-    kubectl create secret generic ids-api-secrets \
+    kubectl create secret generic ids-secrets \
         --namespace=$NAMESPACE_SMART_CITY \
-        --from-literal=XAI_API_KEY="${XAI_API_KEY:-}" \
-        --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY:-}" \
+        --from-literal=xai-api-key="${XAI_API_KEY:-}" \
+        --from-literal=openai-api-key="${OPENAI_API_KEY:-}" \
+        --from-literal=anthropic-api-key="${ANTHROPIC_API_KEY:-}" \
+        --from-literal=gemini-api-key="${GEMINI_API_KEY:-}" \
+        --from-literal=kimi-api-key="${KIMI_API_KEY:-}" \
         --dry-run=client -o yaml | kubectl apply -f -
     
     # Deploy PostgreSQL (if using database)
@@ -311,11 +314,12 @@ deploy_manifests() {
     kubectl create configmap ids-app-code \
         --namespace=$NAMESPACE_SMART_CITY \
         --from-file=services/ids-api/src \
-        --dry-run=client -o yaml | kubectl apply -f -
+        --from-file=llm_providers=services/ids-api/src/llm_providers \
+        --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
     kubectl create configmap ids-app-static \
         --namespace=$NAMESPACE_SMART_CITY \
         --from-file=services/ids-api/static \
-        --dry-run=client -o yaml | kubectl apply -f -
+        --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f -
     
     # Deploy smart city services
     log_info "Deploying smart city services..."
@@ -334,7 +338,7 @@ deploy_manifests() {
         log_info "Deploying Suricata forwarder (monitoring namespace)..."
         kubectl apply -f k8s-manifests/suricata-forwarder-deployment.yaml
     fi
-    
+
     # Deploy MQTT broker
     if [[ -f "k8s-manifests/mqtt-broker.yaml" ]]; then
         log_info "Deploying MQTT broker..."

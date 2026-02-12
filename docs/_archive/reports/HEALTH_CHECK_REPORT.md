@@ -207,7 +207,7 @@ scripts/
 ### Quick Health Check Command
 
 ```bash
-cd /home/aka/smart-city-ids
+cd /home/kali/smart-city-ids
 
 source venv/bin/activate
 kubectl cluster-info

@@ -79,20 +79,22 @@ spec:
           httpGet:
             path: /health
             port: 8000
-          failureThreshold: 60  # 10 minutes total
-          periodSeconds: 10
+          failureThreshold: 30
+          periodSeconds: 5
         livenessProbe:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 120
+          initialDelaySeconds: 15
           periodSeconds: 30
+          timeoutSeconds: 3
         readinessProbe:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 120
+          initialDelaySeconds: 10
           periodSeconds: 10
+          timeoutSeconds: 3
       volumes:
       - name: app-code
         configMap:
@@ -100,3 +102,55 @@ spec:
       - name: app-static
         configMap:
           name: ids-app-static
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ids-api-pdb
+  namespace: smart-city
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ids-api
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ids-api-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ids-api
+  minReplicas: 2
+  maxReplicas: 8
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 25
+        periodSeconds: 60
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 65
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

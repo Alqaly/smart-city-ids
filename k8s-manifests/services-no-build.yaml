@@ -74,6 +74,42 @@ spec:
   type: ClusterIP
 
 ---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: traffic-camera-pdb
+  namespace: smart-city
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: traffic-camera
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: traffic-camera-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: traffic-camera
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
 # Healthcare API Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -148,6 +184,42 @@ spec:
   type: ClusterIP
 
 ---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: healthcare-api-pdb
+  namespace: smart-city
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: healthcare-api
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: healthcare-api-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: healthcare-api
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
 # Parking System Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -220,3 +292,39 @@ spec:
     targetPort: 5002
     protocol: TCP
   type: ClusterIP
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: parking-system-pdb
+  namespace: smart-city
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: parking-system
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: parking-system-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: parking-system
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

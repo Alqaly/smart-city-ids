@@ -4,6 +4,37 @@ This directory contains shell scripts for deploying, managing, and testing the S
 
 ---
 
+## Use These 4 Scripts (Canonical)
+
+You have many scripts. For demo day, use this minimal set only:
+
+1. `scripts/demo-day.sh --profile minimal --runs 1`
+2. `scripts/one-command-ready.sh`
+3. `scripts/check-system.sh`
+4. `scripts/cleanup.sh` (after demo if needed)
+
+This avoids confusion and keeps the flow predictable.
+
+---
+
+## One-Command Run
+
+For demo/meeting use (full consolidated flow):
+
+```bash
+bash scripts/demo-day.sh --profile minimal --runs 1
+```
+
+For quick bootstrap only:
+
+```bash
+bash scripts/one-command-ready.sh
+```
+
+`one-command-ready.sh` now starts/validates local port-forwards directly.
+
+---
+
 ## Production Deployment Scripts
 
 ### 🚀 **deploy.sh** (Main Entry Point)

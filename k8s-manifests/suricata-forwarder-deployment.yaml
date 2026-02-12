@@ -38,7 +38,7 @@ spec:
         - /bin/bash
         - -c
         - |
-          pip install --user fastapi uvicorn httpx pydantic &&
+          pip install --user fastapi uvicorn httpx pydantic prometheus_client &&
           ~/.local/bin/uvicorn main:app --host 0.0.0.0 --port 8100
         ports:
         - name: http-health
@@ -122,6 +122,42 @@ spec:
     targetPort: 8100
     protocol: TCP
   type: ClusterIP
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: suricata-forwarder-pdb
+  namespace: monitoring
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: suricata-forwarder
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: suricata-forwarder-hpa
+  namespace: monitoring
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: suricata-forwarder
+  minReplicas: 1
+  maxReplicas: 4
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -135,20 +171,26 @@ data:
     Suricata Eve JSON → IDS API Alert Forwarder
     Converts Suricata network IDS alerts to IDS API format.
     Listens on UDP:514, parses Eve JSON, and forwards to IDS API /api/alerts endpoint.
+    
+    Includes duplicate-alert suppression (hash-based dedup with TTL) to prevent
+    alert floods from causing repeated LLM calls on the IDS API side.
     """
     
     import json
+    import hashlib
     import logging
     import socket
     import sys
     import os
+    import time
     from datetime import datetime
     from typing import Optional, Dict, Any
     
     import httpx
     import uvicorn
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Response
     from pydantic import BaseModel, Field
+    from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST, REGISTRY
     
     # Configuration
     IDS_API_URL = os.getenv("IDS_API_URL", "http://ids-api:8000/api/alerts")
@@ -156,6 +198,7 @@ data:
     LISTEN_PORT = 514
     LISTEN_HOST = "0.0.0.0"
     SYSLOG_BUFFER = 4096
+    DEDUP_TTL_SECONDS = int(os.getenv("DEDUP_TTL_SECONDS", "120"))
     
     # Logging
     logging.basicConfig(
@@ -163,6 +206,39 @@ data:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     logger = logging.getLogger(__name__)
+    
+    # Prometheus Metrics
+    suricata_forwarder_up = Gauge('suricata_forwarder_up', 'Suricata forwarder is up')
+    suricata_forwarder_up.set(1)
+    suricata_alerts_forwarded_total = Counter('suricata_forwarder_alerts_forwarded_total', 'Total alerts forwarded')
+    suricata_alerts_errors_total = Counter('suricata_forwarder_alerts_errors_total', 'Total errors')
+    suricata_alerts_deduped_total = Counter('suricata_forwarder_alerts_deduped_total', 'Total duplicate alerts suppressed')
+    
+    # ---- Duplicate alert suppression ----
+    recent_alert_hashes: Dict[str, float] = {}
+    
+    def is_duplicate_alert(alert_dict: Dict[str, Any]) -> bool:
+        """Hash-based dedup: suppress identical alerts within DEDUP_TTL_SECONDS."""
+        now = time.time()
+        # Expire old entries
+        for key, ts in list(recent_alert_hashes.items()):
+            if now - ts > DEDUP_TTL_SECONDS:
+                del recent_alert_hashes[key]
+    
+        output_fields = alert_dict.get("output_fields", {}) or {}
+        composite = "|".join([
+            str(alert_dict.get("rule", "")),
+            str(alert_dict.get("time", "")),
+            str(output_fields.get("src_ip", "")),
+            str(output_fields.get("dest_ip", "")),
+            str(output_fields.get("proto", "")),
+            str(alert_dict.get("output", ""))[:120],
+        ])
+        digest = hashlib.md5(composite.encode("utf-8", errors="ignore")).hexdigest()
+        if digest in recent_alert_hashes:
+            return True
+        recent_alert_hashes[digest] = now
+        return False
     
     # Data Models
     class IDSAlert(BaseModel):
@@ -173,16 +249,23 @@ data:
         output_fields: Dict[str, str] = Field(default_factory=dict)
     
     # FastAPI
-    app = FastAPI(title="Suricata Forwarder", version="1.0.0")
+    app = FastAPI(title="Suricata Forwarder", version="1.1.0")
     alerts_forwarded = 0
+    alerts_deduped = 0
     
     @app.get("/health")
     async def health():
-        return {"status": "healthy", "service": "suricata-forwarder", "alerts": alerts_forwarded}
+        return {
+            "status": "healthy",
+            "service": "suricata-forwarder",
+            "alerts_forwarded": alerts_forwarded,
+            "alerts_deduped": alerts_deduped,
+            "dedup_cache_size": len(recent_alert_hashes),
+        }
     
     @app.get("/metrics")
     async def metrics():
-        return {"suricata_alerts_forwarded": alerts_forwarded}
+        return Response(content=generate_latest(REGISTRY), media_type=CONTENT_TYPE_LATEST)
     
     # Conversion
     def priority_to_syslog(eve_priority: Optional[int]) -> str:
@@ -226,25 +309,39 @@ data:
             return None
     
     async def forward_to_ids_api(alert: IDSAlert) -> bool:
+        global alerts_forwarded, alerts_deduped
+    
+        # Dedup check before forwarding
+        alert_dict = alert.dict()
+        if is_duplicate_alert(alert_dict):
+            alerts_deduped += 1
+            suricata_alerts_deduped_total.inc()
+            logger.debug(f"Duplicate suppressed: {alert.rule}")
+            return True  # silently succeed
+    
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
                     IDS_API_URL,
-                    json=alert.dict(),
+                    json=alert_dict,
                     headers={"Authorization": f"Bearer {IDS_API_TOKEN}", "Content-Type": "application/json"}
                 )
                 if response.status_code == 200:
+                    alerts_forwarded += 1
+                    suricata_alerts_forwarded_total.inc()
                     logger.info(f"✅ Forwarded: {alert.rule}")
                     return True
                 else:
+                    suricata_alerts_errors_total.inc()
                     logger.error(f"❌ IDS API error {response.status_code}")
                     return False
         except Exception as e:
+            suricata_alerts_errors_total.inc()
             logger.error(f"Forward error: {e}")
             return False
     
     async def udp_listener():
-        logger.info(f"📡 Listening on {LISTEN_HOST}:{LISTEN_PORT}/UDP")
+        logger.info(f"📡 Listening on {LISTEN_HOST}:{LISTEN_PORT}/UDP (dedup TTL={DEDUP_TTL_SECONDS}s)")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((LISTEN_HOST, LISTEN_PORT))

@@ -75,7 +75,7 @@ def fix_file(file_path):
     return False
 
 def main():
-    docs_dir = Path('/home/aka/smart-city-ids/docs')
+    docs_dir = Path('/home/kali/smart-city-ids/docs')
     fixed = []
     
     for md_file in sorted(docs_dir.glob('*.md')):

@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+data:
+  alerts.yaml: |
+    groups:
+      - name: smartcity-ids-alerts
+        rules:
+          # ============================================
+          # LLM Engine Health Alerts
+          # ============================================
+          - alert: LLMAllEnginesFailing
+            expr: |
+              sum(smartcity_ids_circuit_breaker_state == 2) >= 3
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Multiple LLM engines offline (circuit open)"
+              description: "{{ $value }} LLM engines have open circuit breakers. Alert analysis may be blocked."
+              runbook: "Check LLM API keys and connectivity. Restart IDS API pod if needed."
+
+          - alert: LLMHighFailoverRate
+            expr: |
+              rate(smartcity_ids_llm_failover_total[5m]) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High LLM failover rate detected"
+              description: "LLM engine failovers happening at {{ $value | humanize }}/sec. Primary engine may be degraded."
+
+          # ============================================
+          # Alert Processing Health
+          # ============================================
+          - alert: HighAlertErrorRate
+            expr: |
+              (
+                sum(rate(smartcity_ids_alerts_processed_total{result="error"}[5m]))
+                / sum(rate(smartcity_ids_alerts_processed_total[5m]))
+              ) > 0.5
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Alert processing error rate > 50%"
+              description: "{{ $value | humanizePercentage }} of alerts are failing to process. Check LLM connectivity."
+
+          - alert: AlertQueueBacklog
+            expr: smartcity_ids_request_queue_size > 50
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Alert queue backing up"
+              description: "Request queue at {{ $value }} items. Processing may not keep up with arrival rate."
+
+          - alert: NoAlertsAnalyzed
+            expr: |
+              (
+                sum(smartcity_ids_severity_total) - sum(smartcity_ids_severity_total{severity="0"})
+              ) / sum(smartcity_ids_severity_total) < 0.1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Less than 10% of alerts analyzed"
+              description: "Most alerts have severity=0 (unanalyzed). LLM pipeline may be broken."
+
+          # ============================================
+          # Component Health Alerts
+          # ============================================
+          - alert: IDSApiDown
+            expr: up{job="ids-api"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "IDS API is down"
+              description: "IDS API service is not responding. Alert processing is stopped."
+
+          - alert: SuricataForwarderDisconnected
+            expr: suricata_forwarder_ids_api_connected == 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Suricata forwarder cannot reach IDS API"
+              description: "Suricata forwarder is running but cannot connect to IDS API. Alerts may be queued or dropped."
+
+          # ============================================
+          # Rate Limiting & Protection Alerts
+          # ============================================
+          - alert: HighRateLimitRejections
+            expr: |
+              rate(smartcity_ids_rate_limit_requests_total{result="rejected"}[5m]) > 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High rate limit rejection rate"
+              description: "{{ $value | humanize }}/sec requests being rejected. Consider increasing rate limits."
+
+          - alert: ProtectedServiceAttack
+            expr: |
+              increase(smartcity_ids_protected_service_hits_total[5m]) > 10
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Multiple attempts to isolate protected services"
+              description: "{{ $value }} attempts to isolate protected services in last 5 minutes. Possible attack."
+
+          # ============================================
+          # Data Quality Alerts  
+          # ============================================
+          - alert: HighFalsePositiveRate
+            expr: |
+              rate(smartcity_ids_false_positives_filtered_total[1h]) > 100
+            for: 30m
+            labels:
+              severity: info
+            annotations:
+              summary: "High false positive filtering rate"
+              description: "{{ $value | humanize }}/hour alerts being filtered. Review false positive rules."
+
+          - alert: LowDeduplicationEfficiency
+            expr: smartcity_ids_dedup_hit_rate_percent < 20
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Low alert deduplication hit rate"
+              description: "Dedup cache hit rate at {{ $value }}%. Many unique alerts or cache too small."

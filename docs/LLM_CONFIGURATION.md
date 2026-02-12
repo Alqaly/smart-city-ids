@@ -135,8 +135,19 @@ kubectl logs -n smart-city -l app=ids-api --tail=20 | grep -i "llm\|engine"
 Or check the health endpoint:
 
 ```bash
-curl -s http://localhost:8000/health | jq '.llm_engines'
-# Expected: ["gemini"] or ["xai", "anthropic", "openai", "gemini"]
+curl -s http://localhost:8000/health | jq '.components.llm_providers'
+# Expected: provider connectivity + circuit breaker state
+```
+
+Or inspect detailed manager status:
+
+```bash
+curl -s http://localhost:8000/api/llm/status | jq
+# Includes:
+# - provider_count
+# - providers (in failover order)
+# - priority_order (from LLM_PRIORITY)
+# - per-provider runtime stats (attempts/successes/failures/last_error)
 ```
 
 ---
@@ -200,3 +211,205 @@ Invalid API key. Verify:
 2. **Enable caching** - duplicate alerts reuse cached analysis
 3. **Set appropriate timeout** - don't wait too long for slow APIs
 4. **Monitor usage** in provider dashboards
+
+---
+
+## How the Unified LLM Manager Works
+
+The system uses a **unified approach** that works identically whether you have 1 engine or 10.
+No special cases. No "single engine mode". Just one code path.
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────┐
+│                  LLMEngineManager                      │
+├────────────────────────────────────────────────────────┤
+│  Alert → Manager → Try first available engine          │
+│                       │                                │
+│                   Success?                             │
+│                    /     \                             │
+│                  Yes      No                           │
+│                   │        │                           │
+│               Return    Try next engine (if any)       │
+│                            │                           │
+│                        (repeat)                        │
+└────────────────────────────────────────────────────────┘
+
+Works the same for:
+- 1 engine (just try it)
+- 2 engines (try first, failover to second)
+- N engines (try in priority order)
+```
+
+### Example Configurations
+
+**1 Engine:**
+```bash
+export KIMI_API_KEY="sk-..."
+# Just works. No special mode needed.
+```
+
+**3 Engines:**
+```bash
+export XAI_API_KEY="xai-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+export GEMINI_API_KEY="AIza..."
+export LLM_PRIORITY="xai,anthropic,gemini"
+# Tries xai first, then anthropic, then gemini
+```
+
+### Startup Logs
+
+```
+🔧 LLM Manager: 1 provider(s) available
+   ✅ kimi (moonshot-v1-128k)
+✅ IDS API ready with 1 LLM provider(s)
+```
+
+Or with multiple:
+
+```
+🔧 LLM Manager: 3 provider(s) available
+   ✅ xai (grok-4-latest)
+   ✅ anthropic (claude-3-5-sonnet-20241022)
+   ✅ gemini (gemini-2.0-flash)
+✅ IDS API ready with 3 LLM provider(s)
+```
+
+---
+
+## Check Current LLM Status
+
+Use the `/api/llm/status` endpoint:
+
+```bash
+curl http://localhost:8000/api/llm/status | jq
+```
+
+**Response:**
+```json
+{
+  "provider_count": 1,
+  "providers": ["kimi"],
+  "priority_order": ["kimi"],
+  "details": {
+    "kimi": {
+      "model": "moonshot-v1-128k",
+      "attempts": 12,
+      "successes": 12,
+      "failures": 0,
+      "last_latency_ms": 420,
+      "last_error": null,
+      "last_success_at": 1739280000
+    }
+  }
+}
+```
+
+---
+
+## How LLM Providers Work Internally
+
+### 1. Provider Initialization (`main.py`)
+
+```python
+from llm_providers.manager import LLMManager
+llm_manager = LLMManager()  # auto-discovers providers by API key presence
+```
+
+### 2. Alert Analysis Flow
+
+```python
+# Single entry point - works for 1 or N providers
+result = await llm_manager.analyze(alert_dict)
+
+# Result includes which provider succeeded
+provider_used = result.get("provider")
+analysis = result.get("analysis")
+```
+
+---
+
+## Adding a New LLM Provider
+
+1. **Create engine class** in `llm_manager.py`:
+
+```python
+import httpx
+from config import Config
+
+class NewProviderEngine:
+    def __init__(self, api_key: str = None, model: str = None):
+        self.api_key = api_key or Config.NEWPROVIDER_API_KEY
+        self.model = model or Config.NEWPROVIDER_MODEL
+        self.base_url = "https://api.newprovider.com/v1"
+    
+    def analyze(self, alert: dict) -> dict:
+        # Implement API call
+        ...
+```
+
+2. **Add config** in `config.py`:
+
+```python
+NEWPROVIDER_API_KEY = os.getenv("NEWPROVIDER_API_KEY")
+NEWPROVIDER_MODEL = os.getenv("NEWPROVIDER_MODEL", "default-model")
+```
+
+3. **Register engine** in `main.py`:
+
+```python
+from llm_engine_newprovider import NewProviderEngine
+
+if Config.NEWPROVIDER_API_KEY:
+    llm_engines['newprovider'] = NewProviderEngine()
+```
+
+4. **Update priority** in config:
+
+```python
+LLM_PRIORITY = ['xai', 'anthropic', 'openai', 'gemini', 'kimi', 'newprovider']
+```
+
+---
+
+## Common Patterns
+
+### Use Specific Engine
+
+```python
+# Force use of specific engine (bypasses failover)
+engine = llm_engines.get('gemini')
+if engine:
+    result = engine.analyze(alert)
+```
+
+### Check Engine Health
+
+```bash
+# API endpoint
+curl http://localhost:8000/api/llm/status | jq '.circuit_breaker_summary'
+
+# Or check circuit breaker directly
+curl http://localhost:8000/api/circuit-breaker/status | jq
+```
+
+### Reset Failing Engine
+
+```bash
+# Reset specific engine's circuit breaker
+curl -X POST http://localhost:8000/api/circuit-breaker/reset/gemini
+```
+
+---
+
+## Performance Tuning
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `LLM_TIMEOUT` | 30s | Max wait for API response |
+| `LLM_TEMPERATURE` | 0.3 | Lower = more consistent analysis |
+| `LLM_MAX_TOKENS` | 1000 | Max response length |
+| `CIRCUIT_FAILURE_THRESHOLD` | 5 | Failures before opening circuit |
+| `CIRCUIT_RECOVERY_TIMEOUT` | 30s | Wait before retry after failure |

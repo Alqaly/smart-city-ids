@@ -7,12 +7,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")}" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
 init_script "$0" "Interactive Demo Walkthrough"
 
-export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+ensure_kubeconfig
+ensure_commands kubectl
+kubectl cluster-info >/dev/null 2>&1 || die "Kubernetes cluster is not reachable"
+kubectl get namespace smart-city >/dev/null 2>&1 || die "Namespace smart-city not found"
 
 AUTO_MODE=0
 PAUSE_SECONDS=5

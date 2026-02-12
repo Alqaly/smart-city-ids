@@ -253,8 +253,11 @@ The IDS API is the authoritative source of IDS metrics. Prometheus scrapes
 |---------|------|----------|----------|
 | ids-api | NodePort | 8000 | 30800 |
 | grafana | NodePort | 3000 | 30300 |
-| prometheus | NodePort | 9090 | 31701 |
+| prometheus | NodePort | 9090 | dynamic* |
 | postgres | ClusterIP | 5432 | - |
+
+> *Prometheus NodePort is dynamically assigned by K8s. Find it with:
+> `kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}'`
 
 ---
 

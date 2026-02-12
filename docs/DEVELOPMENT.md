@@ -620,5 +620,5 @@ Closes #123
 
 ---
 
-**Last Updated:** January 2025  
+**Last Updated:** February 2026  
 **Maintained By:** Smart City IDS Team

@@ -21,20 +21,37 @@ log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 log_error() { echo -e "${RED}[✗]${NC} $1"; }
 log_section() { echo ""; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${BLUE}$1${NC}"; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
 
+INVOKING_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
+INVOKING_HOME="$(getent passwd "$INVOKING_USER" | cut -d: -f6)"
+if [[ -z "$INVOKING_HOME" ]]; then
+    INVOKING_HOME="/home/$INVOKING_USER"
+fi
+USER_KUBECONFIG="${INVOKING_HOME}/.kube/config"
+
 # =============================================================================
 # KUBECONFIG Setup (Permanent)
 # =============================================================================
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+export KUBECONFIG="${USER_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 # Make KUBECONFIG permanent in user's profile
 setup_kubeconfig_permanent() {
-    for profile in ~/.bashrc ~/.zshrc ~/.profile; do
+    for profile in "$INVOKING_HOME/.bashrc" "$INVOKING_HOME/.zshrc" "$INVOKING_HOME/.profile"; do
         if [ -f "$profile" ]; then
-            if ! grep -q "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" "$profile"; then
-                echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> "$profile"
+            sed -i '/export KUBECONFIG=\/etc\/rancher\/k3s\/k3s.yaml/d' "$profile" || true
+            if ! grep -q "export KUBECONFIG=$USER_KUBECONFIG" "$profile"; then
+                echo "export KUBECONFIG=$USER_KUBECONFIG" >> "$profile"
             fi
         fi
     done
+}
+
+sync_user_kubeconfig() {
+    mkdir -p "$(dirname "$USER_KUBECONFIG")"
+    cp /etc/rancher/k3s/k3s.yaml "$USER_KUBECONFIG"
+    chown "$INVOKING_USER:$INVOKING_USER" "$USER_KUBECONFIG" 2>/dev/null || true
+    chmod 600 "$USER_KUBECONFIG" 2>/dev/null || true
+    export KUBECONFIG="$USER_KUBECONFIG"
+    log_info "User kubeconfig synced: $USER_KUBECONFIG"
 }
 
 # Ensure we're running as root
@@ -90,7 +107,7 @@ log_info "Old K3s processes cleaned up"
 # =============================================================================
 log_section "PHASE 3: Starting K3s Cluster"
 
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+export KUBECONFIG="${USER_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 # Verify port 6443 is free
 if lsof -Pi :6443 -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -135,6 +152,7 @@ fi
 echo ""
 log_info "K3s cluster status:"
 kubectl get nodes 2>/dev/null | tail -1
+sync_user_kubeconfig
 
 # =============================================================================
 # Phase 4: Deploy Smart City Namespaces & Services
@@ -195,16 +213,47 @@ done
 
 log_info "Manifests applied successfully"
 
-# Create IDS API ConfigMaps (code + operator UI)
-log_info "Creating IDS API ConfigMaps..."
-kubectl create configmap ids-app-code \
-    --namespace=smart-city \
-    --from-file=services/ids-api/src \
-    --dry-run=client -o yaml | kubectl apply -f -
+# Create IDS API deployment artefacts: prefer building a container image for ids-api
+log_info "Preparing IDS API deployment (prefer image build over large ConfigMap)"
+
+# Try to build a local Docker image and import into k3s containerd runtime. This
+# avoids creating a very large ConfigMap (which can exceed Kubernetes limits).
+if command -v docker &> /dev/null; then
+    log_info "Building local Docker image: ids-api:latest"
+    if docker build -t ids-api:latest services/ids-api/src 2>&1 | sed -n '1,3p'; then
+        log_info "Docker image built successfully"
+        TMP_TAR="/tmp/ids-api-image-$$.tar"
+        docker save ids-api:latest -o "$TMP_TAR" || true
+        if command -v k3s &> /dev/null; then
+            log_info "Importing image into k3s containerd"
+            k3s ctr images import "$TMP_TAR" || true
+            rm -f "$TMP_TAR" || true
+        else
+            log_warn "k3s binary not found; image may not be available to the cluster"
+        fi
+    else
+        log_warn "Docker build failed; will fall back to minimal ConfigMap creation"
+        # Fall through to minimal configmap below
+    fi
+else
+    log_warn "Docker not installed; using ConfigMap-mounted code for ids-api"
+fi
+
+# Create a small ConfigMap for static UI (safe size)
+log_info "Creating IDS API static ConfigMap (ui files)"
 kubectl create configmap ids-app-static \
     --namespace=smart-city \
     --from-file=services/ids-api/static \
     --dry-run=client -o yaml | kubectl apply -f -
+
+# Keep ids-app-code in sync with full source tree so all endpoints/features exist.
+log_info "Creating/updating full ids-app-code ConfigMap"
+kubectl create configmap ids-app-code \
+    --namespace=smart-city \
+    --from-file=services/ids-api/src \
+    --from-file=llm_providers=services/ids-api/src/llm_providers \
+    --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - || \
+    log_warn "ids-app-code ConfigMap update failed; ensure image/config is available"
 
 # =============================================================================
 # Phase 5: Deploy Falco Runtime Security (with JSON output for forwarder)
@@ -330,7 +379,7 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 log_info "✅ Smart City IDS is now running!"
-echo "  KUBECONFIG: $KUBECONFIG (permanent in ~/.bashrc, ~/.zshrc)"
+echo "  KUBECONFIG: $KUBECONFIG (permanent in $INVOKING_HOME/.bashrc, $INVOKING_HOME/.zshrc)"
 echo ""
 
 # =============================================================================
@@ -338,27 +387,47 @@ echo ""
 # =============================================================================
 log_section "PHASE 10: Setting Up Port-Forwarding"
 
-# Kill any existing port-forwards
-pkill -f "kubectl port-forward.*ids-api" 2>/dev/null || true
-sleep 1
+STATE_DIR="/tmp/smart-city-ids"
+mkdir -p "$STATE_DIR"
+PF_PID_FILE="$STATE_DIR/pf-ids-api.pid"
 
-# Create background port-forward
-nohup kubectl port-forward -n smart-city svc/ids-api-service 8000:8000 > /tmp/ids-api-portforward.log 2>&1 &
-PID=$!
-echo $PID > /tmp/ids-api-portforward.pid
+if [[ -f "$PF_PID_FILE" ]]; then
+    OLD_PID="$(cat "$PF_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "${OLD_PID:-}" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
+        kill "$OLD_PID" 2>/dev/null || true
+        sleep 1
+        kill -9 "$OLD_PID" 2>/dev/null || true
+    fi
+    rm -f "$PF_PID_FILE"
+fi
+pkill -f "kubectl .*port-forward .*svc/ids-api-service .*8000:8000" 2>/dev/null || true
 
-# Wait for port-forward to connect
-sleep 2
+setsid kubectl --kubeconfig "$KUBECONFIG" -n smart-city \
+    port-forward svc/ids-api-service 8000:8000 --address 127.0.0.1 \
+    >/tmp/ids-api-portforward.log 2>&1 < /dev/null &
+PF_PID=$!
+echo "$PF_PID" > "$PF_PID_FILE"
 
-# Test connection
-if curl -s http://localhost:8000/ > /dev/null 2>&1; then
-    log_info "✅ Port-forward successful (localhost:8000 → IDS API)"
+PF_OK=0
+for _i in $(seq 1 25); do
+    if curl -fsS --max-time 2 http://localhost:8000/health >/dev/null 2>&1; then
+        PF_OK=1
+        break
+    fi
+    if ! kill -0 "$PF_PID" 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+
+if [[ "$PF_OK" -eq 1 ]]; then
+    log_info "✅ Local IDS access is ready (pid=$PF_PID)"
     echo ""
     echo -e "${GREEN}🎉 Dashboard ready at:${NC} http://localhost:8000/ui"
     echo ""
 else
-    log_warn "Port-forward started but connection test failed"
-    echo "Try manually: kubectl port-forward -n smart-city svc/ids-api-service 8000:8000"
-    echo "Or access on NodePort: http://localhost:30800/ui"
+    log_warn "Local IDS access setup failed"
+    tail -n 20 /tmp/ids-api-portforward.log 2>/dev/null || true
+    echo "Fallback NodePort: http://${NODE_IP}:30800/ui"
 fi
 echo ""

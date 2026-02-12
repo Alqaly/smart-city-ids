@@ -41,6 +41,8 @@ class Database:
         self._memory_analysis_results: List[Dict[str, Any]] = []
         self._memory_automation_actions: List[Dict[str, Any]] = []
         self._memory_audit_logs: List[Dict[str, Any]] = []
+        self._memory_system_logs: List[Dict[str, Any]] = []
+        self._memory_throttled_alerts: List[Dict[str, Any]] = []
         
         if PSYCOPG2_AVAILABLE:
             self._connect()
@@ -174,6 +176,31 @@ class Database:
                 )
             """)
             
+            # System logs table (for debugging and audit)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS system_logs (
+                    id SERIAL PRIMARY KEY,
+                    level VARCHAR(20) NOT NULL,
+                    component VARCHAR(100),
+                    message TEXT,
+                    details JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Throttled alerts table (alerts that were rate-limited)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS throttled_alerts (
+                    id SERIAL PRIMARY KEY,
+                    source VARCHAR(50),
+                    rule VARCHAR(255),
+                    priority VARCHAR(50),
+                    throttle_reason VARCHAR(100),
+                    raw_alert JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create indexes
             cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_source ON alerts(source)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp)")
@@ -185,6 +212,10 @@ class Database:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_actions_status ON automation_actions(status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_logs(created_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs(level)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_system_logs_created ON system_logs(created_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_throttled_rule ON throttled_alerts(rule)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_throttled_created ON throttled_alerts(created_at)")
             
             logger.info("✅ Database tables initialized")
     
@@ -331,36 +362,166 @@ class Database:
             log_entry["id"] = len(self._memory_audit_logs) + 1
             self._memory_audit_logs.append(log_entry)
             return log_entry["id"]
+
+    def add_system_log(self, level: str, component: str, message: str, details: Dict = None) -> int:
+        """Add a system log entry for debugging and audit."""
+        log_entry = {
+            "level": level,
+            "component": component,
+            "message": message,
+            "details": details or {},
+            "created_at": datetime.now()
+        }
         
+        if self.use_memory or not self._ensure_connection():
+            log_entry["id"] = len(self._memory_system_logs) + 1
+            self._memory_system_logs.append(log_entry)
+            return log_entry["id"]
+
         try:
             with self.conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO alerts (source, rule, priority, severity, summary, 
-                                       threat_type, recommendations, automated_actions,
-                                       raw_alert, analysis, timestamp)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO system_logs (level, component, message, details, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
                     RETURNING id
                 """, (
-                    alert.get("source", "unknown"),
-                    alert.get("rule"),
-                    alert.get("priority"),
-                    alert.get("severity"),
-                    alert.get("summary"),
-                    alert.get("threat_type"),
-                    json.dumps(alert.get("recommendations", [])),
-                    json.dumps(alert.get("automated_actions", [])),
-                    json.dumps(alert.get("raw_alert", {})),
-                    json.dumps(alert.get("analysis", {})),
-                    alert.get("timestamp", datetime.now())
+                    log_entry["level"],
+                    log_entry["component"],
+                    log_entry["message"],
+                    json.dumps(log_entry["details"]),
+                    log_entry["created_at"]
                 ))
-                alert_id = cur.fetchone()[0]
-                return alert_id
+                return cur.fetchone()[0]
         except Exception as e:
-            logger.error(f"Error adding alert to database: {e}")
-            # Fallback to memory
-            alert["id"] = len(self._memory_alerts) + 1
-            self._memory_alerts.append(alert)
-            return alert["id"]
+            logger.error(f"Error adding system log: {e}")
+            log_entry["id"] = len(self._memory_system_logs) + 1
+            self._memory_system_logs.append(log_entry)
+            return log_entry["id"]
+
+    def add_throttled_alert(self, alert: Dict[str, Any], throttle_reason: str) -> int:
+        """Record an alert that was throttled (rate-limited)."""
+        record = {
+            "source": alert.get("source", "unknown"),
+            "rule": alert.get("rule"),
+            "priority": alert.get("priority"),
+            "throttle_reason": throttle_reason,
+            "raw_alert": alert,
+            "created_at": datetime.now()
+        }
+        
+        if self.use_memory or not self._ensure_connection():
+            record["id"] = len(self._memory_throttled_alerts) + 1
+            self._memory_throttled_alerts.append(record)
+            return record["id"]
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO throttled_alerts (source, rule, priority, throttle_reason, raw_alert, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    record["source"],
+                    record["rule"],
+                    record["priority"],
+                    record["throttle_reason"],
+                    json.dumps(record["raw_alert"]),
+                    record["created_at"]
+                ))
+                return cur.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error adding throttled alert: {e}")
+            record["id"] = len(self._memory_throttled_alerts) + 1
+            self._memory_throttled_alerts.append(record)
+            return record["id"]
+
+    def get_system_logs(self, limit: int = 100, level: str = None, component: str = None) -> List[Dict]:
+        """Get system logs with optional filtering."""
+        if self.use_memory or not self._ensure_connection():
+            logs = self._memory_system_logs
+            if level:
+                logs = [l for l in logs if l.get("level") == level]
+            if component:
+                logs = [l for l in logs if l.get("component") == component]
+            return list(reversed(logs[-limit:]))
+        
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                query = "SELECT * FROM system_logs WHERE 1=1"
+                params = []
+                if level:
+                    query += " AND level = %s"
+                    params.append(level)
+                if component:
+                    query += " AND component = %s"
+                    params.append(component)
+                query += " ORDER BY created_at DESC LIMIT %s"
+                params.append(limit)
+                cur.execute(query, params)
+                return cur.fetchall()
+        except Exception as e:
+            logger.error(f"Error getting system logs: {e}")
+            return []
+
+    def get_throttled_alerts(self, limit: int = 100, rule: str = None) -> List[Dict]:
+        """Get throttled alerts with optional filtering."""
+        if self.use_memory or not self._ensure_connection():
+            alerts = self._memory_throttled_alerts
+            if rule:
+                alerts = [a for a in alerts if a.get("rule") == rule]
+            return list(reversed(alerts[-limit:]))
+        
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if rule:
+                    cur.execute("""
+                        SELECT * FROM throttled_alerts WHERE rule = %s
+                        ORDER BY created_at DESC LIMIT %s
+                    """, (rule, limit))
+                else:
+                    cur.execute("""
+                        SELECT * FROM throttled_alerts
+                        ORDER BY created_at DESC LIMIT %s
+                    """, (limit,))
+                return cur.fetchall()
+        except Exception as e:
+            logger.error(f"Error getting throttled alerts: {e}")
+            return []
+
+    def get_throttle_stats(self) -> Dict:
+        """Get statistics about throttled alerts."""
+        if self.use_memory or not self._ensure_connection():
+            return {
+                "total_throttled": len(self._memory_throttled_alerts),
+                "by_reason": {},
+                "by_rule": {}
+            }
+        
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM throttled_alerts")
+                total = cur.fetchone()[0]
+                
+                cur.execute("""
+                    SELECT throttle_reason, COUNT(*) FROM throttled_alerts
+                    GROUP BY throttle_reason
+                """)
+                by_reason = {row[0]: row[1] for row in cur.fetchall()}
+                
+                cur.execute("""
+                    SELECT rule, COUNT(*) FROM throttled_alerts
+                    GROUP BY rule ORDER BY COUNT(*) DESC LIMIT 10
+                """)
+                by_rule = {row[0]: row[1] for row in cur.fetchall()}
+                
+                return {
+                    "total_throttled": total,
+                    "by_reason": by_reason,
+                    "by_rule": by_rule
+                }
+        except Exception as e:
+            logger.error(f"Error getting throttle stats: {e}")
+            return {"total_throttled": 0, "by_reason": {}, "by_rule": {}}
     
     def get_alerts(self, limit: int = 100, source: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get alerts from database."""

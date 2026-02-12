@@ -22,7 +22,19 @@ readonly BOLD='\033[1m'
 # ─────────────────────────────────────────────────────────────────────────────
 # ENVIRONMENT
 # ─────────────────────────────────────────────────────────────────────────────
-export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+if [[ -n "${KUBECONFIG:-}" ]]; then
+    if [[ -r "$KUBECONFIG" ]]; then
+        export KUBECONFIG
+    elif [[ -r "$HOME/.kube/config" ]]; then
+        export KUBECONFIG="$HOME/.kube/config"
+    else
+        export KUBECONFIG
+    fi
+elif [[ -r "$HOME/.kube/config" ]]; then
+    export KUBECONFIG="$HOME/.kube/config"
+else
+    export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+fi
 export SCRIPT_DEBUG="${SCRIPT_DEBUG:-0}"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,6 +93,19 @@ ensure_command() {
     fi
 }
 
+ensure_commands() {
+    local missing=0
+    for cmd in "$@"; do
+        if ! command -v "$cmd" &>/dev/null; then
+            log_error "Required command not found: $cmd"
+            missing=1
+        fi
+    done
+    if [[ $missing -eq 1 ]]; then
+        die "One or more required commands are missing"
+    fi
+}
+
 ensure_file() {
     local file=$1
     if [[ ! -f "$file" ]]; then
@@ -91,6 +116,9 @@ ensure_file() {
 ensure_kubeconfig() {
     if [[ ! -f "$KUBECONFIG" ]]; then
         die "KUBECONFIG not found: $KUBECONFIG"
+    fi
+    if [[ ! -r "$KUBECONFIG" ]]; then
+        die "KUBECONFIG is not readable: $KUBECONFIG (use ~/.kube/config or adjust permissions)"
     fi
     log_debug "Using KUBECONFIG: $KUBECONFIG"
 }
@@ -194,7 +222,41 @@ get_cpu_cores() {
 # ─────────────────────────────────────────────────────────────────────────────
 
 get_node_ip() {
-    kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null | head -1 || echo "localhost"
+    local ips
+    ips=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true)
+    if [[ -n "$ips" ]]; then
+        # Prefer IPv4 for URL formatting in scripts/output.
+        local ipv4
+        ipv4=$(echo "$ips" | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)
+        if [[ -n "$ipv4" ]]; then
+            echo "$ipv4"
+            return 0
+        fi
+        # Fallback to first returned address (may be IPv6).
+        echo "$ips" | tr ' ' '\n' | head -1
+        return 0
+    fi
+    echo "localhost"
+}
+
+get_service_nodeport() {
+    local service_name=$1
+    local namespace=$2
+    local default_port=${3:-}
+    local nodeport
+
+    nodeport=$(kubectl get svc "$service_name" -n "$namespace" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || true)
+    if [[ -n "$nodeport" ]]; then
+        echo "$nodeport"
+        return 0
+    fi
+
+    if [[ -n "$default_port" ]]; then
+        echo "$default_port"
+        return 0
+    fi
+
+    return 1
 }
 
 is_port_open() {
@@ -222,6 +284,71 @@ wait_port_open() {
     done
     echo ""
     log_info "Port $port on $host is now open"
+}
+
+start_port_forward_checked() {
+    local namespace="$1"
+    local service="$2"
+    local mapping="$3"
+    local health_url="$4"
+    local log_file="$5"
+    local pid_file="$6"
+    local wait_seconds="${7:-20}"
+    local required="${8:-1}"
+
+    mkdir -p "$(dirname "$pid_file")"
+    rm -f "$pid_file"
+
+    setsid kubectl --kubeconfig "$KUBECONFIG" -n "$namespace" \
+        port-forward "svc/$service" "$mapping" --address 127.0.0.1 \
+        >"$log_file" 2>&1 < /dev/null &
+    local pf_pid=$!
+    echo "$pf_pid" > "$pid_file"
+
+    local ok=0
+    local i
+    for i in $(seq 1 "$wait_seconds"); do
+        if curl -fsS --max-time 2 "$health_url" >/dev/null 2>&1; then
+            ok=1
+            break
+        fi
+        if ! kill -0 "$pf_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ "$ok" -eq 1 ]]; then
+        return 0
+    fi
+
+    if [[ -f "$log_file" ]]; then
+        log_warn "Port-forward failed for $service ($mapping). Recent log:"
+        tail -n 20 "$log_file" || true
+    fi
+
+    if [[ "$required" -eq 1 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+stop_port_forward_checked() {
+    local pid_file="$1"
+    local pattern="${2:-}"
+    if [[ -f "$pid_file" ]]; then
+        local pf_pid
+        pf_pid="$(cat "$pid_file" 2>/dev/null || true)"
+        if [[ -n "$pf_pid" ]] && kill -0 "$pf_pid" 2>/dev/null; then
+            kill "$pf_pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$pf_pid" 2>/dev/null || true
+        fi
+        rm -f "$pid_file"
+    fi
+    if [[ -n "$pattern" ]]; then
+        pkill -f "$pattern" 2>/dev/null || true
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -382,10 +509,11 @@ cleanup_on_exit() {
 
 # Export all functions
 export -f log_debug log_info log_warn log_error log_section log_subsection
-export -f die ensure_root ensure_command ensure_file ensure_kubeconfig
+export -f die ensure_root ensure_command ensure_commands ensure_file ensure_kubeconfig
 export -f k8s_cluster_ready k8s_wait_ready k8s_pod_ready k8s_deployment_ready
 export -f get_system_ram_gb get_available_disk_gb get_cpu_cores
 export -f get_node_ip is_port_open wait_port_open
+export -f start_port_forward_checked stop_port_forward_checked
 export -f confirm confirm_destructive
 export -f pkill_safe
 export -f timer_start timer_elapsed timer_format

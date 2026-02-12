@@ -98,7 +98,7 @@ log_success "Database ready: $DB_NAME"
 
 # Step 4: Run migrations
 log_step "Running database migrations..."
-PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /home/aka/smart-city-ids/infrastructure/database/migrations/001_initial_schema.sql
+PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f /home/kali/smart-city-ids/infrastructure/database/migrations/001_initial_schema.sql
 log_success "Database schema created"
 
 # Step 5: Install Python dependencies
@@ -108,7 +108,7 @@ log_success "Dependencies installed"
 
 # Step 6: Create .env file with secrets
 log_step "Creating .env file with secrets..."
-cat > /home/aka/smart-city-ids/.env.security << EOF
+cat > /home/kali/smart-city-ids/.env.security << EOF
 # Capstone 2 Phase 1 - Security Configuration
 # Generated: $(date)
 
@@ -133,14 +133,14 @@ DEBUG=false
 LOG_LEVEL=INFO
 EOF
 
-chmod 600 /home/aka/smart-city-ids/.env.security
+chmod 600 /home/kali/smart-city-ids/.env.security
 log_success "Created .env.security (permissions: 600)"
 
 # Step 7: Create initial admin user
 log_step "Creating initial admin user..."
 python3 << PYEOF
 import sys
-sys.path.insert(0, '/home/aka/smart-city-ids')
+sys.path.insert(0, '/home/kali/smart-city-ids')
 from src.ids_api.core.security import hash_password
 from src.ids_api.infrastructure.db_config import SessionLocal, init_db
 from src.ids_api.infrastructure.database import User, UserRole
@@ -177,7 +177,7 @@ echo "╔═══════════════════════�
 log_success "Capstone 2 Phase 1 Setup Complete!"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
-echo "Configuration saved to: /home/aka/smart-city-ids/.env.security"
+echo "Configuration saved to: /home/kali/smart-city-ids/.env.security"
 echo ""
 echo "Database Details:"
 echo "  Host: $DB_HOST:$DB_PORT"
@@ -198,5 +198,5 @@ echo "  4. Generate API keys for service-to-service auth"
 echo "  5. Deploy updated IDS API with auth middleware"
 echo ""
 echo "Documentation:"
-echo "  See: /home/aka/smart-city-ids/docs/SECURITY.md"
+echo "  See: /home/kali/smart-city-ids/docs/SECURITY.md"
 echo ""

@@ -1,0 +1,114 @@
+# Network Policies — Smart City IDS
+# Provides namespace-level network segmentation for defense-in-depth
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ids-api-ingress
+  namespace: smart-city
+  labels:
+    app: ids-api
+spec:
+  podSelector:
+    matchLabels:
+      app: ids-api
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow traffic from any source on the IDS API port (NodePort-exposed)
+  - ports:
+    - protocol: TCP
+      port: 8000
+  # Allow Prometheus scraping on metrics port
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-restrict
+  namespace: smart-city
+  labels:
+    app: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+  - Ingress
+  ingress:
+  # Only allow IDS API and migration jobs to reach PostgreSQL
+  - from:
+    - podSelector:
+        matchLabels:
+          app: ids-api
+    ports:
+    - protocol: TCP
+      port: 5432
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: iot-devices-egress
+  namespace: smart-city
+spec:
+  podSelector:
+    matchLabels:
+      app: iot-devices-enhanced
+  policyTypes:
+  - Egress
+  egress:
+  # IoT devices can talk to MQTT broker
+  - to:
+    - podSelector:
+        matchLabels:
+          app: mqtt-broker
+    ports:
+    - protocol: TCP
+      port: 1883
+  # IoT devices can talk to IDS API (for metrics/health)
+  - to:
+    - podSelector:
+        matchLabels:
+          app: ids-api
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: smart-city-services-ingress
+  namespace: smart-city
+spec:
+  podSelector:
+    matchExpressions:
+    - key: app
+      operator: In
+      values:
+      - healthcare-api
+      - traffic-camera
+      - parking-system
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow external traffic (these are intentionally vulnerable demo services)
+  - ports:
+    - protocol: TCP
+      port: 5000

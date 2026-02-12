@@ -44,9 +44,12 @@ Welcome to the Smart City IDS documentation. This directory contains all guides 
 | **[LOG_FORMAT_GUIDE.md](LOG_FORMAT_GUIDE.md)** | Alert JSON schema and field reference |
 | **[VALIDATION_CHECKLIST.md](VALIDATION_CHECKLIST.md)** | Verification checklist for production use |
 
-| **[SECURITY_MODEL.md](SECURITY_MODEL.md)** | MITRE ATT&CK mapping and threat model |
-| **[LOG_FORMAT_GUIDE.md](LOG_FORMAT_GUIDE.md)** | Alert JSON schema and field reference |
-| **[VALIDATION_CHECKLIST.md](VALIDATION_CHECKLIST.md)** | Verification checklist for production use |
+### Archive
+
+| Document | Purpose |
+|----------|---------|
+| **[ARCHIVE_INDEX.md](ARCHIVE_INDEX.md)** | Inventory of archived/legacy docs |
+| **[_archive/](./_archive/)** | Historical reports, old checklists, and drafts |
 
 ---
 
@@ -208,5 +211,5 @@ This documentation and the Smart City IDS project are licensed under the reposit
 
 ---
 
-**Last Updated:** January 2025  
+**Last Updated:** February 2026  
 **Status:** Production Ready

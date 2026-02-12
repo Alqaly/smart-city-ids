@@ -74,7 +74,7 @@ kubectl rollout restart deployment/ids-api -n smart-city
 | Dashboard | URL | Credentials |
 |-----------|-----|-------------|
 | Grafana | http://NODE_IP:30300 | admin / admin |
-| Prometheus | http://NODE_IP:31701 | - |
+| Prometheus | http://NODE_IP:PROM_PORT | Run: `kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}'` |
 | IDS API Docs | http://NODE_IP:30800/docs | - |
 
 ### Key Metrics to Watch

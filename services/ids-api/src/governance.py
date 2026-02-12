@@ -75,11 +75,13 @@ class PendingAction:
     approved_by: Optional[str] = None
     approved_at: Optional[float] = None
     execution_result: Optional[Dict] = None
+    operator_comment: Optional[str] = None
     
     def to_dict(self) -> Dict:
         """Convert to dictionary for API responses."""
         return {
             **asdict(self),
+            "operator_comment": self.operator_comment,
             "created_at_iso": datetime.fromtimestamp(self.created_at).isoformat(),
             "expires_at_iso": datetime.fromtimestamp(self.expires_at).isoformat() if self.expires_at else None,
             "age_seconds": time.time() - self.created_at
@@ -289,7 +291,8 @@ class GovernanceController:
             }
     
     def approve_action(self, action_id: str, approved_by: str = "operator",
-                      execute_callback: Optional[Callable] = None) -> Dict:
+                      execute_callback: Optional[Callable] = None,
+                      operator_comment: Optional[str] = None) -> Dict:
         """
         Approve a pending action.
         
@@ -316,6 +319,7 @@ class GovernanceController:
             action.status = "approved"
             action.approved_by = approved_by
             action.approved_at = time.time()
+            action.operator_comment = operator_comment
             self._metrics["approved"] += 1
         
         # Execute the action
@@ -484,9 +488,10 @@ def request_automated_action(action_type: str, target: str, severity: int,
     )
 
 def approve_pending_action(action_id: str, operator: str = "admin",
-                          execute_fn: Optional[Callable] = None) -> Dict:
-    """Approve a pending action."""
-    return governance.approve_action(action_id, operator, execute_fn)
+                          execute_fn: Optional[Callable] = None,
+                          operator_comment: Optional[str] = None) -> Dict:
+    """Approve a pending action (convenience wrapper)."""
+    return governance.approve_action(action_id, operator, execute_fn, operator_comment)
 
 def reject_pending_action(action_id: str, operator: str = "admin",
                          reason: Optional[str] = None) -> Dict:

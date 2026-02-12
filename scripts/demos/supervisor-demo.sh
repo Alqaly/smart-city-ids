@@ -14,26 +14,35 @@ set -euo pipefail
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+source "${PROJECT_ROOT}/scripts/lib/script-utils.sh"
+ensure_kubeconfig
+AUTO_YES=0
 
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
-GRAFANA_URL="http://${NODE_IP}:30300"
+if [[ "${1:-}" == "--yes" ]]; then
+    AUTO_YES=1
+fi
+
+for cmd in kubectl curl jq; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "❌ Required command not found: $cmd"
+        exit 1
+    fi
+done
+
+NODE_IP=$(get_node_ip)
+GRAFANA_PORT=$(get_service_nodeport "grafana" "monitoring" "30300")
+PROMETHEUS_PORT=$(get_service_nodeport "prometheus" "monitoring" "31701")
+GRAFANA_URL="http://${NODE_IP}:${GRAFANA_PORT}"
 GRAFANA_USER="admin"
 GRAFANA_PASS="admin"
-PROMETHEUS_URL="http://${NODE_IP}:31701"
+PROMETHEUS_URL="http://${NODE_IP}:${PROMETHEUS_PORT}"
 
 DEMO_DASHBOARD_UID="smart-city-demo-$(date +%s)"
 DEMO_DASHBOARD_TITLE="🎯 CAPSTONE DEMO - $(date '+%Y-%m-%d %H:%M')"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
+# Extra color not defined in shared utils
 MAGENTA='\033[0;35m'
-BOLD='\033[1m'
-NC='\033[0m'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper Functions
@@ -68,7 +77,7 @@ log_detect() { echo -e "  ${MAGENTA}🔍 DETECTED:${NC} $1"; }
 
 get_metric() {
     kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-        | grep "^$1{" | awk -F'} ' '{sum+=$2} END {print sum+0}'
+        | awk -v name="$1" '$0 ~ ("^" name "\\{") {sum+=$NF} END {print sum+0}'
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -373,8 +382,7 @@ capture_baseline() {
     
     BASELINE_RECEIVED=$(get_metric "smartcity_ids_alerts_received_total")
     BASELINE_PROCESSED=$(get_metric "smartcity_ids_alerts_processed_total")
-    BASELINE_ACTIONS=$(kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-        | grep "smartcity_ids_actions_executed_total{" | awk -F'} ' '{sum+=$2} END {print sum+0}')
+    BASELINE_ACTIONS=$(get_metric "smartcity_ids_actions_executed_total")
     BASELINE_TIME=$(date -Iseconds)
     
     echo -e "  ${CYAN}┌─────────────────────────────────────────────────┐${NC}"
@@ -478,12 +486,11 @@ show_results() {
     
     FINAL_RECEIVED=$(get_metric "smartcity_ids_alerts_received_total")
     FINAL_PROCESSED=$(get_metric "smartcity_ids_alerts_processed_total")
-    FINAL_ACTIONS=$(kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-        | grep "smartcity_ids_actions_executed_total{" | awk -F'} ' '{sum+=$2} END {print sum+0}')
+    FINAL_ACTIONS=$(get_metric "smartcity_ids_actions_executed_total")
     
     DELTA_RECEIVED=$((FINAL_RECEIVED - BASELINE_RECEIVED))
     DELTA_PROCESSED=$((FINAL_PROCESSED - BASELINE_PROCESSED))
-    DELTA_ACTIONS=$(echo "$FINAL_ACTIONS - $BASELINE_ACTIONS" | bc 2>/dev/null || echo "0")
+    DELTA_ACTIONS=$((FINAL_ACTIONS - BASELINE_ACTIONS))
     
     echo -e "  ${CYAN}┌───────────────────────────────────────────────────────────────────┐${NC}"
     echo -e "  ${CYAN}│${NC}                    ${BOLD}BEFORE vs AFTER COMPARISON${NC}                    ${CYAN}│${NC}"
@@ -590,17 +597,21 @@ preflight_checks() {
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 main() {
-    clear
+    clear || true
     print_banner
     
-    echo -e "${YELLOW}Press ENTER to start the demo, or Ctrl+C to cancel...${NC}"
-    read
+    if [[ $AUTO_YES -eq 0 ]]; then
+        echo -e "${YELLOW}Press ENTER to start the demo, or Ctrl+C to cancel...${NC}"
+        read
+    fi
     
     preflight_checks
     create_demo_dashboard
     
-    echo -e "${YELLOW}Press ENTER when Grafana dashboard is open in your browser...${NC}"
-    read
+    if [[ $AUTO_YES -eq 0 ]]; then
+        echo -e "${YELLOW}Press ENTER when Grafana dashboard is open in your browser...${NC}"
+        read
+    fi
     
     capture_baseline
     run_attacks

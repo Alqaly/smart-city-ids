@@ -13,6 +13,7 @@ ENV/
 .env
 *.env
 !.env.example
+.env.security
 
 # IDE
 .vscode/
@@ -30,3 +31,19 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test / script outputs (generated during testing)
+script-run-outputs/
+scalability-results/
+
+# Binary docs (keep markdown only)
+*.docx
+
+# Build artifacts
+*.tar
+/tmp/
+
+# Misc
+payload.json
+a
+*.bak

@@ -150,7 +150,8 @@ kubectl wait --for=condition=available --timeout=60s deployment/suricata -n smar
 ```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-curl -s http://$NODE_IP:31701/api/v1/query?query=smartcity_ids_alerts_received_total | jq
+PROM_PORT=$(kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}')
+curl -s http://$NODE_IP:$PROM_PORT/api/v1/query?query=smartcity_ids_alerts_received_total | jq
 ```
 
 ### 3.2 Grafana Dashboards
@@ -357,7 +358,8 @@ INFO:     Automated action: isolate_pod (target=healthcare-api-7bb856cbf4-4vkgs)
 **Evidence:** 
 ```bash
 # Show raw Prometheus query
-curl http://NODE_IP:31701/api/v1/query?query=smartcity_ids_alerts_received_total
+PROM_PORT=$(kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}')
+curl http://NODE_IP:$PROM_PORT/api/v1/query?query=smartcity_ids_alerts_received_total
 
 # Show database records
 kubectl exec deploy/postgres -- psql -U idsuser -d idsdb -c "SELECT COUNT(*) FROM alerts;"

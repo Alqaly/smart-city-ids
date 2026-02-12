@@ -1,5 +1,13 @@
 """
 Security Monitor - Collects alerts from Falco and Suricata
+
+DEPRECATED: This module is retained for reference only.
+Alert collection is now handled directly in main.py through the /api/alerts
+and /api/alerts/internal endpoints, with Prometheus counters for tracking.
+The Falco forwarder (services/forwarders/falco/) and alert_rate_limiter.py
+have replaced this module's functionality.
+
+Remove in a future cleanup pass once all references are confirmed unused.
 """
 import logging
 from typing import Dict, Any, List

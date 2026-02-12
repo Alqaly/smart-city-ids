@@ -16,7 +16,18 @@
 # =============================================================================
 
 set -euo pipefail
-export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    echo "Usage: bash scripts/demos/capstone1-demo.sh [attack_count]"
+    echo "Default attack_count: 5"
+    exit 0
+fi
+if [[ -n "${KUBECONFIG:-}" && -r "${KUBECONFIG:-}" ]]; then
+    export KUBECONFIG
+elif [[ -r "$HOME/.kube/config" ]]; then
+    export KUBECONFIG="$HOME/.kube/config"
+else
+    export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -42,8 +53,7 @@ echo ""
 get_metric_sum() {
     local metric_name=$1
     kubectl exec -n smart-city deploy/ids-api -- curl -s localhost:8000/metrics 2>/dev/null \
-        | grep "^${metric_name}{" \
-        | awk -F'} ' '{sum+=$2} END {print sum+0}'
+        | awk -v name="$metric_name" '$0 ~ ("^" name "\\{") {sum+=$NF} END {print sum+0}'
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -190,7 +200,9 @@ if [[ "$DELTA_RECEIVED" -gt 0 ]]; then
     echo "   • xAI Grok-4 analyzed each alert"
     echo "   • Metrics in Grafana are REAL measurements"
     echo ""
-    echo "   Grafana URL: http://$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'):30300"
+    GRAFANA_PORT=$(kubectl get svc -n monitoring grafana -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30300")
+    NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null | tr ' ' '\n' | head -1)
+    echo "   Grafana URL: http://${NODE_IP}:${GRAFANA_PORT}"
 else
     echo -e "   ${RED}❌ FAILED: No alerts detected${NC}"
     echo ""

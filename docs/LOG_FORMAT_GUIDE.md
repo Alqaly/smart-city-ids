@@ -380,7 +380,7 @@ smartcity_ids_llm_latency_seconds_count 127.0
 
 ### How to Query Metrics
 
-**Via Prometheus UI (http://NODE_IP:31701):**
+**Via Prometheus UI** (find port: `kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}'`):
 ```promql
 # Alert rate (alerts per second)
 rate(smartcity_ids_alerts_received_total[5m])
@@ -594,7 +594,7 @@ T+15.000s: Grafana dashboard updates
 **Check:**
 1. Prometheus scraping IDS API: `kubectl logs -n monitoring -l app=prometheus | grep "ids-api"`
 2. Metrics endpoint accessible: `kubectl exec deploy/ids-api -n smart-city -- curl localhost:8000/metrics`
-3. Prometheus target status: http://NODE_IP:31701/targets
+3. Prometheus target status: `http://NODE_IP:$(kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}')/targets`
 
 ---
 

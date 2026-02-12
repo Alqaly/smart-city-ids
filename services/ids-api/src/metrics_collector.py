@@ -1,5 +1,12 @@
 """
 Metrics Collection for Evaluation
+
+DEPRECATED: This module is retained for reference only. 
+Prometheus-based metrics (PROM_* counters/gauges) in main.py have replaced
+this class for all production metric collection. See main.py lines ~45-100
+for the active Prometheus metrics definitions.
+
+Remove in a future cleanup pass once all references are confirmed unused.
 """
 from datetime import datetime
 from typing import List, Dict

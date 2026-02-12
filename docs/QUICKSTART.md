@@ -12,6 +12,9 @@ Get the Smart City IDS running in 5 minutes.
 - **LLM API Keys:** At least one of:
   - `XAI_API_KEY` (xAI Grok access)
   - `OPENAI_API_KEY` (OpenAI GPT access)
+  - `ANTHROPIC_API_KEY` (Anthropic Claude access)
+  - `GEMINI_API_KEY` (Google Gemini access)
+  - `KIMI_API_KEY` (Moonshot Kimi access)
 
 ---
 
@@ -20,13 +23,22 @@ Get the Smart City IDS running in 5 minutes.
 ### Step 1: Set LLM API Key
 
 ```bash
-# Option A: Use xAI Grok
+# Option A: Use xAI Grok (recommended)
 export XAI_API_KEY="your-xai-key-here"
 
 # Option B: Use OpenAI
 export OPENAI_API_KEY="your-openai-key-here"
 
-# Option C: Add to ~/.bashrc to persist across terminal sessions
+# Option C: Use Anthropic Claude
+export ANTHROPIC_API_KEY="your-anthropic-key-here"
+
+# Option D: Use Google Gemini (free tier: 1500 req/day)
+export GEMINI_API_KEY="your-gemini-key-here"
+
+# Option E: Use Moonshot Kimi
+export KIMI_API_KEY="your-kimi-key-here"
+
+# Persist to ~/.bashrc
 echo 'export XAI_API_KEY="your-xai-key-here"' >> ~/.bashrc
 source ~/.bashrc
 ```
