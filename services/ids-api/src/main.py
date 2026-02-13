@@ -1054,7 +1054,7 @@ async def root():
 
 @app.get("/ui")
 async def serve_ui():
-    """Serve the operator dashboard UI"""
+    """Serve the security analyst dashboard UI"""
     if STATIC_DIR:
         ui_file = os.path.join(STATIC_DIR, "index.html")
         if os.path.exists(ui_file):
@@ -1122,17 +1122,17 @@ def verify_jwt_token(token: str) -> str:
 @app.post("/api/auth/login", response_model=LoginResponse)
 async def login(request: LoginRequest):
     """
-    Authenticate operator and return JWT token.
+    Authenticate security analyst and return JWT token.
     
     Demo credentials:
-    - username: operator
-    - password: operator
+    - username: analyst
+    - password: analyst
     
     For production, integrate with your authentication system.
     """
     # Demo authentication (in production, check against AD/LDAP/database)
-    DEMO_USERNAME = "operator"
-    DEMO_PASSWORD = "operator"
+    DEMO_USERNAME = "analyst"
+    DEMO_PASSWORD = "analyst"
     
     if request.username == DEMO_USERNAME and request.password == DEMO_PASSWORD:
         token = create_jwt_token(request.username)
