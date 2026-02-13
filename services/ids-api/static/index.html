@@ -66,6 +66,12 @@ tr:hover td{background:rgba(0,212,255,.03)}
 .badge-info{background:rgba(0,212,255,.12);color:var(--accent)}
 .badge-purple{background:rgba(124,92,252,.15);color:var(--accent2)}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.pipeline-grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.pipeline-stage{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px}
+.pipeline-stage .name{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px}
+.pipeline-stage .rate{font-size:20px;font-weight:700;margin-top:4px}
+.pipeline-stage .meta{font-size:11px;color:var(--text2);margin-top:2px}
+@media(max-width:1200px){.pipeline-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:900px){.row{grid-template-columns:1fr}}
 .btn{padding:8px 16px;border-radius:var(--radius);border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
 .btn-primary{background:var(--accent);color:#000}.btn-primary:hover{opacity:.85}
@@ -125,6 +131,7 @@ tr:hover td{background:rgba(0,212,255,.03)}
     <button onclick="doLogout()">Sign Out</button>
   </div>
 </div>
+<div style="padding:8px 24px;border-bottom:1px solid var(--border);background:rgba(0,212,255,.03);font-size:12px;color:var(--text2)">This dashboard helps security analysts triage and explain alerts, not replace them.</div>
 
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="overview">Overview</button>
@@ -138,6 +145,8 @@ tr:hover td{background:rgba(0,212,255,.03)}
 
 <div class="tab-panel active" id="tab-overview">
   <div class="stat-grid" id="overviewStats"></div>
+  <div class="pipeline-grid" id="pipelineOverview"></div>
+  <div class="card"><div class="card-header"><h3>Alert Fatigue (Last Window)</h3></div><div class="card-body" id="alertFatigue"></div></div>
   <div class="row">
     <div class="card">
       <div class="card-header"><h3>Live Alert Feed</h3><span class="badge badge-info" id="alertCountBadge">0</span></div>
@@ -167,7 +176,7 @@ tr:hover td{background:rgba(0,212,255,.03)}
         <button class="btn btn-outline btn-sm" onclick="loadAlerts()">Refresh</button>
       </div>
     </div>
-    <div class="card-body no-pad"><table><thead><tr><th>Time</th><th>Source</th><th>Rule</th><th>Severity</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead><tbody id="alertsTable"></tbody></table></div>
+    <div class="card-body no-pad"><table><thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>Severity</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead><tbody id="alertsTable"></tbody></table></div>
   </div>
 </div>
 
@@ -201,10 +210,14 @@ tr:hover td{background:rgba(0,212,255,.03)}
       <div class="card-header"><h3>Latency by Engine</h3><span style="font-size:11px;color:var(--text3)">p50 / p95 / avg (seconds)</span></div>
       <div class="card-body" id="llmLatencyChart"></div>
     </div>
-    <div class="card">
-      <div class="card-header"><h3>Cost by Engine</h3><span style="font-size:11px;color:var(--text3)">Estimated USD per demo session</span></div>
-      <div class="card-body" id="llmCostChart"></div>
+      <div class="card">
+        <div class="card-header"><h3>Cost by Engine</h3><span style="font-size:11px;color:var(--text3)">Estimated USD per demo session</span></div>
+        <div class="card-body" id="llmCostChart"></div>
+      </div>
     </div>
+  <div class="card">
+    <div class="card-header"><h3>Tokens &amp; Cost per Request</h3></div>
+    <div class="card-body no-pad"><table><thead><tr><th>Engine</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Avg Tokens/Req</th><th>Avg Cost/Req</th></tr></thead><tbody id="llmTokenTable"></tbody></table></div>
   </div>
   <div class="row">
     <div class="card">
@@ -245,15 +258,11 @@ tr:hover td{background:rgba(0,212,255,.03)}
     <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the IDS pipeline</span></div>
     <div class="card-body">
       <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;color:var(--text2);line-height:1.7">
-        <strong style="color:var(--text);font-size:13px">Why Attack Simulation?</strong><br>
-        These buttons inject <strong>realistic security alerts</strong> into the IDS pipeline — the same JSON payloads that Falco and Suricata forwarders send in production.
-        Each click triggers the <strong>full detection → LLM analysis → automated response</strong> chain so you can observe how the system classifies threats, assigns severity, and takes defensive action (pod isolation, service scaling) in real time.
-        <br><br>
-        <strong style="color:var(--text)">How it works:</strong>
-        Click a card → alert payload is POSTed to <code style="background:var(--bg);padding:2px 6px;border-radius:3px;font-size:11px">/api/alerts/internal</code>
-        → rate limiter + dedup check → LLM engine analyzes the alert → severity score assigned → automated K8s action if severity ≥ 6 → full result shown in the log below.
-        <br><br>
-        <span style="color:var(--text3)"><strong>Falco</strong> alerts detect runtime threats (shell spawns, file reads, privilege escalation). <strong>Suricata</strong> alerts detect network threats (port scans, DDoS, exfiltration).</span>
+        <strong style="color:var(--text);font-size:13px">How this emulation works</strong><br>
+        These actions inject Falco-style runtime alerts and Suricata-style network alerts into the real IDS pipeline.
+        Each alert goes through ingest, deduplication, LLM or local analysis, governance checks, and optional Kubernetes response.
+        Behavior depends on provider availability (API keys, quota, cooldown) and governance mode (manual, assisted, autopilot).
+        Use this console to validate end-to-end analyst triage flow, not just raw alert generation.
       </div>
       <div class="attack-grid" id="attackGrid"></div>
     </div>
@@ -368,6 +377,7 @@ function connectLiveFeed(){
       var threat=d.threat_type||'Unknown';
       var summary=d.summary||'';
       var source=d.source||'api';
+      var traceId=d.trace_id||('alert-'+(d.alert_id||'unknown'));
       var rule=d.rule||'';
       var container=d.container_name||'';
       var procTime=d.processing_time_ms?d.processing_time_ms+'ms':'';
@@ -386,6 +396,7 @@ function connectLiveFeed(){
       var line='';
       line+='┌─────────────────────────────────────────────────────────────\n';
       line+='│  ['+ts+']  LIVE ALERT — Source: '+source.toUpperCase()+'\n';
+      line+='│  Trace: '+traceId+'\n';
       if(rule) line+='│  Rule: '+rule+'\n';
       if(container) line+='│  Container: '+container+'\n';
       line+='├── LLM Analysis ──────────────────────────────────────────────\n';
@@ -476,9 +487,10 @@ function refreshAll(){
     apiNoAuth('/api/deduplicator-stats'), // r[6] dedup
     apiNoAuth('/api/alerts?limit=30'),   // r[7] alerts
     apiFetch('/api/operator/dashboard'), // r[8] dashboard
-    apiNoAuth('/api/llm/diagnostics')    // r[9] llmDiag
+    apiNoAuth('/api/llm/diagnostics'),   // r[9] llmDiag
+    apiNoAuth('/api/pipeline-overview')  // r[10] pipeline
   ]).then(function(r){
-    var h=r[0],m=r[1],cb=r[2],safety=r[3],prod=r[4],gov=r[5],dedup=r[6],alerts=r[7],dash=r[8],llmDiag=r[9];
+    var h=r[0],m=r[1],cb=r[2],safety=r[3],prod=r[4],gov=r[5],dedup=r[6],alerts=r[7],dash=r[8],llmDiag=r[9],pipeline=r[10];
     // Derive LLM info from /health (no auth needed)
     var llmFromHealth=null;
     if(h&&h.components&&h.components.llm_providers){
@@ -486,6 +498,7 @@ function refreshAll(){
       llmFromHealth={provider_count:h.llm_provider_count||provNames.length,providers:provNames};
     }
     renderOverview(m,h,cb,safety,prod,gov,llmFromHealth,llmDiag);
+    renderPipelineOverview(pipeline);
     renderAlertFeed(alerts);
     renderLLMOverview(llmFromHealth,cb,llmDiag);
     renderSystemHealth(h,prod);
@@ -519,6 +532,32 @@ function renderOverview(m,h,cb,safety,prod,gov,llmFromHealth,llmDiag){
     '<div class="stat-card '+(smry.error>0||smry.cooldown>0?'red':'purple')+'"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(smry.operational||h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+llmSub+'</div></div>'+
     '<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">'+(m.alert_reduction_percentage||0)+'%</div><div class="stat-sub">Duplicate alerts suppressed</div></div>'+
     '<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">'+uptime+'</div><div class="stat-sub">System operational</div></div>';
+}
+
+function renderPipelineOverview(data){
+  var pipeEl=document.getElementById('pipelineOverview');
+  var fatigueEl=document.getElementById('alertFatigue');
+  if(!data||!data.stages){pipeEl.innerHTML='';fatigueEl.innerHTML='<span style="color:var(--text3)">Pipeline metrics unavailable</span>';return}
+  var html='';
+  data.stages.forEach(function(s){
+    var dot=s.status==='green'?'dot-green':s.status==='yellow'?'dot-yellow':'dot-red';
+    html+='<div class="pipeline-stage">'+
+      '<div class="name"><span class="dot '+dot+'"></span>'+esc(s.label)+'</div>'+
+      '<div class="rate">'+(s.rate_per_minute||0)+'/m</div>'+
+      '<div class="meta">p95: '+(s.p95_latency_ms||0)+' ms</div>'+
+      (s.dedup_hit_rate_percent!==undefined?'<div class="meta">Dedup: '+s.dedup_hit_rate_percent+'%</div>':'')+
+      '</div>';
+  });
+  pipeEl.innerHTML=html;
+  var f=data.alert_fatigue||{};
+  fatigueEl.innerHTML=
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:13px">'+
+    '<div><span style="color:var(--text3)">Raw Alerts</span><br><strong>'+(f.raw_total||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">After Dedup</span><br><strong>'+(f.after_dedup_total||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Human Review</span><br><strong>'+(f.human_review_required_total||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Auto-Handled</span><br><strong>'+(f.auto_handled_total||0)+'</strong></div>'+
+    '<div><span style="color:var(--text3)">Reduction</span><br><strong>'+(f.reduction_percent||0)+'%</strong></div>'+
+    '</div>';
 }
 
 function renderAlertFeed(data){
@@ -597,8 +636,10 @@ function loadAlerts(){
       var recs=a.recommendations||[];
       var an=a.analysis||{};
       var hasDetail=recs.length||an.reasoning||an.business_impact;
+      var traceId=a.trace_id||('alert-'+(a.id||idx));
       html+='<tr>'+
         '<td>'+shortTime(a.timestamp)+'</td>'+
+        '<td><code style="font-size:11px">'+esc(traceId)+'</code></td>'+
         '<td><span class="badge '+(a.source==='falco'?'badge-info':'badge-purple')+'">'+esc(a.source||'-')+'</span></td>'+
         '<td>'+esc(a.rule||'')+'</td>'+
         '<td><span class="badge '+sevBadge(a.severity)+'">'+(a.severity||'-')+'</span></td>'+
@@ -607,7 +648,8 @@ function loadAlerts(){
         '<td>'+(hasDetail?'<button class="btn btn-outline btn-sm" onclick="toggleDetail('+idx+')">Detail</button>':'—')+'</td>'+
         '</tr>';
       if(hasDetail){
-        html+='<tr id="detail-'+idx+'" style="display:none"><td colspan="7" style="background:var(--bg3);padding:12px 16px;font-size:12px;line-height:1.6">';
+        html+='<tr id="detail-'+idx+'" style="display:none"><td colspan="8" style="background:var(--bg3);padding:12px 16px;font-size:12px;line-height:1.6">';
+        html+='<div style="margin-bottom:8px"><strong style="color:var(--blue)">Trace ID:</strong> '+esc(traceId)+'</div>';
         if(an.reasoning) html+='<div style="margin-bottom:8px"><strong style="color:var(--purple)">Reasoning:</strong> '+esc(an.reasoning)+'</div>';
         if(an.business_impact) html+='<div style="margin-bottom:8px"><strong style="color:var(--yellow)">Business Impact:</strong> '+esc(an.business_impact)+'</div>';
         if(an.mitre_technique) html+='<div style="margin-bottom:8px"><strong style="color:var(--blue)">MITRE ATT&amp;CK:</strong> '+esc(an.mitre_technique)+'</div>';
@@ -624,7 +666,7 @@ function loadAlerts(){
         html+='</td></tr>';
       }
     });
-    document.getElementById('alertsTable').innerHTML=html||'<tr><td colspan="7" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
+    document.getElementById('alertsTable').innerHTML=html||'<tr><td colspan="8" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
   });
 }
 function toggleDetail(idx){var r=document.getElementById('detail-'+idx);if(r)r.style.display=r.style.display==='none'?'table-row':'none'}
@@ -779,6 +821,21 @@ function renderLLMTab(llm,cb,dedup,llmDiag){
     });
     costHtml+='</table>';
     document.getElementById('llmCostChart').innerHTML=costHtml||'<div style="color:var(--text3);padding:12px">No data yet</div>';
+
+    var tokenRows='';
+    names.forEach(function(n){
+      var e=eng[n];
+      if(!e.total_requests) return;
+      tokenRows+='<tr>'+
+        '<td><strong>'+n+'</strong></td>'+
+        '<td>'+(e.prompt_tokens_total||0)+'</td>'+
+        '<td>'+(e.completion_tokens_total||0)+'</td>'+
+        '<td>'+(e.tokens_total||0)+'</td>'+
+        '<td>'+(e.avg_tokens_per_request||0)+'</td>'+
+        '<td>$'+((e.avg_cost_per_request_usd||0).toFixed(6))+'</td>'+
+      '</tr>';
+    });
+    document.getElementById('llmTokenTable').innerHTML=tokenRows||'<tr><td colspan="6" style="text-align:center;color:var(--text3)">No token data yet</td></tr>';
   });
 
   var pc=document.getElementById('llmProviderCards');

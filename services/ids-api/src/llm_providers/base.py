@@ -34,7 +34,7 @@ class ProviderConfig:
     timeout: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT", "30")))
     priority: List[str] = field(default_factory=lambda: [
         p.strip().lower()
-        for p in os.getenv("LLM_PRIORITY", "xai,anthropic,openai,gemini,kimi,custom").split(",")
+        for p in os.getenv("LLM_PRIORITY", "kimi,xai,anthropic,openai,gemini,custom").split(",")
         if p.strip()
     ])
 

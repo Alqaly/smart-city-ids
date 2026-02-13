@@ -147,10 +147,10 @@ class LLMConfig:
     anthropic_model: str = "claude-3-5-sonnet-20241022"
     openai_model: str = "gpt-4-turbo-preview"
     gemini_model: str = "gemini-2.0-flash"
-    kimi_model: str = "moonshot-v1-128k"
+    kimi_model: str = "moonshot-v1-8k"
     
     # Engine priority (first available with healthy circuit breaker wins)
-    priority: List[str] = field(default_factory=lambda: ["xai", "anthropic", "openai", "gemini", "kimi"])
+    priority: List[str] = field(default_factory=lambda: ["kimi", "xai", "anthropic", "openai", "gemini"])
     
     # Shared settings
     temperature: float = 0.3
@@ -162,7 +162,7 @@ class LLMConfig:
         """Load configuration from environment variables"""
         import os
         
-        priority_str = os.getenv("LLM_PRIORITY", "xai,anthropic,openai,gemini,kimi")
+        priority_str = os.getenv("LLM_PRIORITY", "kimi,xai,anthropic,openai,gemini")
         priority = [p.strip() for p in priority_str.split(",")]
         
         return cls(
@@ -175,7 +175,7 @@ class LLMConfig:
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview"),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-            kimi_model=os.getenv("KIMI_MODEL", "moonshot-v1-128k"),
+            kimi_model=os.getenv("KIMI_MODEL", "moonshot-v1-8k"),
             priority=priority,
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1000")),
@@ -525,7 +525,7 @@ class KimiEngine(BaseLLMEngine):
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
         async with httpx.AsyncClient(timeout=60.0) as client:  # Kimi can be slower
             response = await client.post(
-                "https://api.moonshot.cn/v1/chat/completions",
+                "https://api.moonshot.ai/v1/chat/completions",
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.api_key}"

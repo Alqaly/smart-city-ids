@@ -16,6 +16,7 @@ import time
 import sys
 import os
 import hashlib
+import uuid
 from collections import OrderedDict
 import asyncio
 import json as json_mod
@@ -586,6 +587,7 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple[dict, str, float]:
         PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
         PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="success").inc()
         PROM_LLM_LATENCY_SECONDS.labels(engine=engine_used).observe(llm_duration)
+        _record_llm_tokens(engine_used, alert_dict, analysis)
         _record_llm_call(engine_used, llm_duration, True)
         return analysis, engine_used, llm_duration
     
@@ -614,6 +616,29 @@ metrics = {
     "alert_reduction_percentage": 100,
     "avg_response_time_seconds": 3.5
 }
+
+_alert_fatigue_stats = {
+    "raw_total": 0,
+    "after_dedup_total": 0,
+    "llm_triaged_total": 0,
+    "human_review_required_total": 0,
+    "auto_handled_total": 0,
+}
+
+
+def _alert_trace_id(alert_id: Union[int, str]) -> str:
+    return f"alert-{alert_id}"
+
+
+def _compute_human_review_required(severity: int) -> bool:
+    """Approximate analyst-touch requirement from governance mode."""
+    mode = get_automation_mode()
+    threshold = int(os.getenv("ASSISTED_THRESHOLD", "8"))
+    if mode == "manual":
+        return True
+    if mode == "autopilot":
+        return False
+    return severity >= threshold
 
 # Initialize metrics from database on startup
 def init_metrics_from_db():
@@ -724,6 +749,23 @@ PROM_ALERTS_PROCESSED_TOTAL = Counter(
     "Total number of alerts processed by the IDS API, labeled by result.",
     ["result"],
 )
+PROM_ALERTS_RAW_TOTAL = Counter(
+    "smartcity_ids_alerts_raw_total",
+    "Raw alerts entering IDS before dedup/throttling.",
+    ["source"],
+)
+PROM_ALERTS_AFTER_DEDUP_TOTAL = Counter(
+    "smartcity_ids_alerts_after_dedup_total",
+    "Alerts that required a fresh analysis after dedup checks.",
+)
+PROM_LLM_TRIAGED_ALERTS_TOTAL = Counter(
+    "smartcity_ids_llm_triaged_alerts_total",
+    "Alerts triaged by LLM/local analysis (non-cached).",
+)
+PROM_HUMAN_REVIEW_REQUIRED_TOTAL = Counter(
+    "smartcity_ids_human_review_required_total",
+    "Alerts requiring analyst review based on governance mode/threshold.",
+)
 PROM_ACTIONS_EXECUTED_TOTAL = Counter(
     "smartcity_ids_actions_executed_total",
     "Total number of automated actions triggered by the IDS API.",
@@ -761,6 +803,11 @@ PROM_LLM_COST_USD = Counter(
     "Estimated LLM API cost in USD by engine.",
     ["engine"],
 )
+PROM_LLM_TOKENS_TOTAL = Counter(
+    "smartcity_ids_llm_tokens_total",
+    "Estimated LLM token usage by engine and token kind.",
+    ["engine", "kind"],  # kind=prompt|completion
+)
 
 # Per-provider cost estimates (USD per call, approximate)
 _LLM_COST_PER_CALL = {
@@ -789,6 +836,30 @@ def _record_llm_call(engine: str, latency_s: float, success: bool):
         PROM_LLM_COST_USD.labels(engine=engine).inc(cost)
     else:
         s["failures"] += 1
+
+
+def _estimate_tokens(payload: Any) -> int:
+    """Estimate tokens with a conservative chars/4 heuristic."""
+    try:
+        text = payload if isinstance(payload, str) else json_mod.dumps(payload, ensure_ascii=False)
+    except Exception:
+        text = str(payload)
+    return max(1, int(len(text) / 4))
+
+
+def _record_llm_tokens(engine: str, prompt_payload: Any, completion_payload: Any):
+    """Track estimated prompt/completion tokens for observability."""
+    prompt_tokens = _estimate_tokens(prompt_payload)
+    completion_tokens = _estimate_tokens(completion_payload)
+    PROM_LLM_TOKENS_TOTAL.labels(engine=engine, kind="prompt").inc(prompt_tokens)
+    PROM_LLM_TOKENS_TOTAL.labels(engine=engine, kind="completion").inc(completion_tokens)
+    s = _llm_provider_stats.setdefault(engine, {
+        "total_requests": 0, "successes": 0, "failures": 0,
+        "latencies": [], "total_cost_usd": 0.0,
+        "prompt_tokens": 0, "completion_tokens": 0,
+    })
+    s["prompt_tokens"] = s.get("prompt_tokens", 0) + prompt_tokens
+    s["completion_tokens"] = s.get("completion_tokens", 0) + completion_tokens
 
 PROM_LLM_CACHE_OPERATIONS = Counter(
     "smartcity_ids_llm_cache_total",
@@ -1032,6 +1103,7 @@ class Alert(BaseModel):
 class AlertResponse(BaseModel):
     status: str
     alert_id: Union[int, str]
+    trace_id: Optional[str] = None
     analysis: Optional[Dict[str, Any]] = None
     actions_taken: Optional[List[str]] = None
     error: Optional[str] = None
@@ -1784,6 +1856,8 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         source = detect_alert_source(alert)
         metrics["alerts_by_source"][source] += 1
         PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
+        PROM_ALERTS_RAW_TOTAL.labels(source=source).inc()
+        _alert_fatigue_stats["raw_total"] += 1
         
         # ========== ALERT RATE LIMITING (FLOOD PREVENTION) ==========
         # Check if this alert should be throttled to prevent LLM overload
@@ -1839,6 +1913,10 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         if analysis is None:
             logger.info("Analyzing alert with LLM...")
             analysis, llm_used, llm_latency = await analyze_with_fallback(alert.dict())
+            PROM_ALERTS_AFTER_DEDUP_TOTAL.inc()
+            PROM_LLM_TRIAGED_ALERTS_TOTAL.inc()
+            _alert_fatigue_stats["after_dedup_total"] += 1
+            _alert_fatigue_stats["llm_triaged_total"] += 1
             
             # Cache the analysis for future deduplication
             if deduplicator:
@@ -1848,6 +1926,12 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         
         severity = analysis.get("severity", 5)
         threat_type = analysis.get("threat_type", "Unknown")
+        requires_review = _compute_human_review_required(int(severity))
+        if requires_review:
+            PROM_HUMAN_REVIEW_REQUIRED_TOTAL.inc()
+            _alert_fatigue_stats["human_review_required_total"] += 1
+        else:
+            _alert_fatigue_stats["auto_handled_total"] += 1
         logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}, cached={analysis_cached}")
         
         # Track severity and threat metrics
@@ -1974,6 +2058,8 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         }
         alert_id = db.add_alert(alert_record)
         alert_record["id"] = alert_id
+        trace_id = _alert_trace_id(alert_id)
+        alert_record["trace_id"] = trace_id
 
         # Persist LLM analysis results for auditability
         db.add_analysis_result(
@@ -2022,6 +2108,7 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         resp = AlertResponse(
             status="processed",
             alert_id=alert_id,
+            trace_id=trace_id,
             analysis=analysis,
             actions_taken=actions_taken,
             severity=severity,
@@ -2035,6 +2122,7 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
             "type": "alert_processed",
             "source": source,
             "endpoint": "/api/alerts",
+            "trace_id": trace_id,
             **resp.dict()
         })
         return resp
@@ -2067,6 +2155,7 @@ async def process_alert(alert: Alert, request: Request, token = Depends(verify_t
         return AlertResponse(
             status="error",
             alert_id=alert_id,
+            trace_id=_alert_trace_id(alert_id),
             error=str(e)
         )
     finally:
@@ -2102,6 +2191,8 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
     source = detect_alert_source(alert)
     metrics["alerts_by_source"][source] += 1
     PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
+    PROM_ALERTS_RAW_TOTAL.labels(source=source).inc()
+    _alert_fatigue_stats["raw_total"] += 1
     
     try:
         if alert_rate_limiter:
@@ -2140,11 +2231,21 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         if analysis is None:
             logger.info("Analyzing internal alert with LLM...")
             analysis, llm_used, llm_latency = await analyze_with_fallback(alert.dict())
+            PROM_ALERTS_AFTER_DEDUP_TOTAL.inc()
+            PROM_LLM_TRIAGED_ALERTS_TOTAL.inc()
+            _alert_fatigue_stats["after_dedup_total"] += 1
+            _alert_fatigue_stats["llm_triaged_total"] += 1
             if deduplicator:
                 deduplicator.cache_analysis(alert.dict(), analysis)
 
         severity = analysis.get("severity", 5)
         threat_type = analysis.get("threat_type", "Unknown")
+        requires_review = _compute_human_review_required(int(severity))
+        if requires_review:
+            PROM_HUMAN_REVIEW_REQUIRED_TOTAL.inc()
+            _alert_fatigue_stats["human_review_required_total"] += 1
+        else:
+            _alert_fatigue_stats["auto_handled_total"] += 1
         logger.info(f"Analysis complete ({llm_used}): severity={severity}, threat={threat_type}")
         
         # Track severity and threat metrics
@@ -2271,6 +2372,8 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         }
         alert_id = db.add_alert(alert_record)
         alert_record["id"] = alert_id
+        trace_id = _alert_trace_id(alert_id)
+        alert_record["trace_id"] = trace_id
 
         db.add_analysis_result(
             alert_id,
@@ -2300,6 +2403,7 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         resp = AlertResponse(
             status="processed",
             alert_id=alert_id,
+            trace_id=trace_id,
             analysis=analysis,
             actions_taken=actions_taken,
             severity=severity,
@@ -2318,6 +2422,7 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
             "output": alert.output,
             "output_fields": alert.output_fields,
             "container_name": (alert.output_fields or {}).get("container.name", ""),
+            "trace_id": trace_id,
             **resp.dict()
         })
         return resp
@@ -2349,6 +2454,7 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         return AlertResponse(
             status="error",
             alert_id=alert_id,
+            trace_id=_alert_trace_id(alert_id),
             error=str(e)
         )
     finally:
@@ -2573,6 +2679,10 @@ async def export_llm_stats():
         n = s["total_requests"]
         succ = s["successes"]
         fail = s["failures"]
+        prompt_tokens = int(s.get("prompt_tokens", 0))
+        completion_tokens = int(s.get("completion_tokens", 0))
+        total_tokens = prompt_tokens + completion_tokens
+        total_cost = round(s["total_cost_usd"], 6)
         engines_out[engine] = {
             "total_requests": n,
             "successes": succ,
@@ -2582,8 +2692,13 @@ async def export_llm_stats():
             "p50_latency_s": round(statistics.median(lats), 4) if lats else 0,
             "p95_latency_s": round(sorted(lats)[int(len(lats) * 0.95)] if len(lats) >= 2 else (lats[0] if lats else 0), 4),
             "p99_latency_s": round(sorted(lats)[int(len(lats) * 0.99)] if len(lats) >= 2 else (lats[0] if lats else 0), 4),
-            "total_estimated_cost_usd": round(s["total_cost_usd"], 6),
+            "total_estimated_cost_usd": total_cost,
             "cost_per_call_usd": _LLM_COST_PER_CALL.get(engine, 0.005),
+            "prompt_tokens_total": prompt_tokens,
+            "completion_tokens_total": completion_tokens,
+            "tokens_total": total_tokens,
+            "avg_tokens_per_request": round(total_tokens / n, 2) if n else 0,
+            "avg_cost_per_request_usd": round(total_cost / n, 6) if n else 0,
         }
 
     # Also include runtime_stats from LLM manager for richer context
@@ -2595,7 +2710,7 @@ async def export_llm_stats():
         "engines": engines_out,
         "manager_runtime_stats": mgr_stats,
         "cost_model": _LLM_COST_PER_CALL,
-        "note": "Latencies are in seconds. Cost is estimated based on per-call pricing model.",
+        "note": "Latencies are in seconds. Cost and tokens are estimated from IDS payload/response size.",
     }
 
 # ============== ALERT ENDPOINTS ==============
@@ -2604,12 +2719,88 @@ async def export_llm_stats():
 async def get_alerts(limit: int = 10, source: Optional[str] = None):
     """Get alerts from database."""
     alerts = db.get_alerts(limit=limit, source=source)
+    for a in alerts:
+        if "trace_id" not in a or not a.get("trace_id"):
+            a["trace_id"] = _alert_trace_id(a.get("id", "unknown"))
     total = db.get_alert_count(source=source)
     return {
         "total": total,
         "showing": len(alerts),
         "storage": db.get_stats()["storage_type"],
         "alerts": alerts
+    }
+
+
+@app.get("/api/pipeline-overview")
+async def pipeline_overview():
+    """Compact stage-by-stage operational view for dashboard pipeline strip."""
+    db_stats = db.get_stats()
+    total_alerts = db_stats.get("total_alerts", 0)
+    by_source = db_stats.get("alerts_by_source", {})
+    total_minutes = max(1.0, ((datetime.now() - datetime.fromisoformat(metrics["started_at"])).total_seconds() / 60.0))
+    llm_stats = await export_llm_stats()
+    engine_stats = llm_stats.get("engines", {})
+    llm_requests = sum(v.get("total_requests", 0) for v in engine_stats.values())
+    llm_p95 = 0.0
+    if engine_stats:
+        llm_p95 = max(v.get("p95_latency_s", 0.0) for v in engine_stats.values())
+    dedup_stats = deduplicator.get_stats() if deduplicator else {"hit_rate_percent": 0}
+    gov = get_governance_status()
+    human_review = _alert_fatigue_stats["human_review_required_total"]
+    auto_handled = _alert_fatigue_stats["auto_handled_total"]
+    actions_total = gov.get("metrics", {}).get("approved", 0) + gov.get("metrics", {}).get("auto_executed", 0)
+
+    return {
+        "stages": [
+            {
+                "id": "falco",
+                "label": "Falco Alerts",
+                "rate_per_minute": round(by_source.get("falco", 0) / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": "green" if by_source.get("falco", 0) >= 0 else "yellow",
+            },
+            {
+                "id": "suricata",
+                "label": "Suricata Alerts",
+                "rate_per_minute": round(by_source.get("suricata", 0) / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": "green" if by_source.get("suricata", 0) > 0 else "yellow",
+            },
+            {
+                "id": "ingest",
+                "label": "IDS Ingest + Dedup",
+                "rate_per_minute": round(total_alerts / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": "green" if dedup_stats.get("hit_rate_percent", 0) >= 0 else "yellow",
+                "dedup_hit_rate_percent": dedup_stats.get("hit_rate_percent", 0),
+            },
+            {
+                "id": "llm",
+                "label": "LLM / Local Analysis",
+                "rate_per_minute": round(llm_requests / total_minutes, 2),
+                "p95_latency_ms": int(llm_p95 * 1000),
+                "status": "green" if llm_requests > 0 else "yellow",
+            },
+            {
+                "id": "gov",
+                "label": "Governance + K8s Actions",
+                "rate_per_minute": round(actions_total / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": "green" if actions_total >= 0 else "yellow",
+                "human_review_required": human_review,
+                "auto_handled": auto_handled,
+            },
+        ],
+        "alert_fatigue": {
+            "raw_total": _alert_fatigue_stats["raw_total"],
+            "after_dedup_total": _alert_fatigue_stats["after_dedup_total"],
+            "llm_triaged_total": _alert_fatigue_stats["llm_triaged_total"],
+            "human_review_required_total": human_review,
+            "auto_handled_total": auto_handled,
+            "reduction_percent": round(
+                (1 - (human_review / max(1, _alert_fatigue_stats["raw_total"]))) * 100, 2
+            ),
+        },
     }
 
 @app.get("/api/metrics")

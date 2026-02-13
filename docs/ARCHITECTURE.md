@@ -119,6 +119,24 @@ Every security event follows this path:
    └─ Prometheus counters restored from DB on restart
 ```
 
+### Pipeline-to-Metrics Mapping (Dashboard)
+
+The Overview "Pipeline Overview" row maps each stage to concrete metrics:
+
+| Stage | Metric / Source | Notes |
+|---|---|---|
+| Falco alerts | `smartcity_ids_alerts_raw_total{source="falco"}` | Raw ingress rate before dedup/throttling |
+| Suricata alerts | `smartcity_ids_alerts_raw_total{source="suricata"}` | Raw network alert ingress |
+| IDS ingest + dedup | `smartcity_ids_alerts_after_dedup_total`, `smartcity_ids_dedup_hit_rate_percent` | Shows analysis workload after dedup |
+| LLM / local analysis | `smartcity_ids_llm_requests_total{engine,result}`, `smartcity_ids_llm_latency_seconds` | p95 latency and per-engine throughput |
+| Governance + K8s actions | `smartcity_ids_human_review_required_total`, `smartcity_ids_actions_executed_total` | Analyst touch vs automated response |
+
+Additional LLM observability exported by IDS API:
+
+- `smartcity_ids_llm_tokens_total{engine,kind="prompt|completion"}` (estimated tokens)
+- `smartcity_ids_llm_cost_usd_total{engine}` (estimated total cost)
+- `/api/llm-stats/export` provides per-engine aggregate latency, token, and cost summaries used by UI tables.
+
 ---
 
 ## Source Code Structure

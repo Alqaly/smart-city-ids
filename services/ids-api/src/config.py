@@ -23,10 +23,10 @@ class Config:
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview")
     ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshot-v1-128k")
+    KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshot-v1-8k")
     
     # LLM Fallback Priority (comma-separated list of engines to try in order)
-    LLM_PRIORITY: str = os.getenv("LLM_PRIORITY", "xai,anthropic,openai,gemini,kimi")
+    LLM_PRIORITY: str = os.getenv("LLM_PRIORITY", "kimi,xai,anthropic,openai,gemini")
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1000"))

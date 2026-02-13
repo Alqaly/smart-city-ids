@@ -17,7 +17,7 @@ class KimiAnalyzer:
         self.api_key = Config.KIMI_API_KEY
         self.model = Config.KIMI_MODEL
         # Kimi uses OpenAI-compatible API
-        self.base_url = "https://api.moonshot.cn/v1/chat/completions"
+        self.base_url = "https://api.moonshot.ai/v1/chat/completions"
         
         self.system_prompt = """You are a cybersecurity expert analyzing threats in a Smart City infrastructure running on Kubernetes.
 

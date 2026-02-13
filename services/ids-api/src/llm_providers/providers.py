@@ -94,8 +94,8 @@ class KimiProvider(BaseProvider):
     """Moonshot Kimi models (OpenAI-compatible)"""
     NAME = "kimi"
     ENV_KEY = "KIMI_API_KEY"
-    DEFAULT_MODEL = "moonshot-v1-128k"
-    DEFAULT_BASE_URL = "https://api.moonshot.cn/v1"
+    DEFAULT_MODEL = "moonshot-v1-8k"
+    DEFAULT_BASE_URL = "https://api.moonshot.ai/v1"
     
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
         async with httpx.AsyncClient(timeout=60.0) as client:  # Kimi can be slower
