@@ -26,6 +26,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans
 .pill-ok{background:rgba(34,197,94,.15);color:var(--green)}
 .pill-warn{background:rgba(234,179,8,.15);color:var(--yellow)}
 .pill-err{background:rgba(239,68,68,.15);color:var(--red)}
+.pill-success{background:rgba(34,197,94,.18);color:var(--green)}
 .topbar-right button{background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:var(--radius);font-size:12px;cursor:pointer;transition:all .2s}
 .topbar-right button:hover{border-color:var(--accent);color:var(--text)}
 .tab-bar{display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;overflow-x:auto}
@@ -35,6 +36,13 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans
 .tab-panel{display:none;padding:24px;animation:fadeIn .2s}
 .tab-panel.active{display:block}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes attackFlow{
+0%{left:0;opacity:.7;transform:scale(1)}
+25%{left:25%;opacity:1;transform:scale(1.25)}
+50%{left:50%;opacity:.8;transform:scale(1.1)}
+75%{left:75%;opacity:.65;transform:scale(1.2)}
+100%{left:100%;opacity:0;transform:scale(.8)}
+}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
 .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
@@ -71,7 +79,7 @@ tr:hover td{background:rgba(0,212,255,.03)}
 .pipeline-stage .name{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px}
 .pipeline-stage .rate{font-size:20px;font-weight:700;margin-top:4px}
 .pipeline-stage .meta{font-size:11px;color:var(--text2);margin-top:2px}
-@media(max-width:1200px){.pipeline-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:1200px){.pipeline-grid{grid-template-columns:1fr 1fr}#iotServiceCards{grid-template-columns:1fr!important}}
 @media(max-width:900px){.row{grid-template-columns:1fr}}
 .btn{padding:8px 16px;border-radius:var(--radius);border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
 .btn-primary{background:var(--accent);color:#000}.btn-primary:hover{opacity:.85}
@@ -197,8 +205,97 @@ tr:hover td{background:rgba(0,212,255,.03)}
 
 <div class="tab-panel" id="tab-iot">
   <div class="stat-grid" id="iotStats"></div>
+
+  <!-- Protocol Emulator Service Cards -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px" id="iotServiceCards">
+    <!-- Traffic Camera ONVIF -->
+    <div class="card" id="svc-traffic-camera">
+      <div class="card-header" style="border-left:3px solid var(--accent)">
+        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4F7;</span> Traffic Camera</h3>
+        <span class="badge badge-info" id="tc-status">Loading...</span>
+      </div>
+      <div class="card-body" style="font-size:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>ONVIF Profile S</strong></div>
+        <div id="tc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+      </div>
+    </div>
+    <!-- Parking System MQTT/CoAP -->
+    <div class="card" id="svc-parking-system">
+      <div class="card-header" style="border-left:3px solid var(--green)">
+        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F17F;&#xFE0F;</span> Parking System</h3>
+        <span class="badge badge-info" id="pk-status">Loading...</span>
+      </div>
+      <div class="card-body" style="font-size:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>MQTT / CoAP / SenML</strong></div>
+        <div id="pk-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+      </div>
+    </div>
+    <!-- Healthcare FHIR R4 -->
+    <div class="card" id="svc-healthcare-api">
+      <div class="card-header" style="border-left:3px solid var(--red)">
+        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F3E5;</span> Healthcare API</h3>
+        <span class="badge badge-info" id="hc-status">Loading...</span>
+      </div>
+      <div class="card-body" style="font-size:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>HL7 FHIR R4</strong></div>
+        <div id="hc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+      </div>
+    </div>
+    <!-- Environmental Sensor Modbus/OPC UA -->
+    <div class="card" id="svc-env-sensor">
+      <div class="card-header" style="border-left:3px solid var(--yellow)">
+        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F32C;&#xFE0F;</span> Env Sensor</h3>
+        <span class="badge badge-info" id="ev-status">Loading...</span>
+      </div>
+      <div class="card-body" style="font-size:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>Modbus TCP + OPC UA</strong></div>
+        <div id="ev-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+      </div>
+    </div>
+    <!-- Street Lighting DALI-2 / TALQ -->
+    <div class="card" id="svc-street-lighting">
+      <div class="card-header" style="border-left:3px solid var(--orange)">
+        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4A1;</span> Street Lighting</h3>
+        <span class="badge badge-info" id="sl-status">Loading...</span>
+      </div>
+      <div class="card-body" style="font-size:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>DALI-2 + TALQ v2.4</strong></div>
+        <div id="sl-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live Telemetry Data tables -->
+  <div class="row" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-header"><h3>&#x1F4F9; ANPR &amp; Camera Telemetry</h3><span style="font-size:11px;color:var(--text3)">ONVIF real-time feed</span></div>
+      <div class="card-body" id="tc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>&#x1F3E5; Medical Device Telemetry</h3><span style="font-size:11px;color:var(--text3)">IEEE 11073 devices</span></div>
+      <div class="card-body" id="hc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-bottom:16px">
+    <div class="card">
+      <div class="card-header"><h3>&#x1F32C;&#xFE0F; Air Quality Index (AQI)</h3><span style="font-size:11px;color:var(--text3)">EPA standard, 5 monitoring stations</span></div>
+      <div class="card-body" id="ev-aqi" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>&#x1F4A1; Lighting Zones</h3><span style="font-size:11px;color:var(--text3)">DALI-2 dimming by zone</span></div>
+      <div class="card-body" id="sl-zones" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header"><h3>&#x1F17F;&#xFE0F; Parking Lot Occupancy</h3><span style="font-size:11px;color:var(--text3)">Magnetometer + Ultrasonic Sensor Fusion</span></div>
+    <div class="card-body" id="pk-lots" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+  </div>
+
+  <!-- Fleet device table -->
   <div class="card">
-    <div class="card-header"><h3>IoT Device Fleet</h3><button class="btn btn-outline btn-sm" onclick="loadIoT()">Refresh</button></div>
+    <div class="card-header"><h3>IoT Device Fleet</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">All K8s IoT pods</span><button class="btn btn-outline btn-sm" onclick="loadIoT()">Refresh</button></div>
     <div class="card-body no-pad"><table><thead><tr><th>Device / Pod</th><th>Type</th><th>Status</th><th>Namespace</th><th>IP</th></tr></thead><tbody id="iotTable"></tbody></table></div>
   </div>
 </div>
@@ -259,12 +356,22 @@ tr:hover td{background:rgba(0,212,255,.03)}
     <div class="card-body">
       <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;color:var(--text2);line-height:1.7">
         <strong style="color:var(--text);font-size:13px">How this emulation works</strong><br>
-        These actions inject Falco-style runtime alerts and Suricata-style network alerts into the real IDS pipeline.
-        Each alert goes through ingest, deduplication, LLM or local analysis, governance checks, and optional Kubernetes response.
-        Behavior depends on provider availability (API keys, quota, cooldown) and governance mode (manual, assisted, autopilot).
-        Use this console to validate end-to-end analyst triage flow, not just raw alert generation.
+        Scenarios inject Falco/Suricata-style alerts into the real IDS path. You can watch attack flow, LLM analysis, governance, and K8s actions as one chain.
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+        <div id="attackStatus" class="pill pill-ok" style="min-width:120px;text-align:center">Idle</div>
+        <div id="attackProgress" class="progress" style="flex:1;height:8px">
+          <div id="attackProgressFill" class="progress-fill" style="width:0%;background:var(--red)"></div>
+        </div>
+        <span id="attackTimer" style="font-size:12px;color:var(--text3)">00:00</span>
       </div>
       <div class="attack-grid" id="attackGrid"></div>
+      <div class="card" style="margin-top:20px">
+        <div class="card-header"><h3>Live Attack Flow <span id="attackFlowCount" style="font-size:12px;color:var(--text3)">0 events</span></h3></div>
+        <div class="card-body no-pad">
+          <div id="attackFlowVis" style="height:200px;overflow:hidden;position:relative;background:var(--bg);border-radius:6px"></div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="card" style="margin-top:16px">
@@ -288,6 +395,22 @@ tr:hover td{background:rgba(0,212,255,.03)}
   </div>
   <div class="card-body" id="liveFeedBody" style="display:block">
     <pre id="liveFeedLog" style="font-size:11.5px;color:var(--text2);max-height:500px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to live event stream...</pre>
+  </div>
+</div>
+
+<!-- IoT Live Stream — MQTT bridge -->
+<div class="card" id="iotLiveCard" style="margin:0 24px 16px;border:1px solid var(--accent2);border-radius:8px">
+  <div class="card-header" style="cursor:pointer" onclick="toggleIoTStream()">
+    <h3><span id="iotStreamDot" class="dot dot-yellow" style="margin-right:6px"></span>IoT Live Stream</h3>
+    <span style="font-size:11px;color:var(--text3);margin-left:8px" id="iotStreamStatus">Connecting...</span>
+    <span class="badge badge-purple" id="iotStreamCount" style="margin-left:8px">0</span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearIoTStream()">Clear</button>
+      <button class="btn btn-outline btn-sm" id="iotStreamToggleBtn" onclick="event.stopPropagation();toggleIoTStream()">▼</button>
+    </div>
+  </div>
+  <div class="card-body" id="iotStreamBody" style="display:block">
+    <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to IoT stream...</pre>
   </div>
 </div>
 
@@ -321,7 +444,15 @@ function doLogin(){
     else{document.getElementById('loginError').textContent=d.detail||'Login failed';document.getElementById('loginError').style.display='block'}
   }).catch(function(){document.getElementById('loginError').textContent='Connection error';document.getElementById('loginError').style.display='block'});
 }
-function doLogout(){TOKEN='';localStorage.removeItem('ids_token');clearInterval(refreshTimer);document.getElementById('dashboard').style.display='none';document.getElementById('loginScreen').style.display='flex'}
+function doLogout(){
+  TOKEN='';
+  localStorage.removeItem('ids_token');
+  clearInterval(refreshTimer);
+  if(_sse){try{_sse.close()}catch(e){} _sse=null;}
+  if(iotWS){try{iotWS.close()}catch(e){} iotWS=null;}
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
 
 function apiFetch(path,opts){
   opts=opts||{};
@@ -336,6 +467,7 @@ function showDashboard(){
   refreshAll();
   refreshTimer=setInterval(refreshAll,10000);
   connectLiveFeed();
+  setTimeout(connectIoTStream, 1000);
 }
 
 /* ─── SSE Live Pipeline Feed ─── */
@@ -465,6 +597,92 @@ function clearLiveFeed(){
   document.getElementById('liveFeedLog').innerHTML='Waiting for alerts...';
   _sseFeedCount=0;
   document.getElementById('liveFeedCount').textContent='0';
+}
+
+// IoT Live Stream WebSocket
+var iotWS=null;
+var iotStreamCount=0;
+var iotStreamOpen=true;
+
+function getIoTStreamUrls(){
+  var host=window.location.hostname||'localhost';
+  return [
+    'ws://'+host+':30810',          // NodePort
+    'ws://localhost:30810',         // local nodeport
+    'ws://localhost:8081',          // optional port-forward
+    'ws://127.0.0.1:8081'
+  ];
+}
+
+function connectIoTStream(){
+  if(iotWS){try{iotWS.close()}catch(e){}}
+  var dot=document.getElementById('iotStreamDot');
+  var status=document.getElementById('iotStreamStatus');
+  var log=document.getElementById('iotStreamLog');
+  dot.className='dot dot-yellow';
+  status.textContent='Connecting to MQTT bridge...';
+
+  var urls=getIoTStreamUrls();
+  var idx=0;
+
+  function tryNext(){
+    if(idx>=urls.length){
+      dot.className='dot dot-red';
+      status.textContent='Bridge unavailable (check iot-stream-bridge service)';
+      return;
+    }
+    var ws=new WebSocket(urls[idx]);
+    idx+=1;
+    ws.onopen=function(){
+      iotWS=ws;
+      dot.className='dot dot-green';
+      status.textContent='Live IoT MQTT traffic';
+      log.innerHTML='<span style="color:var(--green)">\\u2713 Connected to IoT stream bridge.</span>';
+    };
+    ws.onmessage=function(event){
+      try{
+        var data=JSON.parse(event.data);
+        if(data.type!=='iot_message')return;
+        iotStreamCount+=1;
+        document.getElementById('iotStreamCount').textContent=iotStreamCount;
+        var msg=data.data||{};
+        var ts=new Date().toLocaleTimeString();
+        var device=msg.device||msg.device_id||'unknown';
+        var ns=msg.namespace||'smart-city';
+        var sample=msg.vehicle_count||msg.temperature_c||msg.power_kw||msg.value||'data';
+        var rate=Math.round((data.total_rate||0)*60);
+        var line='['+ts+'] '+device+' ('+ns+') -> '+sample+' | '+rate+'/min\\n';
+        log.textContent=line+log.textContent.slice(0,8000);
+      }catch(e){
+        console.warn('IoT WS parse error',e);
+      }
+    };
+    ws.onerror=function(){try{ws.close()}catch(e){}};
+    ws.onclose=function(){
+      if(iotWS===ws){iotWS=null;}
+      if(dot.className.indexOf('dot-green')!==-1){
+        dot.className='dot dot-red';
+        status.textContent='Disconnected — reconnecting...';
+        setTimeout(connectIoTStream,2000);
+      }else{
+        tryNext();
+      }
+    };
+  }
+
+  tryNext();
+}
+
+function toggleIoTStream(){
+  iotStreamOpen=!iotStreamOpen;
+  document.getElementById('iotStreamBody').style.display=iotStreamOpen?'block':'none';
+  document.getElementById('iotStreamToggleBtn').textContent=iotStreamOpen?'▼':'▲';
+}
+
+function clearIoTStream(){
+  document.getElementById('iotStreamLog').textContent='IoT stream cleared.';
+  iotStreamCount=0;
+  document.getElementById('iotStreamCount').textContent='0';
 }
 
 document.querySelectorAll('.tab-btn').forEach(function(b){
@@ -727,26 +945,255 @@ function renderK8sTables(){
 }
 
 function loadIoT(){
-  Promise.all([apiNoAuth('/api/metrics'),apiNoAuth('/api/iot/pods')]).then(function(r){
-    var m=r[0],podData=r[1];
-    var pods=(podData&&podData.pods)?podData.pods:[];
-    var totalPods=podData&&podData.total||0;
-    var runningPods=podData&&podData.running||0;
-    var types=podData&&podData.types?Object.keys(podData.types).length:0;
+  Promise.all([apiNoAuth('/api/metrics'),apiNoAuth('/api/iot/devices'),apiNoAuth('/api/iot/telemetry')]).then(function(r){
+    var m=r[0],deviceData=r[1],telem=r[2]||{};
+    var devices=(deviceData&&deviceData.devices)?deviceData.devices:[];
+    var totalPods=deviceData&&deviceData.total||devices.length||0;
+    var runningPods=devices.filter(function(d){return !!d.connected}).length;
+    var typeSet={};
+    devices.forEach(function(d){typeSet[d.device_type||'unknown']=1});
+    var types=Object.keys(typeSet).length;
     var healthPct=totalPods>0?Math.round((runningPods/totalPods)*100):0;
+
+    // Count protocols online
+    var protos=0;
+    if(telem['traffic-camera']&&telem['traffic-camera'].online) protos++;
+    if(telem['parking-system']&&telem['parking-system'].online) protos++;
+    if(telem['healthcare-api']&&telem['healthcare-api'].online) protos++;
+    if(telem['env-sensor']&&telem['env-sensor'].online) protos++;
+    if(telem['street-lighting']&&telem['street-lighting'].online) protos++;
+
     document.getElementById('iotStats').innerHTML=
       '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">'+runningPods+'</div><div class="stat-sub">Running in cluster</div></div>'+
       '<div class="stat-card blue"><div class="stat-label">Total Pods</div><div class="stat-value">'+totalPods+'</div><div class="stat-sub">IoT workloads deployed</div></div>'+
-      '<div class="stat-card purple"><div class="stat-label">Device Types</div><div class="stat-value">'+types+'</div><div class="stat-sub">'+Object.keys(podData&&podData.types||{}).join(', ')+'</div></div>'+
+      '<div class="stat-card purple"><div class="stat-label">Protocol Emulators</div><div class="stat-value">'+protos+'/5</div><div class="stat-sub">ONVIF, MQTT, FHIR, Modbus, DALI</div></div>'+
       '<div class="stat-card '+(healthPct>=90?'green':healthPct>=50?'yellow':'red')+'"><div class="stat-label">Fleet Health</div><div class="stat-value">'+healthPct+'%</div><div class="stat-sub">'+runningPods+'/'+totalPods+' pods running</div></div>';
+
+    // ── Traffic Camera ONVIF Card ──
+    var tc=telem['traffic-camera']||{};
+    document.getElementById('tc-status').innerHTML=tc.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
+    document.getElementById('tc-status').className=tc.online?'badge badge-low':'badge badge-crit';
+    if(tc.online&&tc.telemetry){
+      var t=tc.telemetry,st=tc.stats||{};
+      document.getElementById('tc-detail').innerHTML=
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
+        '<div style="color:var(--text3)">Device ID</div><div><strong>'+esc(t.device_id||'-')+'</strong></div>'+
+        '<div style="color:var(--text3)">Resolution</div><div>'+esc(t.codec||'H.264')+' @ '+esc(t.current_fps||'-')+' fps</div>'+
+        '<div style="color:var(--text3)">Bitrate</div><div>'+(t.bitrate_kbps||0)+' kbps</div>'+
+        '<div style="color:var(--text3)">CMOS Temp</div><div>'+(t.cmos_temperature_c||'-')+'&deg;C</div>'+
+        '<div style="color:var(--text3)">Day/Night</div><div>'+esc(t.day_night_mode||'-')+'</div>'+
+        '<div style="color:var(--text3)">Frames</div><div>'+(st.frames_processed||t.frame_counter||0).toLocaleString()+'</div>'+
+        '<div style="color:var(--text3)">Plates Detected</div><div><strong style="color:var(--accent)">'+(st.plates_detected||0)+'</strong></div>'+
+        '<div style="color:var(--text3)">Vehicles</div><div>'+(st.vehicles_total||0).toLocaleString()+'</div>'+
+        '<div style="color:var(--text3)">Firmware</div><div style="font-family:monospace">'+esc(st.firmware||'-')+'</div>'+
+        '<div style="color:var(--text3)">ONVIF Ver</div><div>'+esc(st.protocol_version||'-')+'</div>'+
+        '</div>';
+      // ANPR telemetry panel
+      var lp=t.last_plate;
+      if(lp){
+        document.getElementById('tc-telemetry').innerHTML=
+          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
+          '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">'+
+          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Last Plate</div>'+
+          '<div style="font-size:22px;font-weight:700;font-family:monospace;color:var(--accent)">'+esc(lp.plate_number||'-')+'</div>'+
+          '<div style="font-size:11px;color:var(--text2);margin-top:4px">'+esc(lp.vehicle_class||'-')+' &bull; '+esc(lp.direction||'-')+' &bull; Lane '+esc(lp.lane||'-')+'</div>'+
+          '</div>'+
+          '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">'+
+          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Speed</div>'+
+          '<div style="font-size:22px;font-weight:700">'+(lp.speed_kmh||0).toFixed(1)+' <span style="font-size:12px;color:var(--text3)">km/h</span></div>'+
+          '<div style="font-size:11px;color:var(--text2);margin-top:4px">Confidence: '+(lp.confidence*100||0).toFixed(1)+'%</div>'+
+          '</div>'+
+          '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">'+
+          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Camera Feed</div>'+
+          '<div style="font-size:14px;font-weight:600">'+esc(t.codec||'H.264')+'</div>'+
+          '<div style="font-size:11px;color:var(--text2);margin-top:4px">Input: '+(t.input_voltage_v||0).toFixed(2)+'V &bull; IR: '+esc(t.ir_status||'-')+'</div>'+
+          '</div></div>';
+      }
+    }else{
+      document.getElementById('tc-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
+      document.getElementById('tc-telemetry').innerHTML='<div style="color:var(--text3);text-align:center">No ONVIF telemetry available</div>';
+    }
+
+    // ── Parking System MQTT/CoAP Card ──
+    var pk=telem['parking-system']||{};
+    document.getElementById('pk-status').innerHTML=pk.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
+    document.getElementById('pk-status').className=pk.online?'badge badge-low':'badge badge-crit';
+    if(pk.online&&pk.stats){
+      var ps=pk.stats,gw=pk.gateway||{};
+      document.getElementById('pk-detail').innerHTML=
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
+        '<div style="color:var(--text3)">Gateway ID</div><div><strong>'+esc(gw.gateway_id||'-')+'</strong></div>'+
+        '<div style="color:var(--text3)">Sensors</div><div>'+esc(gw.sensors_online||ps.sensors_total-ps.sensors_faulted||0)+' / '+esc(ps.sensors_total||0)+' online</div>'+
+        '<div style="color:var(--text3)">Occupancy</div><div><strong style="color:var(--yellow)">'+(ps.occupancy_rate||0).toFixed(1)+'%</strong></div>'+
+        '<div style="color:var(--text3)">Capacity</div><div>'+(ps.total_occupied||0)+' / '+(ps.total_capacity||0)+' spaces</div>'+
+        '<div style="color:var(--text3)">MQTT Broker</div><div style="font-family:monospace;font-size:11px">'+esc(gw.broker||'-')+'</div>'+
+        '<div style="color:var(--text3)">Uplink</div><div style="font-size:11px">'+esc(gw.uplink||'-')+'</div>'+
+        '<div style="color:var(--text3)">Battery Avg</div><div>'+(ps.avg_battery_pct||0).toFixed(1)+'%</div>'+
+        '<div style="color:var(--text3)">Faulted</div><div style="color:var(--red)">'+(ps.sensors_faulted||0)+' sensors</div>'+
+        '</div>';
+      // Parking lot detail
+      var lots=pk.lots;
+      if(lots&&lots.parking_lots){
+        var lh='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">';
+        Object.keys(lots.parking_lots).forEach(function(lid){
+          var lot=lots.parking_lots[lid];
+          var occPct=(lot.occupancy_pct||0);
+          var barColor=occPct>85?'var(--red)':occPct>60?'var(--yellow)':'var(--green)';
+          lh+='<div style="background:var(--bg);border-radius:6px;padding:14px;border:1px solid var(--border)">'+
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+            '<strong>'+esc(lot.name||lid)+'</strong>'+
+            '<span class="badge" style="background:rgba(234,179,8,.12);color:var(--yellow)">'+esc(lot.zone||'-')+'</span></div>'+
+            '<div style="font-size:24px;font-weight:700;margin-bottom:4px">'+occPct.toFixed(0)+'% <span style="font-size:12px;color:var(--text3);font-weight:400">occupied</span></div>'+
+            '<div class="progress" style="margin-bottom:8px"><div class="progress-fill" style="width:'+occPct+'%;background:'+barColor+'"></div></div>'+
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:var(--text2)">'+
+            '<div>Occupied: <strong>'+(lot.occupied||0)+'</strong></div>'+
+            '<div>Vacant: <strong>'+(lot.vacant||0)+'</strong></div>'+
+            '<div>Capacity: '+(lot.capacity||0)+'</div>'+
+            '<div>Battery: '+(lot.avg_battery_pct||0).toFixed(0)+'%</div>'+
+            '<div>Type: '+esc(lot.sensor_type||'-')+'</div>'+
+            '<div>Faulted: <span style="color:var(--red)">'+(lot.faulted_sensors||0)+'</span></div>'+
+            '</div></div>';
+        });
+        lh+='</div>';
+        document.getElementById('pk-lots').innerHTML=lh;
+      }
+    }else{
+      document.getElementById('pk-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
+      document.getElementById('pk-lots').innerHTML='<div style="color:var(--text3);text-align:center">No parking data available</div>';
+    }
+
+    // ── Healthcare FHIR R4 Card ──
+    var hc=telem['healthcare-api']||{};
+    document.getElementById('hc-status').innerHTML=hc.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
+    document.getElementById('hc-status').className=hc.online?'badge badge-low':'badge badge-crit';
+    if(hc.online&&hc.stats){
+      var hs=hc.stats,al=hc.alarms||{};
+      document.getElementById('hc-detail').innerHTML=
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
+        '<div style="color:var(--text3)">FHIR Version</div><div><strong>'+esc(hs.fhir_version||'-')+'</strong></div>'+
+        '<div style="color:var(--text3)">Active Devices</div><div>'+(hs.active_devices||0)+'</div>'+
+        '<div style="color:var(--text3)">Patients</div><div>'+(hs.active_patients||0)+'</div>'+
+        '<div style="color:var(--text3)">Observations</div><div><strong style="color:var(--accent)">'+(hs.observations_total||0).toLocaleString()+'</strong></div>'+
+        '<div style="color:var(--text3)">Medications</div><div>'+(hs.medications_active||0)+' active</div>'+
+        '<div style="color:var(--text3)">Active Alarms</div><div style="color:'+(hs.active_alarms>0?'var(--red)':'var(--green)')+'">'+(hs.active_alarms||0)+'</div>'+
+        '<div style="color:var(--text3)">Protocol</div><div style="font-size:11px">'+esc(hs.protocol||'-')+'</div>'+
+        '</div>';
+      // Medical devices telemetry
+      var devs=(hc.telemetry&&hc.telemetry.devices)?hc.telemetry.devices:[];
+      if(devs.length>0){
+        var dh='<table style="width:100%;font-size:12px"><thead><tr><th>Device</th><th>Type</th><th>Patient</th><th>Location</th><th>Readings</th><th>Battery</th><th>Alarm</th></tr></thead><tbody>';
+        devs.forEach(function(d){
+          var readingStr='';
+          if(d.readings){
+            var rkeys=Object.keys(d.readings);
+            readingStr=rkeys.map(function(k){return '<span style="color:var(--text2)">'+esc(k)+':</span> <strong>'+esc(String(d.readings[k]))+'</strong>'}).join(' &bull; ');
+          }
+          var alarmBadge=d.alarm_active?'<span class="badge badge-crit">'+esc(d.alarm_type||'ALARM')+'</span>':'<span class="badge badge-low">OK</span>';
+          var battColor=d.battery_pct>50?'var(--green)':d.battery_pct>20?'var(--yellow)':'var(--red)';
+          dh+='<tr><td style="font-family:monospace">'+esc(d.device_id||'-')+'</td>'+
+            '<td><span class="badge badge-purple" style="font-size:10px">'+esc(d.type||'-')+'</span><br><span style="font-size:10px;color:var(--text3)">'+esc(d.ieee_standard||'')+'</span></td>'+
+            '<td>'+esc(d.patient||'-')+'</td>'+
+            '<td>'+esc(d.location||'-')+'</td>'+
+            '<td>'+readingStr+'</td>'+
+            '<td><span style="color:'+battColor+'">'+(d.battery_pct||0).toFixed(0)+'%</span></td>'+
+            '<td>'+alarmBadge+'</td></tr>';
+        });
+        dh+='</tbody></table>';
+        document.getElementById('hc-telemetry').innerHTML=dh;
+      }
+    }else{
+      document.getElementById('hc-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
+      document.getElementById('hc-telemetry').innerHTML='<div style="color:var(--text3);text-align:center">No FHIR telemetry available</div>';
+    }
+
+    // ── Environmental Sensor Modbus/OPC UA Card ──
+    var ev=telem['env-sensor']||{};
+    document.getElementById('ev-status').innerHTML=ev.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
+    document.getElementById('ev-status').className=ev.online?'badge badge-low':'badge badge-crit';
+    if(ev.online&&ev.stats){
+      var es=ev.stats;
+      document.getElementById('ev-detail').innerHTML=
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
+        '<div style="color:var(--text3)">Stations</div><div><strong>'+(es.stations_online||0)+' / '+(es.stations_total||0)+'</strong> online</div>'+
+        '<div style="color:var(--text3)">Sensor Channels</div><div>'+(es.total_sensor_channels||0)+'</div>'+
+        '<div style="color:var(--text3)">City AQI</div><div><strong style="color:'+(es.avg_aqi<=50?'var(--green)':es.avg_aqi<=100?'var(--yellow)':'var(--red)')+'">'+
+        (es.avg_aqi||0)+'</strong> '+esc(es.aqi_category||'')+'</div>'+
+        '<div style="color:var(--text3)">Faulted</div><div style="color:'+(es.stations_faulted>0?'var(--red)':'var(--green)')+'">'+
+        (es.stations_faulted||0)+' stations</div>'+
+        '<div style="color:var(--text3)">Registers/Stn</div><div>'+(es.sensors_per_station||0)+'</div>'+
+        '<div style="color:var(--text3)">Protocol</div><div style="font-size:11px">'+esc(es.protocol||'-')+'</div>'+
+        '</div>';
+      // AQI station cards
+      var aqi=ev.aqi;
+      if(aqi&&aqi.stations){
+        var ah='<div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">'+
+          '<div style="background:var(--bg);border-radius:8px;padding:16px 24px;border:1px solid var(--border);text-align:center">'+
+          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">City AQI</div>'+
+          '<div style="font-size:36px;font-weight:700;color:'+(aqi.city_aqi<=50?'var(--green)':aqi.city_aqi<=100?'var(--yellow)':'var(--red)')+'">'+
+          (aqi.city_aqi||0)+'</div>'+
+          '<div style="font-size:11px;color:var(--text2)">'+esc(aqi.category||'')+'</div></div>'+
+          '<div style="flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">';
+        Object.keys(aqi.stations).forEach(function(sid){
+          var s=aqi.stations[sid];
+          var col=s.aqi<=50?'var(--green)':s.aqi<=100?'var(--yellow)':s.aqi<=150?'var(--orange)':'var(--red)';
+          ah+='<div style="background:var(--bg);border-radius:6px;padding:8px 12px;border:1px solid var(--border)">'+
+            '<div style="font-size:10px;color:var(--text3)">'+esc(sid)+'</div>'+
+            '<div style="font-size:20px;font-weight:700;color:'+col+'">'+s.aqi+'</div>'+
+            '<div style="font-size:10px;color:var(--text2)">'+esc(s.category||'')+'</div></div>';
+        });
+        ah+='</div></div>';
+        document.getElementById('ev-aqi').innerHTML=ah;
+      }
+    }else{
+      document.getElementById('ev-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
+      document.getElementById('ev-aqi').innerHTML='<div style="color:var(--text3);text-align:center">No environmental data</div>';
+    }
+
+    // ── Street Lighting DALI-2/TALQ Card ──
+    var sl=telem['street-lighting']||{};
+    document.getElementById('sl-status').innerHTML=sl.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
+    document.getElementById('sl-status').className=sl.online?'badge badge-low':'badge badge-crit';
+    if(sl.online&&sl.stats){
+      var ss=sl.stats;
+      document.getElementById('sl-detail').innerHTML=
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
+        '<div style="color:var(--text3)">Luminaires</div><div><strong>'+(ss.luminaires_on||0)+' / '+(ss.luminaires_total||0)+'</strong> on</div>'+
+        '<div style="color:var(--text3)">Total Power</div><div>'+(ss.total_power_w||0).toFixed(0)+' W</div>'+
+        '<div style="color:var(--text3)">Avg Dimming</div><div>'+(ss.avg_dim_pct||0).toFixed(0)+'%</div>'+
+        '<div style="color:var(--text3)">Faults</div><div style="color:'+(ss.luminaires_fault>0?'var(--red)':'var(--green)')+'">'+
+        (ss.luminaires_fault||0)+'</div>'+
+        '<div style="color:var(--text3)">Energy</div><div>'+(ss.energy_total_kwh||0).toFixed(2)+' kWh</div>'+
+        '<div style="color:var(--text3)">Pro Protocol</div><div style="font-size:11px">'+esc(ss.protocol||'-')+'</div>'+
+        '</div>';
+      // Zone breakdown
+      if(ss.zones){
+        var zh='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">';
+        Object.keys(ss.zones).forEach(function(zn){
+          var z=ss.zones[zn];
+          var dimColor=z.avg_dim_pct>70?'var(--yellow)':z.avg_dim_pct>30?'var(--accent)':'var(--text3)';
+          zh+='<div style="background:var(--bg);border-radius:6px;padding:10px 12px;border:1px solid var(--border)">'+
+            '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px">'+esc(zn)+'</div>'+
+            '<div style="font-size:18px;font-weight:700;color:'+dimColor+'">'+(z.avg_dim_pct||0).toFixed(0)+'%</div>'+
+            '<div style="font-size:10px;color:var(--text2)">'+(z.on||0)+'/'+z.count+' on &bull; '+(z.power_w||0).toFixed(0)+'W</div></div>';
+        });
+        zh+='</div>';
+        document.getElementById('sl-zones').innerHTML=zh;
+      }
+    }else{
+      document.getElementById('sl-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
+      document.getElementById('sl-zones').innerHTML='<div style="color:var(--text3);text-align:center">No lighting data</div>';
+    }
+
+    // ── Fleet table (existing) ──
     var ih='';
-    if(pods.length>0){
-      pods.forEach(function(p){
-        var dotCls=p.status==='Running'?'dot-green':p.status==='Pending'?'dot-yellow':'dot-red';
-        ih+='<tr><td>'+esc(p.name)+'</td><td><span class="badge badge-info">'+esc(p.type)+'</span></td><td><span class="dot '+dotCls+'"></span>'+esc(p.status)+'</td><td>'+esc(p.namespace)+'</td><td>'+esc(p.ip)+'</td></tr>';
+    if(devices.length>0){
+      devices.forEach(function(d){
+        var dotCls=d.connected?'dot-green':'dot-red';
+        var rate=(typeof d.current_rate==='number')?d.current_rate.toFixed(1):'0.0';
+        ih+='<tr><td>'+esc(d.device||d.device_id||'-')+'</td><td><span class="badge badge-info">'+esc(d.device_type||'-')+'</span></td><td><span class="dot '+dotCls+'"></span>'+esc(d.status||'-')+' <span style="font-size:11px;color:var(--text3)">('+rate+'/min)</span></td><td>'+esc(d.namespace||'smart-city')+'</td><td>'+esc(d.ip||'-')+'</td></tr>';
       });
     }else{
-      ih='<tr><td colspan="5" style="text-align:center;color:var(--text3)">No IoT pods found — K8s API may be unreachable</td></tr>';
+      ih='<tr><td colspan="5" style="text-align:center;color:var(--text3)">No IoT devices found</td></tr>';
     }
     document.getElementById('iotTable').innerHTML=ih;
   });
@@ -939,134 +1386,129 @@ function loadHistory(){
   });
 }
 
-var ATTACKS=[
-  {id:'falco_shell',name:'Shell in Container',cat:'Runtime',desc:'Spawn bash in IoT pod - triggers Falco runtime detection',source:'falco',severity:'Critical'},
-  {id:'falco_sensitive',name:'Sensitive File Read',cat:'File',desc:'Read /etc/shadow inside container - triggers Falco file rule',source:'falco',severity:'Warning'},
-  {id:'falco_network',name:'Unexpected Outbound',cat:'Network',desc:'Outbound connection from IoT pod - triggers Falco network rule',source:'falco',severity:'Notice'},
-  {id:'suricata_scan',name:'Port Scan',cat:'Recon',desc:'Network port scan - triggers Suricata ET SCAN signature',source:'suricata',severity:'Warning'},
-  {id:'suricata_exfil',name:'Data Exfiltration',cat:'Exfil',desc:'DNS-based data exfiltration - triggers Suricata policy rule',source:'suricata',severity:'Critical'},
-  {id:'ddos',name:'DDoS Simulation',cat:'DoS',desc:'NTP amplification flood against IoT service',source:'suricata',severity:'Critical'},
-  {id:'privesc',name:'Privilege Escalation',cat:'Priv',desc:'Container breakout attempt via setuid binary',source:'falco',severity:'Critical'},
-  {id:'custom',name:'Custom Alert',cat:'Custom',desc:'Inject a custom alert with your own parameters',source:'custom',severity:'Variable'}
+const ATTACK_SCENARIOS=[
+  {id:0,name:'DDoS Traffic Cameras',source:'suricata',threat:'DDoS',pod:'traffic-camera-lusail-01',sev:9,color:'#ef4444',duration:15000,icon:'🌐',particles:50},
+  {id:1,name:'Shell Healthcare Pod',source:'falco',threat:'Privilege Escalation',pod:'healthcare-vitalmon-03',sev:8,color:'#f97316',duration:12000,icon:'🐚',particles:30},
+  {id:2,name:'Port Scan Parking',source:'suricata',threat:'Reconnaissance',pod:'parking-meter-westbay',sev:6,color:'#eab308',duration:10000,icon:'🔍',particles:20},
+  {id:3,name:'Exfil Smart Lights',source:'falco',threat:'Data Exfiltration',pod:'smart-light-doha-02',sev:7,color:'#00d4ff',duration:18000,icon:'📤',particles:40}
 ];
-function renderAttackTab(){
-  var html='';
-  ATTACKS.forEach(function(a){
-    html+='<div class="attack-card" onclick="'+(a.id==='custom'?'showCustomModal()':'runAttack(\''+a.id+'\')')+'">'+
-      '<div style="display:flex;justify-content:space-between;align-items:start">'+
-      '<h4>['+a.cat+'] '+a.name+'</h4>'+
-      '<span class="badge '+(a.severity==='Critical'?'badge-crit':a.severity==='Warning'?'badge-med':'badge-low')+'">'+a.severity+'</span>'+
-      '</div><p>'+a.desc+'</p>'+
-      '<div style="margin-top:8px;font-size:11px;color:var(--text3)">Source: '+a.source+'</div></div>';
-  });
-  document.getElementById('attackGrid').innerHTML=html;
+var currentAttack=null;
+var attackTimerMs=0;
+var attackFlowEvents=0;
+
+function attackSeverityClass(sev){
+  return sev>=8?'badge-crit':sev>=6?'badge-high':'badge-med';
 }
 
-function runAttack(type){
+function renderAttackTab(){
+  var grid=document.getElementById('attackGrid');
+  if(!grid)return;
+  var html='';
+  ATTACK_SCENARIOS.forEach(function(attack){
+    html+='<div class="attack-card" onclick="launchAttack('+attack.id+')" style="border-left:3px solid '+attack.color+'">'+
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
+      '<span style="font-size:16px">'+attack.icon+'</span>'+
+      '<h4 style="margin:0;color:'+attack.color+'">'+attack.name+'</h4>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--text3)">'+
+      '<span class="badge '+attackSeverityClass(attack.sev)+'">'+attack.sev+'/10</span> '+
+      attack.pod+' • '+attack.source.toUpperCase()+
+      '</div></div>';
+  });
+  html+='<div class="attack-card" onclick="showCustomModal()" style="border-left:3px solid var(--accent2)"><h4 style="margin:0 0 6px 0">⚙️ Custom Alert</h4><p>Create a custom payload and inject into `/api/alerts/internal`.</p></div>';
+  grid.innerHTML=html;
+}
+
+function launchAttack(attackId){
+  if(currentAttack)return;
+  var attack=ATTACK_SCENARIOS.find(function(a){return a.id===attackId});
+  if(!attack)return;
+  currentAttack=attack;
+  attackTimerMs=0;
+
+  document.getElementById('attackStatus').textContent='Attacking: '+attack.name;
+  document.getElementById('attackStatus').className='pill pill-err';
+  document.getElementById('attackProgressFill').style.background='var(--red)';
+  document.getElementById('attackProgressFill').style.width='0%';
+  document.getElementById('attackTimer').textContent='00:00';
+
+  addLog('['+new Date().toLocaleTimeString()+'] ATTACK START: '+attack.name+' ('+attack.source+')');
+  triggerRealAttack(attack);
+
+  var attackInterval=setInterval(function(){
+    attackTimerMs+=100;
+    var progress=Math.min(100,(attackTimerMs/attack.duration)*100);
+    document.getElementById('attackProgressFill').style.width=progress+'%';
+    document.getElementById('attackTimer').textContent=new Date(attackTimerMs).toISOString().substr(14,5);
+    if(Math.random()<0.3){createAttackParticle(attack);}
+    if(attackTimerMs>=attack.duration){
+      clearInterval(attackInterval);
+      attackComplete();
+    }
+  },100);
+}
+
+function severityToPriority(sev){
+  if(sev>=8)return 'Critical';
+  if(sev>=6)return 'Warning';
+  return 'Notice';
+}
+
+function triggerRealAttack(attack){
   var ts=new Date().toISOString();
-  var payloads={
-    falco_shell:{output:'Terminal shell in container: bash was spawned in traffic-camera-north (user=root command=bash)',priority:'Critical',rule:'Terminal shell in container',time:ts,output_fields:{'container.name':'traffic-camera-north','proc.cmdline':'bash','user.name':'root'}},
-    falco_sensitive:{output:'Sensitive file opened for reading: /etc/shadow by process cat in container air-quality-downtown',priority:'Warning',rule:'Read sensitive file untrusted',time:ts,output_fields:{'container.name':'air-quality-downtown','proc.cmdline':'cat /etc/shadow','fd.name':'/etc/shadow'}},
-    falco_network:{output:'Unexpected outbound connection from smart-light-main-st to 185.192.69.10:443',priority:'Notice',rule:'Unexpected outbound connection destination',time:ts,output_fields:{'container.name':'smart-light-main-st','fd.sip':'185.192.69.10','fd.sport':'443'}},
-    suricata_scan:{output:'Suricata Network Alert: ET SCAN Potential VNC Scan 5900-5920 (10.42.1.5 to 10.42.0.8:5900/TCP) [SigID: 2002911]',priority:'Warning',rule:'ET SCAN Potential VNC Scan 5900-5920',time:ts,output_fields:{'container.name':'suricata','alert.signature':'ET SCAN Potential VNC Scan','src_ip':'10.42.1.5','dest_ip':'10.42.0.8','proto':'TCP'}},
-    suricata_exfil:{output:'Suricata Network Alert: ET POLICY Possible Data Exfiltration via DNS (10.42.1.5 to 203.0.113.50:53/UDP) [SigID: 2027863]',priority:'Critical',rule:'ET POLICY Possible Data Exfiltration via DNS',time:ts,output_fields:{'container.name':'suricata','alert.signature':'ET POLICY Data Exfiltration','src_ip':'10.42.1.5','dest_ip':'203.0.113.50','proto':'UDP'}},
-    ddos:{output:'Suricata Network Alert: ET DOS Possible NTP DDoS Amplification (10.0.0.99 to 10.42.0.8:80/UDP) [SigID: 2016150]',priority:'Critical',rule:'ET DOS Possible NTP DDoS Amplification',time:ts,output_fields:{'container.name':'suricata','alert.signature':'ET DOS NTP DDoS','src_ip':'10.0.0.99','dest_ip':'10.42.0.8','proto':'UDP'}},
-    privesc:{output:'Container privilege escalation: setuid binary in power-grid-monitor (user=www-data command=sudo su)',priority:'Critical',rule:'Launch Privileged Container',time:ts,output_fields:{'container.name':'power-grid-monitor','proc.cmdline':'sudo su','user.name':'www-data'}}
+  var traceId='attack-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
+  var payload={
+    output:attack.source.toUpperCase()+' Attack: '+attack.name+' on '+attack.pod,
+    priority:severityToPriority(attack.sev),
+    rule:attack.name,
+    time:ts,
+    output_fields:{
+      'container.name':attack.pod,
+      'alert.signature':attack.name,
+      'threat.type':attack.threat,
+      'trace.id':traceId
+    }
   };
-  var payload=payloads[type];
-  if(!payload)return;
-  var attackName=ATTACKS.find(function(x){return x.id===type});
-  var label=attackName?attackName.name:type;
-  addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  addLog('  ATTACK SIMULATION: '+label.toUpperCase());
-  addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  addLog('');
-  addLog('  ► STEP 1: Generating alert payload');
-  addLog('  ┌─ Alert Input (sent to /api/alerts/internal) ───────────────');
-  addLog('  │ Rule:       '+payload.rule);
-  addLog('  │ Priority:   '+payload.priority);
-  addLog('  │ Source:     '+(attackName?attackName.source:'unknown'));
-  addLog('  │ Output:     '+payload.output);
-  addLog('  │ Container:  '+(payload.output_fields['container.name']||'-'));
-  addLog('  │ Process:    '+(payload.output_fields['proc.cmdline']||payload.output_fields['alert.signature']||'-'));
-  addLog('  └──────────────────────────────────────────────────────────────');
-  addLog('');
-  addLog('  ► STEP 2: Sending to IDS API → rate limiter → dedup → LLM...');
-  addLog('    Waiting for LLM analysis...');
-  var sendTime=performance.now();
-  fetch(API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    var elapsed=Math.round(performance.now()-sendTime);
-    var a=d.analysis||{};
-    var sev=d.severity||a.severity||'-';
-    var eng=d.llm_engine||a.llm_engine||a.model_used||'unknown';
-    var threat=d.threat_type||a.threat_type||'-';
-    var summary=d.summary||a.summary||'';
-    var confidence=a.confidence||'-';
-    var reasoning=a.reasoning||'';
-    var impact=a.business_impact||'';
-    var indicators=(a.key_indicators||[]).join(', ')||'-';
-    var mitigating=(a.mitigating_factors||[]).join(', ')||'-';
-    var recs=(a.recommendations||[]);
-    var autoActs=(a.automated_actions||[]);
-    var actionsTaken=(d.actions_taken&&d.actions_taken.length)?d.actions_taken:[];
-    addLog('');
-    addLog('  ► STEP 3: LLM Analysis Complete ('+elapsed+'ms)');
-    addLog('  ┌─ LLM Response ────────────────────────────────────────────');
-    addLog('  │ Engine:      '+eng);
-    addLog('  │ Status:      '+(d.status||'ok'));
-    addLog('  │ Alert ID:    '+(d.alert_id||'-'));
-    addLog('  │ Latency:     '+(d.processing_time_ms||elapsed)+'ms');
-    addLog('  │');
-    addLog('  │ ┌─ Threat Assessment ─────────────────────────────────');
-    addLog('  │ │ Severity:    '+sev+' / 10'+(parseInt(sev)>=8?' ⚠ CRITICAL':parseInt(sev)>=6?' ⚡ HIGH':''));
-    addLog('  │ │ Threat Type: '+threat);
-    addLog('  │ │ Confidence:  '+(typeof confidence==='number'?Math.round(confidence*100)+'%':confidence));
-    addLog('  │ └────────────────────────────────────────────────────');
-    addLog('  │');
-    addLog('  │ Summary:');
-    addLog('  │   '+summary);
-    if(reasoning){
-      addLog('  │');
-      addLog('  │ LLM Reasoning:');
-      addLog('  │   '+reasoning);
-    }
-    if(impact){
-      addLog('  │');
-      addLog('  │ Business Impact:');
-      addLog('  │   '+impact);
-    }
-    addLog('  │');
-    addLog('  │ Key Indicators:  '+indicators);
-    addLog('  │ Mitigating:      '+mitigating);
-    if(recs.length){
-      addLog('  │');
-      addLog('  │ Recommendations:');
-      recs.forEach(function(r,i){addLog('  │   '+(i+1)+'. '+r)});
-    }
-    addLog('  └──────────────────────────────────────────────────────────');
-    addLog('');
-    addLog('  ► STEP 4: Automated Response');
-    if(actionsTaken.length){
-      addLog('  ┌─ K8s Actions Executed ──────────────────────────────────');
-      actionsTaken.forEach(function(act){
-        addLog('  │ ✓ '+act+(parseInt(sev)>=8?' (severity ≥ 8 → isolate)':parseInt(sev)>=6?' (severity ≥ 6 → scale up)':''));
-      });
-      addLog('  └──────────────────────────────────────────────────────────');
-    } else {
-      addLog('  │ No automated actions triggered'+(parseInt(sev)<6?' (severity '+sev+' < 6 threshold)':''));
-    }
-    if(autoActs.length && !actionsTaken.length){
-      addLog('  │ LLM recommended: '+autoActs.join(', ')+' (not executed — check governance mode)');
-    }
-    addLog('');
-    addLog('  ✅ Pipeline complete: '+label+' → severity '+sev+' → '+threat);
-    addLog('');
+  fetch(API+'/api/alerts/internal',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
   })
-  .catch(function(e){addLog('  ❌ ERROR: '+e.message+'\n')});
-  setTimeout(refreshAll,2000);
-  setTimeout(refreshAll,5000);
+  .then(function(r){return r.json()})
+  .then(function(data){
+    addLog('['+new Date().toLocaleTimeString()+'] ✅ Attack injected → Trace: '+(data.trace_id||traceId)+' → Severity '+(data.severity||'-'));
+    setTimeout(refreshAll,1500);
+  })
+  .catch(function(e){
+    addLog('['+new Date().toLocaleTimeString()+'] ❌ Attack API error: '+e.message);
+  });
+}
+
+function createAttackParticle(attack){
+  var vis=document.getElementById('attackFlowVis');
+  if(!vis)return;
+  var particle=document.createElement('div');
+  particle.style.cssText='position:absolute;left:0;top:'+(Math.random()*180)+'px;width:4px;height:4px;background:'+attack.color+';border-radius:50%;opacity:.8;animation:attackFlow 2s linear forwards;font-size:10px';
+  particle.textContent=attack.icon;
+  vis.appendChild(particle);
+  attackFlowEvents+=1;
+  document.getElementById('attackFlowCount').textContent=attackFlowEvents+' events';
+  setTimeout(function(){particle.remove();},2000);
+}
+
+function attackComplete(){
+  document.getElementById('attackStatus').textContent='Complete';
+  document.getElementById('attackStatus').className='pill pill-success';
+  document.getElementById('attackProgressFill').style.background='var(--green)';
+  addLog('['+new Date().toLocaleTimeString()+'] ✅ Attack simulation complete');
+  setTimeout(function(){
+    document.getElementById('attackStatus').textContent='Idle';
+    document.getElementById('attackStatus').className='pill pill-ok';
+    document.getElementById('attackProgressFill').style.width='0%';
+    document.getElementById('attackProgressFill').style.background='var(--red)';
+    document.getElementById('attackTimer').textContent='00:00';
+    currentAttack=null;
+  },3000);
 }
 function showCustomModal(){
   document.getElementById('modalContent').innerHTML=

@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: iot-bridge-code
+  namespace: smart-city
+data:
+  bridge.py: |
+    import asyncio
+    import json
+    import os
+    import time
+    from collections import defaultdict
+
+    import paho.mqtt.client as mqtt
+    from websockets.server import serve
+
+    MQTT_HOST = os.getenv("MQTT_HOST", "mqtt-broker")
+    MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+    MQTT_TOPIC = os.getenv("MQTT_TOPIC", "sensors/#")
+    WS_HOST = os.getenv("WS_HOST", "0.0.0.0")
+    WS_PORT = int(os.getenv("WS_PORT", "8080"))
+    WINDOW_SECONDS = int(os.getenv("WINDOW_SECONDS", "30"))
+
+    clients = set()
+    event_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+    device_messages = defaultdict(list)
+
+    def on_connect(client, _userdata, _flags, rc):
+      if rc == 0:
+        client.subscribe(MQTT_TOPIC)
+        print(f"[bridge] MQTT connected, subscribed to {MQTT_TOPIC}", flush=True)
+      else:
+        print(f"[bridge] MQTT connect failed rc={rc}", flush=True)
+
+    def on_message(_client, _userdata, msg):
+      try:
+        payload = json.loads(msg.payload.decode("utf-8", errors="ignore"))
+      except Exception:
+        return
+      payload["topic"] = msg.topic
+      payload["received_at"] = time.time()
+      try:
+        event_queue.put_nowait(payload)
+      except asyncio.QueueFull:
+        # Drop oldest behavior by draining one item, then enqueue latest
+        try:
+          _ = event_queue.get_nowait()
+          event_queue.put_nowait(payload)
+        except Exception:
+          pass
+
+    async def broadcaster():
+      while True:
+        data = await event_queue.get()
+        now = time.time()
+        device = data.get("device", "unknown")
+        # maintain sliding window
+        msgs = [m for m in device_messages[device] if now - m.get("received_at", now) < WINDOW_SECONDS]
+        msgs.append(data)
+        device_messages[device] = msgs
+
+        total_rate_per_sec = sum(len(v) for v in device_messages.values()) / max(1, WINDOW_SECONDS)
+        out = {
+          "type": "iot_message",
+          "data": data,
+          "device_count": len(device_messages),
+          "total_rate": total_rate_per_sec,
+        }
+        message = json.dumps(out, ensure_ascii=False)
+
+        dead = []
+        for ws in list(clients):
+          try:
+            await ws.send(message)
+          except Exception:
+            dead.append(ws)
+        for ws in dead:
+          clients.discard(ws)
+
+    async def ws_handler(websocket):
+      clients.add(websocket)
+      try:
+        await websocket.wait_closed()
+      finally:
+        clients.discard(websocket)
+
+    async def main():
+      mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+      mqtt_client.on_connect = on_connect
+      mqtt_client.on_message = on_message
+      mqtt_client.connect(MQTT_HOST, MQTT_PORT, 60)
+      mqtt_client.loop_start()
+
+      ws_server = await serve(ws_handler, WS_HOST, WS_PORT)
+      print(f"[bridge] WS listening on ws://{WS_HOST}:{WS_PORT}", flush=True)
+      print(f"[bridge] MQTT source {MQTT_HOST}:{MQTT_PORT} topic {MQTT_TOPIC}", flush=True)
+
+      broadcaster_task = asyncio.create_task(broadcaster())
+      try:
+        await ws_server.wait_closed()
+      finally:
+        broadcaster_task.cancel()
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+
+    if __name__ == "__main__":
+      asyncio.run(main())
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: iot-stream-bridge
+  namespace: smart-city
+  labels:
+    app: iot-stream-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: iot-stream-bridge
+  template:
+    metadata:
+      labels:
+        app: iot-stream-bridge
+    spec:
+      containers:
+      - name: bridge
+        image: python:3.11-slim
+        command:
+        - /bin/sh
+        - -lc
+        - pip install --no-cache-dir paho-mqtt websockets && python -u /app/bridge.py
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MQTT_HOST
+          value: mqtt-broker
+        - name: MQTT_PORT
+          value: "1883"
+        - name: MQTT_TOPIC
+          value: sensors/#
+        - name: WS_PORT
+          value: "8080"
+        volumeMounts:
+        - name: code
+          mountPath: /app
+      volumes:
+      - name: code
+        configMap:
+          name: iot-bridge-code
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: iot-stream-bridge
+  namespace: smart-city
+  labels:
+    app: iot-stream-bridge
+spec:
+  type: NodePort
+  selector:
+    app: iot-stream-bridge
+  ports:
+  - name: ws
+    port: 8080
+    targetPort: 8080
+    nodePort: 30810

@@ -2461,6 +2461,105 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         await request_queue.dequeue()
         PROM_REQUEST_QUEUE_SIZE.set(request_queue.queue_size)
 
+# ============== IOT SERVICE TELEMETRY PROXY ==============
+# Aggregates live data from the 3 protocol-accurate IoT emulators
+
+import httpx
+
+_IOT_SERVICES = {
+    "traffic-camera": {
+        "label": "Traffic Camera",
+        "protocol": "ONVIF Profile S",
+        "url": "http://traffic-camera-service.smart-city.svc.cluster.local",
+        "endpoints": {
+            "health": "/health",
+            "telemetry": "/api/telemetry",
+            "anpr": "/api/anpr/statistics",
+            "cameras": "/api/cameras",
+            "stats": "/api/stats",
+        },
+    },
+    "parking-system": {
+        "label": "Parking System",
+        "protocol": "MQTT/CoAP/SenML",
+        "url": "http://parking-system-service.smart-city.svc.cluster.local",
+        "endpoints": {
+            "health": "/health",
+            "lots": "/api/lots",
+            "gateway": "/api/gateway",
+            "stats": "/api/stats",
+        },
+    },
+    "healthcare-api": {
+        "label": "Healthcare API",
+        "protocol": "HL7 FHIR R4",
+        "url": "http://healthcare-api-service.smart-city.svc.cluster.local",
+        "endpoints": {
+            "health": "/health",
+            "telemetry": "/api/devices/telemetry",
+            "alarms": "/api/devices/alarms",
+            "stats": "/api/stats",
+        },
+    },
+    "env-sensor": {
+        "label": "Environmental Sensor",
+        "protocol": "Modbus TCP + OPC UA",
+        "url": "http://env-sensor-service.smart-city.svc.cluster.local",
+        "endpoints": {
+            "health": "/health",
+            "stats": "/api/stats",
+            "aqi": "/api/aqi",
+            "telemetry": "/api/telemetry",
+        },
+    },
+    "street-lighting": {
+        "label": "Street Lighting",
+        "protocol": "DALI-2 + TALQ v2.4",
+        "url": "http://street-lighting-service.smart-city.svc.cluster.local",
+        "endpoints": {
+            "health": "/health",
+            "stats": "/api/stats",
+            "telemetry": "/api/telemetry",
+        },
+    },
+}
+
+
+async def _fetch_json(url: str, timeout: float = 3.0):
+    """Fetch JSON from an internal service with timeout."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/iot/telemetry")
+async def iot_telemetry():
+    """Aggregate live telemetry from all IoT emulators for dashboard.
+
+    Proxies real-time data from:
+    - Traffic Camera (ONVIF) → camera state, ANPR stats, telemetry
+    - Parking System (MQTT/CoAP) → sensor stats, lot occupancy, gateway info
+    - Healthcare API (FHIR R4) → device telemetry, alarms, observation count
+    """
+    results = {}
+    for svc_id, svc in _IOT_SERVICES.items():
+        svc_data = {"label": svc["label"], "protocol": svc["protocol"], "online": False}
+        for ep_name, ep_path in svc["endpoints"].items():
+            url = f"{svc['url']}{ep_path}"
+            data = await _fetch_json(url)
+            if data:
+                svc_data["online"] = True
+                svc_data[ep_name] = data
+        results[svc_id] = svc_data
+
+    return results
+
+
 # ============== IOT SENSOR ENDPOINTS ==============
 
 # IoT device registry (in-memory cache, backed by database)
@@ -2576,17 +2675,80 @@ async def receive_iot_sensor_data(data: IoTSensorData):
 
 @app.get("/api/iot/devices")
 async def get_iot_devices():
-    """List all registered IoT devices"""
+    """List IoT devices with live-ish operational fields for dashboard usage."""
+    devices: List[Dict[str, Any]] = []
+    now = datetime.now()
+
+    # Start from registered devices
+    for device_id, record in iot_devices.items():
+        last_seen_raw = record.get("last_seen")
+        last_seen = None
+        if isinstance(last_seen_raw, str):
+            try:
+                last_seen = datetime.fromisoformat(last_seen_raw.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                last_seen = None
+        if not last_seen:
+            last_seen = now
+        age_s = max(0, (now - last_seen).total_seconds())
+        connected = age_s <= 120
+        event_count = int(record.get("event_count", 0))
+        rate_per_min = round((event_count / max(1.0, age_s / 60.0)) if connected else 0.0, 2)
+        devices.append({
+            "device": device_id,
+            "namespace": "smart-city",
+            "device_type": record.get("device_type", "unknown"),
+            "status": "healthy" if connected else "stale",
+            "current_rate": rate_per_min,
+            "ip": record.get("ip", "-"),
+            "connected": connected,
+            # Keep compatibility with older consumers
+            "device_id": device_id,
+            "last_seen": record.get("last_seen"),
+            "event_count": event_count,
+        })
+
+    # Augment with live K8s pods (best source for current runtime health/IPs)
+    if k8s_automation:
+        try:
+            pods = await get_iot_pods()
+            for p in pods.get("pods", []):
+                pod_name = p.get("name")
+                exists = next((d for d in devices if d["device"] == pod_name), None)
+                if exists:
+                    exists["ip"] = p.get("ip", exists["ip"])
+                    exists["status"] = "healthy" if p.get("status") == "Running" else p.get("status", "unknown").lower()
+                    exists["connected"] = p.get("status") == "Running"
+                else:
+                    devices.append({
+                        "device": pod_name,
+                        "namespace": p.get("namespace", "smart-city"),
+                        "device_type": p.get("type", "pod"),
+                        "status": "healthy" if p.get("status") == "Running" else p.get("status", "unknown").lower(),
+                        "current_rate": 0.0,
+                        "ip": p.get("ip", "-"),
+                        "connected": p.get("status") == "Running",
+                        "device_id": pod_name,
+                        "last_seen": now.isoformat(),
+                        "event_count": 0,
+                    })
+        except Exception as e:
+            logger.warning(f"Could not enrich /api/iot/devices from pods: {e}")
+
+    active_rate = round(sum(float(d.get("current_rate", 0.0) or 0.0) for d in devices), 2)
     return {
-        "total": len(iot_devices),
-        "devices": list(iot_devices.values())
+        "devices": devices,
+        "total": len(devices),
+        "active_rate": active_rate,
     }
 
 # IoT pod label patterns for K8s pod lookup
 _IOT_POD_PREFIXES = [
-    ("traffic-camera", "Camera"),
-    ("healthcare-api", "Healthcare"),
-    ("parking-system", "Parking"),
+    ("traffic-camera", "ONVIF Camera"),
+    ("healthcare-api", "FHIR R4 Gateway"),
+    ("parking-system", "MQTT/CoAP Sensor"),
+    ("env-sensor", "Modbus/OPC UA Env"),
+    ("street-lighting", "DALI-2 Luminaire"),
     ("iot-devices-enhanced", "MQTT Simulator"),
     ("iot-simulator-high", "MQTT High-Freq"),
     ("iot-simulator-medium", "MQTT Med-Freq"),
