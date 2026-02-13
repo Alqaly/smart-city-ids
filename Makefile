@@ -1,7 +1,7 @@
-.PHONY: help check db-migrate start ids-api-venv test build-grok docs-check smoke-test
+.PHONY: help check db-migrate start ids-api-venv test docs-check smoke-test
 
 help:
-	@echo "Available targets: check db-migrate start ids-api-venv test build-grok docs-check smoke-test"
+	@echo "Available targets: check db-migrate start ids-api-venv test docs-check smoke-test"
 
 check:
 	@bash scripts/check-setup.sh
@@ -17,9 +17,6 @@ ids-api-venv:
 
 test:
 	@npm run -s test || pytest -q
-
-build-grok:
-	@if command -v bun >/dev/null 2>&1; then (cd grok-cli && bun run build); else (cd grok-cli && npm run build); fi
 
 docs-check:
 	@bash scripts/docs/check-docs.sh

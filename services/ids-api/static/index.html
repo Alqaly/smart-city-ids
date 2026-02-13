@@ -351,31 +351,72 @@ tr:hover td{background:rgba(0,212,255,.03)}
 </div>
 
 <div class="tab-panel" id="tab-attacks">
+  <!-- Attack Stats Row -->
+  <div class="stat-grid" id="attackStats">
+    <div class="stat-card red"><div class="stat-label">Attack Scenarios</div><div class="stat-value" id="atkScenarioCount">--</div><div class="stat-sub">Predefined + Custom</div></div>
+    <div class="stat-card orange"><div class="stat-label">MITRE Techniques</div><div class="stat-value" id="atkMitreCount">--</div><div class="stat-sub">ATT&CK for ICS mapped</div></div>
+    <div class="stat-card purple"><div class="stat-label">Target Services</div><div class="stat-value" id="atkTargetCount">--</div><div class="stat-sub">IoT protocol emulators</div></div>
+    <div class="stat-card blue"><div class="stat-label">Simulations Run</div><div class="stat-value" id="atkRunCount">0</div><div class="stat-sub">This session</div></div>
+  </div>
+
   <div class="card">
-    <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the IDS pipeline</span></div>
+    <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the real IDS pipeline</span></div>
     <div class="card-body">
       <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;color:var(--text2);line-height:1.7">
-        <strong style="color:var(--text);font-size:13px">How this emulation works</strong><br>
-        Scenarios inject Falco/Suricata-style alerts into the real IDS path. You can watch attack flow, LLM analysis, governance, and K8s actions as one chain.
+        <strong style="color:var(--text);font-size:13px">How Attack Simulation Works</strong><br>
+        Each scenario injects a Falco/Suricata-format alert into <code style="color:var(--accent)">/api/alerts/internal</code>.
+        The alert flows through the full IDS pipeline: <strong>Ingestion &#x2192; Dedup &#x2192; LLM Analysis &#x2192; Governance &#x2192; K8s Automation</strong>.
+        Watch the Live Pipeline Feed below to see real-time processing. Scenarios are grouped by <strong>MITRE ATT&amp;CK for ICS</strong> technique categories.
       </div>
+
+      <!-- Status + Progress Bar -->
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
-        <div id="attackStatus" class="pill pill-ok" style="min-width:120px;text-align:center">Idle</div>
+        <div id="attackStatus" class="pill pill-ok" style="min-width:140px;text-align:center">Idle</div>
         <div id="attackProgress" class="progress" style="flex:1;height:8px">
           <div id="attackProgressFill" class="progress-fill" style="width:0%;background:var(--red)"></div>
         </div>
-        <span id="attackTimer" style="font-size:12px;color:var(--text3)">00:00</span>
+        <span id="attackTimer" style="font-size:12px;color:var(--text3);font-family:monospace">00:00</span>
       </div>
+
+      <!-- Category Filter Chips -->
+      <div id="attackCategoryFilter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+
+      <!-- Attack Scenario Grid -->
       <div class="attack-grid" id="attackGrid"></div>
+
+      <!-- Live Attack Flow Visualisation -->
       <div class="card" style="margin-top:20px">
-        <div class="card-header"><h3>Live Attack Flow <span id="attackFlowCount" style="font-size:12px;color:var(--text3)">0 events</span></h3></div>
+        <div class="card-header">
+          <h3>Live Attack Flow</h3>
+          <div style="display:flex;align-items:center;gap:12px">
+            <span id="attackFlowCount" style="font-size:12px;color:var(--text3)">0 events</span>
+            <div style="display:flex;gap:4px" id="attackFlowLegend"></div>
+          </div>
+        </div>
         <div class="card-body no-pad">
-          <div id="attackFlowVis" style="height:200px;overflow:hidden;position:relative;background:var(--bg);border-radius:6px"></div>
+          <div id="attackFlowVis" style="height:200px;overflow:hidden;position:relative;background:var(--bg);border-radius:6px">
+            <div style="position:absolute;bottom:8px;left:12px;right:12px;display:flex;justify-content:space-between;font-size:10px;color:var(--text3);opacity:.5">
+              <span>&#x2190; Source</span><span>Ingest</span><span>Dedup</span><span>LLM</span><span>Action &#x2192;</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- MITRE ATT&CK Reference Card -->
   <div class="card" style="margin-top:16px">
-    <div class="card-header"><h3>Simulation Log</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Live verbose output — shows full LLM analysis pipeline</span><button class="btn btn-outline btn-sm" onclick="clearAttackLog()" style="margin-left:auto">Clear</button></div>
+    <div class="card-header" style="cursor:pointer" onclick="document.getElementById('mitreBody').style.display=document.getElementById('mitreBody').style.display==='none'?'block':'none'">
+      <h3>MITRE ATT&amp;CK for ICS Mapping</h3><span style="font-size:11px;color:var(--text3)">Click to expand technique reference</span>
+    </div>
+    <div class="card-body" id="mitreBody" style="display:none;font-size:12px">
+      <table><thead><tr><th>Technique ID</th><th>Name</th><th>Tactic</th><th>Scenario(s)</th></tr></thead><tbody id="mitreTable"></tbody></table>
+    </div>
+  </div>
+
+  <!-- Simulation Log -->
+  <div class="card" style="margin-top:16px">
+    <div class="card-header"><h3>Simulation Log</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Live verbose output — full LLM analysis pipeline</span><button class="btn btn-outline btn-sm" onclick="clearAttackLog()" style="margin-left:auto">Clear</button></div>
     <div class="card-body"><pre id="attackLog" style="font-size:11.5px;color:var(--text2);max-height:600px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre></div>
   </div>
 </div>
@@ -1386,37 +1427,106 @@ function loadHistory(){
   });
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   ATTACK SIMULATION ENGINE — 12 scenarios, MITRE ATT&CK for ICS
+   ═══════════════════════════════════════════════════════════════ */
 const ATTACK_SCENARIOS=[
-  {id:0,name:'DDoS Traffic Cameras',source:'suricata',threat:'DDoS',pod:'traffic-camera-lusail-01',sev:9,color:'#ef4444',duration:15000,icon:'🌐',particles:50},
-  {id:1,name:'Shell Healthcare Pod',source:'falco',threat:'Privilege Escalation',pod:'healthcare-vitalmon-03',sev:8,color:'#f97316',duration:12000,icon:'🐚',particles:30},
-  {id:2,name:'Port Scan Parking',source:'suricata',threat:'Reconnaissance',pod:'parking-meter-westbay',sev:6,color:'#eab308',duration:10000,icon:'🔍',particles:20},
-  {id:3,name:'Exfil Smart Lights',source:'falco',threat:'Data Exfiltration',pod:'smart-light-doha-02',sev:7,color:'#00d4ff',duration:18000,icon:'📤',particles:40}
+  // ── Initial Access ──
+  {id:0,name:'DDoS Traffic Cameras',cat:'Denial of Service',source:'suricata',threat:'DDoS / Volumetric Flood',pod:'traffic-camera',sev:9,color:'#ef4444',duration:15000,icon:'\uD83C\uDF10',particles:50,
+   mitre:'T0866',mitreName:'Exploitation of Remote Services',description:'SYN flood targeting ONVIF Profile S camera endpoints. Saturates RTSP/HTTP ports to blind surveillance.'},
+  {id:1,name:'Shell Healthcare Pod',cat:'Execution',source:'falco',threat:'Privilege Escalation',pod:'healthcare-api',sev:8,color:'#f97316',duration:12000,icon:'\uD83D\uDC1A',particles:30,
+   mitre:'T0807',mitreName:'Command-Line Interface',description:'Reverse shell spawned inside HL7 FHIR R4 container. Attacker gains CLI access to patient data endpoints.'},
+  {id:2,name:'Port Scan Parking',cat:'Discovery',source:'suricata',threat:'Reconnaissance',pod:'parking-system',sev:6,color:'#eab308',duration:10000,icon:'\uD83D\uDD0D',particles:20,
+   mitre:'T0846',mitreName:'Remote System Discovery',description:'Sequential SYN scan of MQTT broker (1883) and CoAP (5683) ports on parking sensor network.'},
+  {id:3,name:'Exfil Smart Lights',cat:'Exfiltration',source:'falco',threat:'Data Exfiltration',pod:'street-lighting',sev:7,color:'#00d4ff',duration:18000,icon:'\uD83D\uDCE4',particles:40,
+   mitre:'T0882',mitreName:'Theft of Operational Information',description:'DALI-2 luminaire schedule data exfiltrated via DNS tunneling. Contains zone dimming profiles and energy usage.'},
+  // ── New scenarios for 5 emulators ──
+  {id:4,name:'Modbus Register Overwrite',cat:'Impair Process',source:'falco',threat:'Sensor Manipulation',pod:'env-sensor',sev:9,color:'#a855f7',duration:14000,icon:'\u2699\uFE0F',particles:45,
+   mitre:'T0836',mitreName:'Modify Parameter',description:'Unauthorized write to Modbus holding registers 40001-40016 (PM2.5/O3 values). Falsifies EPA AQI readings to hide pollution event.'},
+  {id:5,name:'OPC UA Node Injection',cat:'Impair Process',source:'falco',threat:'Protocol Abuse',pod:'env-sensor',sev:8,color:'#ec4899',duration:13000,icon:'\uD83C\uDFED',particles:35,
+   mitre:'T0855',mitreName:'Unauthorized Command Message',description:'Rogue OPC UA client injects fabricated temperature nodes into environmental monitoring namespace.'},
+  {id:6,name:'ONVIF Camera Hijack',cat:'Lateral Movement',source:'falco',threat:'Device Takeover',pod:'traffic-camera',sev:9,color:'#dc2626',duration:16000,icon:'\uD83C\uDFA5',particles:50,
+   mitre:'T0867',mitreName:'Lateral Tool Transfer',description:'Attacker exploits WS-Discovery to pivot between ONVIF cameras. PTZ controls seized, ANPR feed redirected.'},
+  {id:7,name:'FHIR Patient Data Tamper',cat:'Impact',source:'falco',threat:'Data Integrity',pod:'healthcare-api',sev:10,color:'#b91c1c',duration:20000,icon:'\u2620\uFE0F',particles:55,
+   mitre:'T0831',mitreName:'Manipulation of Control',description:'Medication dosage modified in FHIR MedicationRequest resources. LOINC vitals observations altered to hide critical patient state.'},
+  {id:8,name:'MQTT Broker Poisoning',cat:'Impact',source:'suricata',threat:'Message Injection',pod:'parking-system',sev:8,color:'#059669',duration:12000,icon:'\uD83D\uDC8A',particles:35,
+   mitre:'T0830',mitreName:'Man in the Middle',description:'Rogue MQTT messages published to parking/+/status topics. SenML payloads report all bays as vacant causing traffic chaos.'},
+  {id:9,name:'TALQ Gateway Spoof',cat:'Evasion',source:'suricata',threat:'Identity Spoofing',pod:'street-lighting',sev:7,color:'#6366f1',duration:11000,icon:'\uD83D\uDCA1',particles:25,
+   mitre:'T0856',mitreName:'Spoof Reporting Message',description:'Fake TALQ v2.4 gateway sends spoofed outdoor-light-point state reports. Hides luminaire failures across 3 zones.'},
+  {id:10,name:'Ransomware IoT Fleet',cat:'Impact',source:'falco',threat:'Ransomware',pod:'traffic-camera',sev:10,color:'#991b1b',duration:22000,icon:'\uD83D\uDD12',particles:60,
+   mitre:'T0828',mitreName:'Loss of Productivity and Revenue',description:'Simulated ransomware encrypts ONVIF config, Modbus maps, and DALI scene files across the entire IoT fleet.'},
+  {id:11,name:'Credential Harvest RPi',cat:'Collection',source:'falco',threat:'Credential Theft',pod:'traffic-camera',sev:7,color:'#d97706',duration:10000,icon:'\uD83D\uDD11',particles:20,
+   mitre:'T0859',mitreName:'Valid Accounts',description:'Attacker harvests API keys from Raspberry Pi motion sensor config. Uses stolen creds to inject false alerts via /api/iot/sensor.'}
 ];
 var currentAttack=null;
 var attackTimerMs=0;
 var attackFlowEvents=0;
+var attackRunCount=0;
+var activeCategory='all';
 
 function attackSeverityClass(sev){
   return sev>=8?'badge-crit':sev>=6?'badge-high':'badge-med';
 }
 
 function renderAttackTab(){
+  // Update stats
+  var categories=[...new Set(ATTACK_SCENARIOS.map(function(a){return a.cat}))];
+  var targets=[...new Set(ATTACK_SCENARIOS.map(function(a){return a.pod}))];
+  var mitres=[...new Set(ATTACK_SCENARIOS.map(function(a){return a.mitre}))];
+  document.getElementById('atkScenarioCount').textContent=ATTACK_SCENARIOS.length+' + Custom';
+  document.getElementById('atkMitreCount').textContent=mitres.length;
+  document.getElementById('atkTargetCount').textContent=targets.length+'/5';
+  document.getElementById('atkRunCount').textContent=attackRunCount;
+
+  // Render category filter chips
+  var filterEl=document.getElementById('attackCategoryFilter');
+  var chips='<button class="btn btn-sm '+(activeCategory==='all'?'btn-primary':'btn-outline')+'" onclick="filterAttacks(\'all\')">All ('+ATTACK_SCENARIOS.length+')</button>';
+  categories.forEach(function(cat){
+    var count=ATTACK_SCENARIOS.filter(function(a){return a.cat===cat}).length;
+    chips+='<button class="btn btn-sm '+(activeCategory===cat?'btn-primary':'btn-outline')+'" onclick="filterAttacks(\''+cat+'\')">'+cat+' ('+count+')</button>';
+  });
+  filterEl.innerHTML=chips;
+
+  // Render scenario cards
   var grid=document.getElementById('attackGrid');
-  if(!grid)return;
   var html='';
-  ATTACK_SCENARIOS.forEach(function(attack){
+  var filtered=activeCategory==='all'?ATTACK_SCENARIOS:ATTACK_SCENARIOS.filter(function(a){return a.cat===activeCategory});
+  filtered.forEach(function(attack){
     html+='<div class="attack-card" onclick="launchAttack('+attack.id+')" style="border-left:3px solid '+attack.color+'">'+
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
-      '<span style="font-size:16px">'+attack.icon+'</span>'+
-      '<h4 style="margin:0;color:'+attack.color+'">'+attack.name+'</h4>'+
+      '<span style="font-size:18px">'+attack.icon+'</span>'+
+      '<div><h4 style="margin:0;color:'+attack.color+';font-size:13px">'+attack.name+'</h4>'+
+      '<span style="font-size:10px;color:var(--text3);font-family:monospace">'+attack.mitre+'</span></div>'+
       '</div>'+
-      '<div style="font-size:11px;color:var(--text3)">'+
-      '<span class="badge '+attackSeverityClass(attack.sev)+'">'+attack.sev+'/10</span> '+
-      attack.pod+' • '+attack.source.toUpperCase()+
+      '<p style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5">'+attack.description+'</p>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px">'+
+      '<span class="badge '+attackSeverityClass(attack.sev)+'">'+attack.sev+'/10</span>'+
+      '<span class="badge badge-info">'+attack.source.toUpperCase()+'</span>'+
+      '<span style="color:var(--text3)">'+attack.pod+'</span>'+
       '</div></div>';
   });
-  html+='<div class="attack-card" onclick="showCustomModal()" style="border-left:3px solid var(--accent2)"><h4 style="margin:0 0 6px 0">⚙️ Custom Alert</h4><p>Create a custom payload and inject into `/api/alerts/internal`.</p></div>';
+  html+='<div class="attack-card" onclick="showCustomModal()" style="border-left:3px solid var(--accent2)">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:18px">\u2699\uFE0F</span><h4 style="margin:0;font-size:13px">Custom Alert</h4></div>'+
+    '<p style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5">Create a custom Falco/Suricata payload and inject into the real IDS analysis pipeline.</p>'+
+    '<div style="font-size:11px"><span class="badge badge-purple">Custom</span></div></div>';
   grid.innerHTML=html;
+
+  // Render MITRE table
+  var mitreMap={};
+  ATTACK_SCENARIOS.forEach(function(a){
+    if(!mitreMap[a.mitre]) mitreMap[a.mitre]={id:a.mitre,name:a.mitreName,tactic:a.cat,scenarios:[]};
+    mitreMap[a.mitre].scenarios.push(a.name);
+  });
+  var mitreHtml='';
+  Object.values(mitreMap).forEach(function(m){
+    mitreHtml+='<tr><td style="font-family:monospace;color:var(--accent)">'+m.id+'</td><td>'+m.name+'</td><td><span class="badge badge-info">'+m.tactic+'</span></td><td style="font-size:11px">'+m.scenarios.join(', ')+'</td></tr>';
+  });
+  document.getElementById('mitreTable').innerHTML=mitreHtml;
+}
+
+function filterAttacks(cat){
+  activeCategory=cat;
+  renderAttackTab();
 }
 
 function launchAttack(attackId){
@@ -1425,6 +1535,8 @@ function launchAttack(attackId){
   if(!attack)return;
   currentAttack=attack;
   attackTimerMs=0;
+  attackRunCount++;
+  document.getElementById('atkRunCount').textContent=attackRunCount;
 
   document.getElementById('attackStatus').textContent='Attacking: '+attack.name;
   document.getElementById('attackStatus').className='pill pill-err';
@@ -1432,7 +1544,9 @@ function launchAttack(attackId){
   document.getElementById('attackProgressFill').style.width='0%';
   document.getElementById('attackTimer').textContent='00:00';
 
-  addLog('['+new Date().toLocaleTimeString()+'] ATTACK START: '+attack.name+' ('+attack.source+')');
+  addLog('['+new Date().toLocaleTimeString()+'] \u2501\u2501\u2501 ATTACK START: '+attack.name+' ('+attack.mitre+' | '+attack.source.toUpperCase()+' | Sev '+attack.sev+'/10) \u2501\u2501\u2501');
+  addLog('['+new Date().toLocaleTimeString()+'] Target: '+attack.pod+' | Threat: '+attack.threat);
+  addLog('['+new Date().toLocaleTimeString()+'] '+attack.description);
   triggerRealAttack(attack);
 
   var attackInterval=setInterval(function(){
@@ -1458,7 +1572,7 @@ function triggerRealAttack(attack){
   var ts=new Date().toISOString();
   var traceId='attack-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
   var payload={
-    output:attack.source.toUpperCase()+' Attack: '+attack.name+' on '+attack.pod,
+    output:attack.source.toUpperCase()+' Attack: '+attack.name+' on '+attack.pod+' ['+attack.mitre+']',
     priority:severityToPriority(attack.sev),
     rule:attack.name,
     time:ts,
@@ -1466,6 +1580,9 @@ function triggerRealAttack(attack){
       'container.name':attack.pod,
       'alert.signature':attack.name,
       'threat.type':attack.threat,
+      'mitre.technique':attack.mitre,
+      'mitre.name':attack.mitreName,
+      'attack.category':attack.cat,
       'trace.id':traceId
     }
   };
@@ -1476,11 +1593,14 @@ function triggerRealAttack(attack){
   })
   .then(function(r){return r.json()})
   .then(function(data){
-    addLog('['+new Date().toLocaleTimeString()+'] ✅ Attack injected → Trace: '+(data.trace_id||traceId)+' → Severity '+(data.severity||'-'));
+    addLog('['+new Date().toLocaleTimeString()+'] \u2705 Attack injected \u2192 Trace: '+(data.trace_id||traceId)+' \u2192 Severity '+(data.severity||'-'));
+    if(data.actions_taken&&data.actions_taken.length){
+      addLog('['+new Date().toLocaleTimeString()+'] \u26A1 Automated Actions: '+data.actions_taken.join(', '));
+    }
     setTimeout(refreshAll,1500);
   })
   .catch(function(e){
-    addLog('['+new Date().toLocaleTimeString()+'] ❌ Attack API error: '+e.message);
+    addLog('['+new Date().toLocaleTimeString()+'] \u274C Attack API error: '+e.message);
   });
 }
 
@@ -1500,7 +1620,7 @@ function attackComplete(){
   document.getElementById('attackStatus').textContent='Complete';
   document.getElementById('attackStatus').className='pill pill-success';
   document.getElementById('attackProgressFill').style.background='var(--green)';
-  addLog('['+new Date().toLocaleTimeString()+'] ✅ Attack simulation complete');
+  addLog('['+new Date().toLocaleTimeString()+'] \u2705 Attack simulation complete — '+currentAttack.name+' ('+currentAttack.mitre+')');
   setTimeout(function(){
     document.getElementById('attackStatus').textContent='Idle';
     document.getElementById('attackStatus').className='pill pill-ok';
@@ -1511,6 +1631,8 @@ function attackComplete(){
   },3000);
 }
 function showCustomModal(){
+  var pods=['traffic-camera','parking-system','healthcare-api','env-sensor','street-lighting'];
+  var podOpts=pods.map(function(p){return '<option value="'+p+'">'+p+'</option>'}).join('');
   document.getElementById('modalContent').innerHTML=
     '<h2>Custom Alert Injection</h2>'+
     '<label style="font-size:12px;color:var(--text2)">Rule Name</label>'+
@@ -1519,18 +1641,23 @@ function showCustomModal(){
     '<textarea id="customOutput" style="width:100%;min-height:60px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px;margin-bottom:12px">Custom security event detected in smart-city service</textarea>'+
     '<label style="font-size:12px;color:var(--text2)">Priority</label>'+
     '<select id="customPriority" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px"><option value="Critical">Critical</option><option value="Warning" selected>Warning</option><option value="Notice">Notice</option></select>'+
-    '<label style="font-size:12px;color:var(--text2)">Container Name</label>'+
-    '<input id="customContainer" value="traffic-camera-north" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:16px">'+
+    '<label style="font-size:12px;color:var(--text2)">Target Pod</label>'+
+    '<select id="customContainer" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px">'+podOpts+'</select>'+
+    '<label style="font-size:12px;color:var(--text2)">MITRE Technique (optional)</label>'+
+    '<input id="customMitre" placeholder="e.g. T0836" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:16px">'+
     '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="sendCustom()">Inject Alert</button></div>';
   document.getElementById('modalOverlay').classList.add('open');
 }
 function sendCustom(){
   var ts=new Date().toISOString();
-  var payload={output:document.getElementById('customOutput').value,priority:document.getElementById('customPriority').value,rule:document.getElementById('customRule').value,time:ts,output_fields:{'container.name':document.getElementById('customContainer').value,'proc.cmdline':'custom-injection'}};
+  var mitre=document.getElementById('customMitre').value||'';
+  var payload={output:document.getElementById('customOutput').value,priority:document.getElementById('customPriority').value,rule:document.getElementById('customRule').value,time:ts,output_fields:{'container.name':document.getElementById('customContainer').value,'proc.cmdline':'custom-injection','mitre.technique':mitre}};
   closeModal();
-  addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  addLog('  CUSTOM ALERT INJECTION');
-  addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  attackRunCount++;
+  document.getElementById('atkRunCount').textContent=attackRunCount;
+  addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
+  addLog('  CUSTOM ALERT INJECTION'+(mitre?' ['+mitre+']':''));
+  addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
   addLog('');
   addLog('  ► STEP 1: Custom payload');
   addLog('  │ Rule:      '+payload.rule);

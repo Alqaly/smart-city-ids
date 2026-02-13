@@ -1,10 +1,16 @@
-# Raspberry Pi 5 Setup for Smart City IDS
+# Raspberry Pi Hardware Integration for Smart City IDS
+
+> Physical IoT device integration using Raspberry Pi 5 with PIR motion sensor.
+> For adding **any** IoT device (hardware or software), see [docs/IOT_INTEGRATION_SDK.md](../docs/IOT_INTEGRATION_SDK.md).
+
+---
 
 ## Hardware Required
 
-- Raspberry Pi 5
-- PIR Motion Sensor (HC-SR501 or similar)
+- Raspberry Pi 5 (or 4)
+- PIR Motion Sensor (AM312 recommended, or HC-SR501)
 - 3 jumper wires (female-to-female)
+- (Optional) Additional sensors: DS18B20 temperature, DHT22 humidity, MQ-135 air quality
 
 ## Network Architecture
 
@@ -241,3 +247,94 @@ sudo apt install python3-gpiozero
 # If running as service
 sudo journalctl -u smart-city-sensor -f
 ```
+---
+
+## Adding Other Hardware Sensors
+
+The `device_template.py` in this directory provides a base class you can subclass for **any** sensor. Here are examples:
+
+### DS18B20 Temperature Sensor (1-Wire)
+
+```
+DS18B20             Raspberry Pi 5
+──────              ──────────────
+VCC  ────────────►  Pin 1  (3.3V)
+DATA ────────────►  Pin 7  (GPIO 4)  + 4.7kΩ pull-up to 3.3V
+GND  ────────────►  Pin 9  (Ground)
+```
+
+```python
+from device_template import SmartCityDevice
+import glob
+
+class TemperatureSensor(SmartCityDevice):
+    def __init__(self, ids_url):
+        super().__init__(ids_url, "rpi5-temp-01", "temperature_sensor")
+        # Enable 1-Wire: add dtoverlay=w1-gpio to /boot/config.txt
+        base = glob.glob("/sys/bus/w1/devices/28-*")[0]
+        self.device_file = base + "/w1_slave"
+
+    def read_sensor(self):
+        with open(self.device_file) as f:
+            lines = f.readlines()
+        temp_str = lines[1].split("t=")[1]
+        temp_c = float(temp_str) / 1000.0
+        return {"temperature_c": temp_c}
+
+    def is_anomaly(self, reading):
+        return reading["temperature_c"] > 50.0 or reading["temperature_c"] < -10.0
+```
+
+### DHT22 Humidity + Temperature
+
+```python
+import adafruit_dht, board
+from device_template import SmartCityDevice
+
+class HumiditySensor(SmartCityDevice):
+    def __init__(self, ids_url):
+        super().__init__(ids_url, "rpi5-humidity-01", "humidity_sensor")
+        self.dht = adafruit_dht.DHT22(board.D4)
+
+    def read_sensor(self):
+        return {
+            "temperature_c": self.dht.temperature,
+            "humidity_pct": self.dht.humidity,
+        }
+
+    def is_anomaly(self, reading):
+        return reading["humidity_pct"] > 90 or reading["temperature_c"] > 45
+```
+
+### MQ-135 Air Quality (via ADC)
+
+```python
+import spidev
+from device_template import SmartCityDevice
+
+class AirQualitySensor(SmartCityDevice):
+    def __init__(self, ids_url):
+        super().__init__(ids_url, "rpi5-airquality-01", "air_quality_sensor")
+        self.spi = spidev.SpiDev()
+        self.spi.open(0, 0)
+
+    def read_sensor(self):
+        raw = self.spi.xfer2([1, (0 << 4) | 128, 0])
+        value = ((raw[1] & 3) << 8) + raw[2]
+        ppm = value * (1000 / 1023)  # Approximate PPM
+        return {"co2_ppm": round(ppm, 1), "raw_adc": value}
+
+    def is_anomaly(self, reading):
+        return reading["co2_ppm"] > 800
+```
+
+### General Steps for Any Sensor
+
+1. Copy `device_template.py` to a new file
+2. Subclass `SmartCityDevice`
+3. Implement `read_sensor()` for your hardware
+4. Implement `is_anomaly()` with your threshold logic
+5. Run: `python3 my_sensor.py --ids-url http://<IP>:30800`
+6. (Optional) Create a systemd service for auto-start
+
+For full integration documentation including K8s deployment and dashboard registration, see [docs/IOT_INTEGRATION_SDK.md](../docs/IOT_INTEGRATION_SDK.md).
