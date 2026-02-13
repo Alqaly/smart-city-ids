@@ -400,23 +400,23 @@ stateDiagram-v2
 
     state Closed {
         [*] --> Healthy
-        Healthy : is_closed() → True
+        Healthy : is_closed() = True
         Healthy : All analyse() calls forwarded
-        Healthy : failure_count: 0 → 4
+        Healthy : failure_count 0 to 4
         Healthy : record_success() resets count
     }
 
     state Open {
         [*] --> CircuitOpen
-        CircuitOpen : is_closed() → False
+        CircuitOpen : is_closed() = False
         CircuitOpen : All calls immediately skipped
         CircuitOpen : PROM_CIRCUIT_BREAKER_TRIPS.inc()
-        CircuitOpen : Cooldown: 30 seconds
+        CircuitOpen : Cooldown = 30 seconds
     }
 
     state HalfOpen {
         [*] --> TestRequest
-        TestRequest : is_closed() → True (single probe)
+        TestRequest : is_closed() = True (single probe)
         TestRequest : Allow exactly 1 request through
         TestRequest : Success → Closed + reset count
         TestRequest : Failure → Open + restart timer
@@ -447,22 +447,22 @@ stateDiagram-v2
     state Autopilot {
         [*] --> AutoDecision
         AutoDecision : ALL alerts handled automatically
-        AutoDecision : severity ≥ 8 → isolate_pod
-        AutoDecision : severity ≥ 6 → scale_up
-        AutoDecision : severity < 6 → log only
+        AutoDecision : severity >= 8 then isolate_pod
+        AutoDecision : severity >= 6 then scale_up
+        AutoDecision : severity < 6 then log only
         AutoDecision : No human approval needed
         AutoDecision : Full audit trail maintained
     }
 
     state Assisted {
         [*] --> AssistedDecision
-        AssistedDecision : severity < 8 → auto-execute
-        AssistedDecision : severity ≥ 8 → queue for approval
+        AssistedDecision : severity < 8 = auto-execute
+        AssistedDecision : severity >= 8 = queue for approval
         AssistedDecision --> WaitApproval
         WaitApproval : Analyst sees pending action
-        WaitApproval : Timeout: 5 minutes
-        WaitApproval --> Execute : ✅ Approved
-        WaitApproval --> Reject : ❌ Rejected
+        WaitApproval : Timeout = 5 minutes
+        WaitApproval --> Execute : Approved
+        WaitApproval --> Reject : Rejected
     }
 
     state Manual {

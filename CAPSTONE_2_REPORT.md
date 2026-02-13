@@ -37,6 +37,33 @@
 
 ---
 
+## List of Figures
+
+| Figure | Title | Page |
+|--------|-------|------|
+| Figure 1 | High-Level System Architecture | §4.2 |
+| Figure 2 | Alert Processing Pipeline (Sequence Diagram) | §4.3.1 |
+| Figure 3 | Circuit Breaker State Machine | §4.3.2 |
+| Figure 4 | Technology Stack Layers | §4.5 |
+| Figure 5 | Project Timeline (Gantt Chart) | §4.6 |
+| Figure 6 | LLM Multi-Provider Failover Chain | §5.2 |
+| Figure 7 | Circuit Breaker Implementation Detail | §5.2 |
+| Figure 8 | HITL Governance Modes State Machine | §5.3 |
+| Figure 9 | Kubernetes Cluster Topology (34 Pods) | §5.4 |
+| Figure 10 | Severity-Based Automated Response Matrix | §5.4 |
+| Figure 11 | Alert Deduplication Funnel | §5.6 |
+| Figure 12 | Deduplication Decision Flowchart | §5.6 |
+| Figure 13 | Attack Scenario Severity Distribution | §6.4 |
+| Figure 14 | MITRE ATT&CK for ICS Technique Coverage | §6.4 |
+| Figure 15 | Before vs After: Manual vs AI-Driven Response | §6.5 |
+| Figure 16 | LLM Provider Performance Comparison | §6.5 |
+| Figure 17 | Cluster Scalability & Resource Headroom | §6.5 |
+| Figure 18 | Capstone I vs Capstone II Achievement Comparison | §6.7 |
+| Figure 19 | IoT Integration Architecture | §5.1 |
+| Figure 20 | Key Contributions Summary Map | §7.2 |
+
+---
+
 ## Abstract
 
 This report presents the complete implementation and evaluation of an LLM-driven Intrusion Detection System (IDS) for edge-enabled smart cities, developed as the continuation and completion of Capstone I. Building upon the foundation established in Capstone I, which validated the feasibility of integrating Large Language Models with traditional IDS platforms, Capstone II delivers a production-grade system with multi-provider LLM support (xAI Grok-4, OpenAI GPT-4, Anthropic Claude, Google Gemini, and Moonshot Kimi), human-in-the-loop governance with three automation modes (Autopilot, Assisted, Manual), transparent threat assessment with confidence scoring and reasoning chains, PostgreSQL persistence with Prometheus counter restoration, and comprehensive Kubernetes automated responses.
@@ -269,72 +296,8 @@ Capstone II followed an agile development methodology with continuous integratio
 
 The final system architecture integrates all Capstone II enhancements:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          Smart City Services                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │Traffic Camera│  │Healthcare API│  │Parking System│  + 10 IoT Pods   │
-│  │   (Flask)    │  │   (Flask)    │  │   (Flask)    │                  │
-│  └──────────────┘  └──────────────┘  └──────────────┘                  │
-└────────────────────────────┬────────────────────────────────────────────┘
-                             │ HTTP/MQTT Traffic
-                             ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Kubernetes (K3s)                                │
-│  ┌──────────────┐  ┌──────────────┐                                    │
-│  │    Falco     │  │   Suricata   │  Runtime + Network Monitoring      │
-│  │   (eBPF)     │  │   (IDS)      │                                    │
-│  └──────┬───────┘  └──────┬───────┘                                    │
-│         │                 │                                             │
-│         ▼                 ▼                                             │
-│  ┌──────────────┐  ┌──────────────┐                                    │
-│  │Falco Forward │  │Suricata Fwd  │  JSON Normalization                │
-│  │   (Python)   │  │  (FastAPI)   │                                    │
-│  └──────┬───────┘  └──────┬───────┘                                    │
-│         │                 │                                             │
-│         └────────┬────────┘                                            │
-│                  ▼                                                      │
-│  ┌───────────────────────────────────────────────────────────────────┐ │
-│  │                         IDS API (FastAPI)                         │ │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐               │ │
-│  │  │Rate Limiter │  │Deduplicator │  │Request Queue│               │ │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘               │ │
-│  │         └────────────────┼────────────────┘                       │ │
-│  │                          ▼                                        │ │
-│  │  ┌─────────────────────────────────────────────────────────────┐ │ │
-│  │  │              LLM Engine Manager (5 Providers)               │ │ │
-│  │  │  ┌─────┐ ┌──────┐ ┌────────┐ ┌──────┐ ┌────┐              │ │ │
-│  │  │  │ xAI │→│OpenAI│→│Anthropic│→│Gemini│→│Kimi│              │ │ │
-│  │  │  └──┬──┘ └──┬───┘ └───┬────┘ └──┬───┘ └─┬──┘              │ │ │
-│  │  │     │       │         │         │       │                   │ │ │
-│  │  │  [Circuit Breaker per Engine - 5 failures → OPEN 30s]      │ │ │
-│  │  └─────────────────────────────────────────────────────────────┘ │ │
-│  │                          │                                        │ │
-│  │                          ▼                                        │ │
-│  │  ┌─────────────────────────────────────────────────────────────┐ │ │
-│  │  │              Governance Controller                          │ │ │
-│  │  │  AUTOPILOT ──── ASSISTED ──── MANUAL                       │ │ │
-│  │  │  (full auto)   (sev≥8 approval) (all approval)             │ │ │
-│  │  └─────────────────────────────────────────────────────────────┘ │ │
-│  │                          │                                        │ │
-│  │                          ▼                                        │ │
-│  │  ┌─────────────────────────────────────────────────────────────┐ │ │
-│  │  │              K8s Automation                                 │ │ │
-│  │  │  • isolate_pod (NetworkPolicy)                             │ │ │
-│  │  │  • scale_up/down (Deployment patch)                        │ │ │
-│  │  │  • block_ip (NetworkPolicy)                                │ │ │
-│  │  │  • cordon_node (Node patch)                                │ │ │
-│  │  │  • restart_service (Pod deletion)                          │ │ │
-│  │  └─────────────────────────────────────────────────────────────┘ │ │
-│  └───────────────────────────────────────────────────────────────────┘ │
-│                  │                                                      │
-│                  ▼                                                      │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐     │
-│  │   PostgreSQL     │  │    Prometheus    │  │     Grafana      │     │
-│  │  (8 tables)      │  │   (42 metrics)   │  │  (Dashboards)    │     │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+![Figure 1: High-level system architecture](figures/fig01-system-architecture.png)
+*Figure 1: High-level system architecture showing the five processing layers — IoT devices, detection engines, IDS core with LLM analysis, Kubernetes orchestration, and the operator dashboard.*
 
 ### 4.3 Algorithm Design
 
@@ -397,6 +360,9 @@ Output: Processed alert with LLM analysis and actions
 RETURN success_response
 ```
 
+![Figure 2: Alert processing pipeline](figures/fig02-alert-pipeline.png)
+*Figure 2: End-to-end alert processing sequence showing the flow from detection engines through deduplication, LLM analysis, governance checks, and automated Kubernetes response.*
+
 #### 4.3.2 Circuit Breaker State Machine
 
 ```
@@ -417,6 +383,9 @@ HALF_OPEN:
   - IF success THEN transition to CLOSED, reset failure count
   - IF failure THEN transition to OPEN, restart timer
 ```
+
+![Figure 3: Circuit breaker state machine](figures/fig03-circuit-breaker-state.png)
+*Figure 3: Circuit breaker state machine showing CLOSED, OPEN, and HALF_OPEN transitions.*
 
 ### 4.4 Database Schema
 
@@ -450,6 +419,9 @@ The PostgreSQL database includes 8 tables:
 | **Metrics** | Prometheus | 2.x |
 | **Visualization** | Grafana | 9.x |
 | **IoT Protocol** | MQTT (Mosquitto) | 2.x |
+
+![Figure 4: Technology stack layers](figures/fig04-technology-stack.png)
+*Figure 4: Technology stack layers showing the full software stack from IoT protocols to operator dashboard.*
 
 ### 4.6 Work Breakdown Structure (Capstone II)
 
@@ -486,6 +458,9 @@ The PostgreSQL database includes 8 tables:
 | WP6.3 | Attack simulations | 4 days | ✅ |
 | WP7 | Documentation | 1 week | ✅ Complete |
 
+![Figure 5: Project timeline](figures/fig05-project-timeline.png)
+*Figure 5: Project timeline (Gantt chart) showing the 10-week Capstone II development schedule.*
+
 ---
 
 ## Chapter 5: Implementation
@@ -508,6 +483,9 @@ Capstone II implementation added approximately 5,000+ lines of production code a
 | `llm_engine_openai.py` | 220 | OpenAI GPT-4 integration |
 | `config.py` | 185 | Configuration management |
 | `llm_retry.py` | 382 | Retry logic with backoff |
+
+![Figure 19: IoT integration architecture](figures/fig19-iot-integration.png)
+*Figure 19: IoT integration architecture showing device types, protocols, and data flow into the IDS.*
 
 ### 5.2 Multi-LLM Integration
 
@@ -565,6 +543,9 @@ class LLMManager:
         return self._create_fallback_response(alert)
 ```
 
+![Figure 6: LLM multi-provider failover chain](figures/fig06-llm-failover-chain.png)
+*Figure 6: LLM multi-provider failover chain with priority-based routing and circuit breaker protection.*
+
 **Circuit Breaker Implementation (`main.py`):**
 ```python
 class CircuitBreaker:
@@ -596,6 +577,9 @@ class CircuitBreaker:
                 return True  # Allow test request
         return False
 ```
+
+![Figure 7: Circuit breaker implementation detail](figures/fig07-circuit-breaker-detail.png)
+*Figure 7: Circuit breaker implementation detail showing state transitions and failure tracking.*
 
 ### 5.3 Human-in-the-Loop Governance
 
@@ -654,6 +638,9 @@ class GovernanceController:
         return result
 ```
 
+![Figure 8: HITL governance modes](figures/fig08-hitl-governance.png)
+*Figure 8: Human-in-the-loop governance modes showing Autopilot, Assisted, and Manual decision flows.*
+
 ### 5.4 Kubernetes Automation
 
 **K8s Automation Module (`k8s_automation.py`):**
@@ -709,6 +696,12 @@ class K8sAutomation:
         )
         return {"action": "scale_up", "status": "success", "replicas": replicas}
 ```
+
+![Figure 9: Kubernetes cluster topology](figures/fig09-k8s-topology.png)
+*Figure 9: Kubernetes cluster topology showing smart-city namespace pod layout and automation targets.*
+
+![Figure 10: Severity-based response matrix](figures/fig10-severity-response.png)
+*Figure 10: Severity-based response matrix mapping alert severity levels to automated defensive actions.*
 
 ### 5.5 Database Persistence
 
@@ -828,6 +821,12 @@ class AlertCache:
         fp = self._fingerprint(alert)
         self.cache[fp] = (analysis, time.time())
 ```
+
+![Figure 11: Alert deduplication funnel](figures/fig11-dedup-funnel.png)
+*Figure 11: Alert deduplication funnel showing reduction from raw alerts to unique LLM calls.*
+
+![Figure 12: Deduplication decision flowchart](figures/fig12-dedup-flowchart.png)
+*Figure 12: Deduplication decision flowchart illustrating the cache lookup and eviction logic.*
 
 ### 5.7 Prometheus Metrics
 
@@ -990,6 +989,12 @@ async def test_governance_assisted_mode():
 | Severity score | 8-10 | 9 |
 | Pod isolation | Yes | ✅ (in ASSISTED mode, queued for approval) |
 
+![Figure 13: Attack severity distribution](figures/fig13-attack-severity-pie.png)
+*Figure 13: Attack severity distribution across all simulated attack scenarios.*
+
+![Figure 14: MITRE ATT&CK for ICS coverage](figures/fig14-mitre-attack-coverage.png)
+*Figure 14: MITRE ATT&CK for ICS coverage map showing detected technique categories.*
+
 ### 6.5 Performance Metrics
 
 **Throughput Testing:**
@@ -1010,6 +1015,12 @@ async def test_governance_assisted_mode():
 | Gemini 2.0 | 0.9s | 97.8% | 3 |
 | Claude 3.5 | 2.4s | 99.5% | 0 |
 
+![Figure 15: Before vs after — manual vs AI-driven](figures/fig15-before-vs-after.png)
+*Figure 15: Before vs after comparison of manual security operations versus AI-driven IDS.*
+
+![Figure 16: LLM provider comparison](figures/fig16-llm-provider-comparison.png)
+*Figure 16: LLM provider comparison showing latency, success rate, and circuit breaker trips.*
+
 **Deduplication Effectiveness:**
 
 | Metric | Before | After | Improvement |
@@ -1017,6 +1028,9 @@ async def test_governance_assisted_mode():
 | LLM API calls | 1,000 | 580 | 42% reduction |
 | Estimated cost | $5.00 | $2.90 | 42% savings |
 | Cache hit rate | - | 42% | - |
+
+![Figure 17: Cluster scalability and resources](figures/fig17-cluster-scalability.png)
+*Figure 17: Cluster scalability and resource utilization under increasing alert load.*
 
 ### 6.6 System Reliability
 
@@ -1049,6 +1063,9 @@ async def test_governance_assisted_mode():
 | Governance | Planned | Basic | 3-mode HITL |
 | Persistence | Planned | In-memory | PostgreSQL |
 
+![Figure 18: Capstone I vs II achievement comparison](figures/fig18-capstone1-vs-2.png)
+*Figure 18: Capstone I vs Capstone II achievement comparison across all key metrics.*
+
 ---
 
 ## Chapter 7: Conclusion and Future Work
@@ -1080,6 +1097,9 @@ This capstone makes several novel contributions to smart city cybersecurity:
 | **Transparent reasoning interface** | Addresses black-box automation concerns in security operations |
 | **Alert deduplication for LLM-IDS** | 40-60% cost reduction while maintaining detection quality |
 | **Prometheus persistence pattern** | Solves counter loss problem for Kubernetes security monitoring |
+
+![Figure 20: Key contributions map](figures/fig20-key-contributions.png)
+*Figure 20: Key contributions map showing the five novel contributions of this capstone project.*
 
 ### 7.3 Challenges Encountered
 

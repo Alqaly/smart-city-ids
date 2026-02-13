@@ -47,3 +47,5 @@ scalability-results/
 payload.json
 a
 *.bak
+node_modules/
+puppeteer-config.json
