@@ -159,11 +159,16 @@ sync_user_kubeconfig
 # =============================================================================
 log_section "PHASE 4: Deploying Kubernetes Manifests"
 
-# Create namespaces
+# Create namespaces (idempotent — skips if already exist)
 log_info "Creating namespaces..."
-kubectl create namespace smart-city --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
-kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
-kubectl create namespace falco-system --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+for ns in smart-city monitoring falco-system; do
+    if kubectl get namespace "$ns" &>/dev/null 2>&1; then
+        log_info "Namespace $ns already exists — skipping"
+    else
+        kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+        log_info "Created namespace: $ns"
+    fi
+done
 
 # =============================================================================
 # Setup Persistent Storage for Prometheus and Grafana (AUTOMATIC)
@@ -190,7 +195,8 @@ log_info "Persistent storage configured (Prometheus: 50Gi, Grafana: 10Gi)"
 # Apply core manifests
 MANIFEST_DIR="$PROJECT_ROOT/k8s-manifests"
 
-log_info "Applying Kubernetes manifests..."
+log_info "Applying Kubernetes manifests (idempotent — unchanged resources are skipped)..."
+APPLIED=0; SKIPPED=0
 
 for manifest in \
     "$MANIFEST_DIR/namespace.yaml" \
@@ -206,12 +212,20 @@ for manifest in \
     "$MANIFEST_DIR/suricata-forwarder-deployment.yaml"; do
     
     if [[ -f "$manifest" ]]; then
-        log_info "Applying $(basename $manifest)..."
-        kubectl apply -f "$manifest" 2>&1 | grep -E "(created|configured|unchanged)" | head -3 || true
+        result=$(kubectl apply -f "$manifest" 2>&1) || true
+        changed=$(echo "$result" | grep -cE '(created|configured)' || true)
+        unchanged=$(echo "$result" | grep -c 'unchanged' || true)
+        if [[ $changed -gt 0 ]]; then
+            log_info "Applied $(basename $manifest) ($changed resource(s) updated)"
+            APPLIED=$((APPLIED + changed))
+        else
+            log_info "$(basename $manifest) — no changes"
+            SKIPPED=$((SKIPPED + unchanged))
+        fi
     fi
 done
 
-log_info "Manifests applied successfully"
+log_info "Manifests applied: ${APPLIED} updated, ${SKIPPED} unchanged"
 
 # Create IDS API deployment artefacts: prefer building a container image for ids-api
 log_info "Preparing IDS API deployment (prefer image build over large ConfigMap)"
@@ -322,7 +336,7 @@ log_info "Waiting for IoT device emulation pods to initialize..."
 sleep 5
 
 # Count ready pods
-IOT_PODS=$(kubectl get pods -n smart-city -l app=iot-simulator --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
+IOT_PODS=$(kubectl get pods -n smart-city -l app=iot-device --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
 log_info "$IOT_PODS IoT emulation pods are running"
 
 # =============================================================================
@@ -337,7 +351,7 @@ echo ""
 
 log_info "Smart City Namespace Pods:"
 kubectl get pods -n smart-city --no-headers 2>/dev/null | wc -l | xargs echo "  Total pods:"
-kubectl get pods -n smart-city -o wide 2>/dev/null | grep -E "(ids-api|postgres|mqtt|traffic-camera|iot-simulator)" | head -5 || true
+kubectl get pods -n smart-city -o wide 2>/dev/null | grep -E "(ids-api|postgres|mqtt|traffic-camera|iot-device)" | head -5 || true
 
 echo ""
 log_info "Monitoring Stack:"
@@ -373,7 +387,7 @@ echo -e "${YELLOW}Quick Commands:${NC}"
 echo "  View all pods:           kubectl get pods -A"
 echo "  Watch IDS API logs:      kubectl logs -f -n smart-city -l app=ids-api"
 echo "  Watch Falco alerts:      kubectl logs -f -n falco-system -l app.kubernetes.io/name=falco"
-echo "  Scale IoT emulation:     kubectl scale deployment/iot-simulator-high -n smart-city --replicas=10"
+echo "  Scale IoT emulation:     kubectl scale deployment/iot-device-high -n smart-city --replicas=10"
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""

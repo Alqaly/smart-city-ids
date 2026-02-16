@@ -21,6 +21,15 @@ done
 
 init_script "$0" "System Requirements Check"
 
+# ── Load .env if present ──
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+if [[ -f "$PROJECT_ROOT/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$PROJECT_ROOT/.env"
+    set +a
+fi
+
 PASSED=0
 FAILED=0
 WARNINGS=0

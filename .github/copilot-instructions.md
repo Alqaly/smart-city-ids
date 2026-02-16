@@ -17,7 +17,7 @@ Short, targeted guidance to help AI coding agents be productive immediately in t
   - cd services/ids-api/src && python -m venv venv && source venv/bin/activate
   - pip install -r requirements.txt
   - uvicorn main:app --host 0.0.0.0 --port 8000
-- Simulate attacks:
+- Run attacks:
   - python attack-simulator/ddos_simulator.py <url> <threads> <duration>
   - or use scripts in `attack-simulations/` for demo scenarios
 - Quick fixes for common infra issues (K3s permissions / kubeconfig): see `docs/PROJECT_CONTEXT.md` (KUBECONFIG export, `sudo systemctl restart k3s`).

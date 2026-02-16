@@ -1,7 +1,7 @@
 # Metrics Contract (Frozen)
 
 **Status:** Frozen (do not rename metrics without a versioned contract update)  
-**Owner:** IDS API + IoT Simulator  
+**Owner:** IDS API + IoT Device  
 **Last Updated:** 2026-02-04  
 
 This document defines the **authoritative metrics contract** for the Smart City IDS.  
@@ -76,9 +76,9 @@ Metrics are treated as an API. Names, types, and labels are stable.
 | `smartcity_ids_protected_service_hits_total` | Counter | `service` | Attempts to isolate protected services? |
 | `smartcity_ids_protection_bypass_attempts_total` | Counter | `action` | Safety bypass attempts? |
 
-## IoT Simulator Metrics (`iot_*`)
+## IoT Device Metrics (`iot_*`)
 
-**Owner:** `iot-simulator` services (MQTT emulation)
+**Owner:** `iot-device` services (MQTT emulation)
 
 | Metric | Type | Labels | Question Answered |
 |---|---|---|---|

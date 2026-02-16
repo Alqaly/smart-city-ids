@@ -307,14 +307,10 @@ tr:hover td{background:rgba(0,212,255,.03)}
       <div class="card-header"><h3>Latency by Engine</h3><span style="font-size:11px;color:var(--text3)">p50 / p95 / avg (seconds)</span></div>
       <div class="card-body" id="llmLatencyChart"></div>
     </div>
-      <div class="card">
-        <div class="card-header"><h3>Cost by Engine</h3><span style="font-size:11px;color:var(--text3)">Estimated USD per demo session</span></div>
-        <div class="card-body" id="llmCostChart"></div>
-      </div>
     </div>
   <div class="card">
-    <div class="card-header"><h3>Tokens &amp; Cost per Request</h3></div>
-    <div class="card-body no-pad"><table><thead><tr><th>Engine</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Avg Tokens/Req</th><th>Avg Cost/Req</th></tr></thead><tbody id="llmTokenTable"></tbody></table></div>
+    <div class="card-header"><h3>Tokens per Request</h3></div>
+    <div class="card-body no-pad"><table><thead><tr><th>Engine</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Avg Tokens/Req</th></tr></thead><tbody id="llmTokenTable"></tbody></table></div>
   </div>
   <div class="row">
     <div class="card">
@@ -327,7 +323,7 @@ tr:hover td{background:rgba(0,212,255,.03)}
     </div>
   </div>
   <div class="card">
-    <div class="card-header"><h3>Deduplication &amp; Cost Savings</h3></div>
+    <div class="card-header"><h3>Deduplication Statistics</h3></div>
     <div class="card-body" id="dedupDetail"></div>
   </div>
 </div>
@@ -1250,7 +1246,7 @@ function renderLLMTab(llm,cb,dedup,llmDiag){
     '<div class="stat-card purple"><div class="stat-label">Total Providers</div><div class="stat-value">'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+ALL_PROVIDERS.map(function(p){return p.id}).join(', ')+'</div></div>'+
     '<div class="stat-card green"><div class="stat-label">Operational</div><div class="stat-value">'+(smry.operational||0)+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">Configured: '+configCount+'</div></div>'+
     '<div class="stat-card red"><div class="stat-label">Errors / Cooldown</div><div class="stat-value">'+((smry.error||0)+(smry.cooldown||0))+'</div><div class="stat-sub">'+(smry.error||0)+' errors, '+(smry.cooldown||0)+' in cooldown</div></div>'+
-    '<div class="stat-card blue"><div class="stat-label">Cost Saved</div><div class="stat-value">$'+(dedup&&dedup.cost_saved_usd?dedup.cost_saved_usd.toFixed(3):'0.000')+'</div><div class="stat-sub">Dedup: '+(dedup&&dedup.hit_rate_percent?dedup.hit_rate_percent.toFixed(1):'0')+'% hit rate</div></div>';
+    '<div class="stat-card blue"><div class="stat-label">Dedup Hit Rate</div><div class="stat-value">'+(dedup&&dedup.hit_rate_percent?dedup.hit_rate_percent.toFixed(1):'0')+'%</div><div class="stat-sub">'+(dedup&&dedup.hits||0)+' hits / '+(dedup&&dedup.total_alerts||0)+' total</div></div>';
 
   // Fetch per-engine stats for latency/cost charts
   apiNoAuth('/api/llm-stats/export').then(function(stats){
@@ -1285,31 +1281,6 @@ function renderLLMTab(llm,cb,dedup,llmDiag){
     latHtml+='</table>';
     document.getElementById('llmLatencyChart').innerHTML=latHtml||'<div style="color:var(--text3);padding:12px">No data yet — run attacks to generate stats</div>';
 
-    // ── Cost bar chart ──
-    var maxCost=0;
-    names.forEach(function(n){var c=eng[n].total_estimated_cost_usd||0;if(c>maxCost)maxCost=c});
-    if(maxCost<0.001) maxCost=0.01;
-    var costHtml='<table style="width:100%;border-collapse:collapse;font-size:13px">';
-    costHtml+='<tr style="color:var(--text3);font-size:11px"><td style="width:80px">Engine</td><td>Requests</td><td>Success</td><td>$/call</td><td>Total $</td><td style="width:40%">Cost</td></tr>';
-    names.forEach(function(n){
-      var e=eng[n];
-      if(!e.total_requests) return;
-      var cost=e.total_estimated_cost_usd||0;
-      var barW=Math.max(2,Math.round((cost/maxCost)*100));
-      var col=barColors[n]||'#94a3b8';
-      costHtml+='<tr style="border-top:1px solid var(--bg3)">'+
-        '<td><strong>'+n+'</strong></td>'+
-        '<td>'+e.total_requests+'</td>'+
-        '<td>'+(e.success_rate*100).toFixed(0)+'%</td>'+
-        '<td>$'+e.cost_per_call_usd.toFixed(4)+'</td>'+
-        '<td>$'+cost.toFixed(4)+'</td>'+
-        '<td><div style="height:18px;background:var(--bg3);border-radius:4px;overflow:hidden">'+
-          '<div style="height:100%;width:'+barW+'%;background:'+col+';border-radius:4px"></div>'+
-        '</div></td></tr>';
-    });
-    costHtml+='</table>';
-    document.getElementById('llmCostChart').innerHTML=costHtml||'<div style="color:var(--text3);padding:12px">No data yet</div>';
-
     var tokenRows='';
     names.forEach(function(n){
       var e=eng[n];
@@ -1320,10 +1291,9 @@ function renderLLMTab(llm,cb,dedup,llmDiag){
         '<td>'+(e.completion_tokens_total||0)+'</td>'+
         '<td>'+(e.tokens_total||0)+'</td>'+
         '<td>'+(e.avg_tokens_per_request||0)+'</td>'+
-        '<td>$'+((e.avg_cost_per_request_usd||0).toFixed(6))+'</td>'+
       '</tr>';
     });
-    document.getElementById('llmTokenTable').innerHTML=tokenRows||'<tr><td colspan="6" style="text-align:center;color:var(--text3)">No token data yet</td></tr>';
+    document.getElementById('llmTokenTable').innerHTML=tokenRows||'<tr><td colspan="5" style="text-align:center;color:var(--text3)">No token data yet</td></tr>';
   });
 
   var pc=document.getElementById('llmProviderCards');
@@ -1379,12 +1349,15 @@ function renderLLMTab(llm,cb,dedup,llmDiag){
     '<div><span style="color:var(--text3)">Cache Misses:</span><br><strong>'+(dedup&&dedup.misses||0)+'</strong></div>'+
     '<div><span style="color:var(--text3)">TTL:</span><br><strong>'+(dedup&&dedup.ttl_seconds||60)+'s</strong></div>'+
     '<div><span style="color:var(--text3)">Evictions:</span><br><strong>'+(dedup&&dedup.evictions||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Cost w/o Dedup:</span><br><strong>$'+(dedup&&dedup.estimated_cost_without_dedup?dedup.estimated_cost_without_dedup.toFixed(3):'0.000')+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Cost w/ Dedup:</span><br><strong>$'+(dedup&&dedup.estimated_cost_with_dedup?dedup.estimated_cost_with_dedup.toFixed(3):'0.000')+'</strong></div>'+
     '</div>';
 }
 function resetCircuitBreakers(){apiNoAuth('/api/circuit-breaker/reset').then(function(){addLog('Circuit breakers reset');refreshAll()})}
 
+/* ═══════════════════════════════════════════════════════════════
+  GOVERNANCE / HITL INTERFACE
+  Purpose: keep analyst accountability explicit for stakeholder demos.
+  Endpoints: /api/governance/status, /pending, /history, /approve, /reject
+  ═══════════════════════════════════════════════════════════════ */
 function renderGovernanceTab(gov,dashboard){
   if(!gov)return;
   var gm=gov.metrics||{};
@@ -1404,6 +1377,8 @@ function renderGovernanceTab(gov,dashboard){
   loadHistory();
 }
 function setGovMode(mode){apiFetch('/api/governance/mode?mode='+mode,{method:'POST'}).then(function(){refreshAll()})}
+
+// Pending queue renderer: analyst approve/reject workflow for critical actions.
 function loadPending(){
   apiFetch('/api/governance/pending').then(function(data){
     var el=document.getElementById('pendingActions');
@@ -1417,6 +1392,8 @@ function loadPending(){
 }
 function approveAction(id){apiFetch('/api/governance/approve/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({analyst_comment:'Approved via dashboard'})}).then(function(){addLog('Action '+id+' approved');refreshAll()})}
 function rejectAction(id){apiFetch('/api/governance/reject/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({analyst_comment:'Rejected via dashboard'})}).then(function(){addLog('Action '+id+' rejected');refreshAll()})}
+
+// Governance history table: audit visibility for demos and post-incident review.
 function loadHistory(){
   apiFetch('/api/governance/history?limit=20').then(function(data){
     var el=document.getElementById('govHistory');

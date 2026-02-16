@@ -5,7 +5,7 @@ Smart City IDS - Comprehensive Stability Testing Suite
 Capstone II - Week 8: Stability Testing
 
 This script runs comprehensive tests to validate:
-1. Attack simulation at scale
+1. Attack reproduction at scale
 2. LLM failover mechanism (xAI → OpenAI)
 3. Protected services safety
 4. System performance under load
@@ -91,12 +91,12 @@ class StabilityTestSuite:
             return {"error": str(e)}
 
     # =========================================================================
-    # TEST 1: ATTACK SIMULATION AT SCALE
+    # TEST 1: ATTACK REPRODUCTION AT SCALE
     # =========================================================================
-    def test_attack_simulation_scale(self) -> TestResult:
-        """Test system behavior under high-volume attack simulation."""
+    def test_attack_reproduction_scale(self) -> TestResult:
+        """Test system behavior under high-volume attack reproduction."""
         self.log("=" * 60)
-        self.log("TEST 1: ATTACK SIMULATION AT SCALE")
+        self.log("TEST 1: ATTACK REPRODUCTION AT SCALE")
         self.log("=" * 60)
         
         start_time = time.time()
@@ -306,7 +306,7 @@ class StabilityTestSuite:
             recommendations.append("Some requests taking too long; add timeout handling")
         
         details = f"""
-Attack Simulation Scale Test Results:
+Attack Reproduction Scale Test Results:
 - Sequential (10 attacks): {sequential_success_rate:.0f}% success, avg {metrics['avg_response_time_sec']:.2f}s
 - Burst (20 concurrent): {burst_success_rate:.0f}% success in {burst_duration:.2f}s
 - Sustained (30 over 60s): {sustained_success_rate:.0f}% success
@@ -314,7 +314,7 @@ Attack Simulation Scale Test Results:
 """
         
         return TestResult(
-            test_name="Attack Simulation at Scale",
+            test_name="Attack Reproduction at Scale",
             status=status,
             duration_seconds=total_duration,
             details=details,
@@ -874,7 +874,7 @@ END OF REPORT
         self.log("")
         
         # Run all tests
-        self.results.append(self.test_attack_simulation_scale())
+        self.results.append(self.test_attack_reproduction_scale())
         self.results.append(self.test_llm_failover())
         self.results.append(self.test_protected_services())
         self.results.append(self.test_error_handling())

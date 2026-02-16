@@ -1,5 +1,12 @@
 # Operator Interface & Human-in-the-Loop Governance
 
+## Presentation Planning Update (2026-02-16)
+
+For the stakeholder-facing roadmap and phased UX/security upgrades, see:
+- `docs/LLM_SECURITY_INTERFACE_IMPROVEMENT_PLAN.md`
+
+This keeps implementation status (`HITL_UI_CHANGES.md`) separate from forward planning (presentation + stakeholder readiness).
+
 ## Overview
 
 The Smart City IDS implements a **PhD-level human-in-the-loop governance model** where:

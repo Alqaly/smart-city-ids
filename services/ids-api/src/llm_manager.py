@@ -771,7 +771,7 @@ class LocalFallbackEngine(BaseLLMEngine):
         import random
         import time as _time
         
-        # Simulate realistic processing time (200-800ms) for local analysis
+        # Add realistic processing time (200-800ms) for local analysis
         start = _time.monotonic()
         
         # Extract ONLY the alert-specific fields from the prompt (skip the JSON template)

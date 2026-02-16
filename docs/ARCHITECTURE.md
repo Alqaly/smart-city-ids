@@ -20,7 +20,7 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 │  │  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘  │ │
 │  │         │                │                │                │           │ │
 │  │  ┌──────┴────────────────┴────────────────┴────────────────┘           │ │
-│  │  │  IoT Simulators: enhanced(×10) + high(×4) + medium(×5) + burst(×1) │ │
+│  │  │  IoT Devices: enhanced(×10) + high(×4) + medium(×5) + burst(×1)     │ │
 │  │  └────────────────────────────────────────────────────────────────┬──┐ │ │
 │  │                                                                   │  │ │ │
 │  │  ┌───────────────────────────────────────────┐  ┌──────────────┐  │  │ │ │
@@ -66,10 +66,10 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 | `smart-city` | healthcare-api | 2 | Vulnerable Flask patient record API |
 | `smart-city` | parking-system | 2 | Vulnerable Flask parking reservation/payment API |
 | `smart-city` | mqtt-broker | 1 | Mosquitto MQTT broker for IoT telemetry |
-| `smart-city` | iot-devices-enhanced | 10 | MQTT sensor simulators (standard rate) |
-| `smart-city` | iot-simulator-high | 4 | High-frequency MQTT simulators |
-| `smart-city` | iot-simulator-medium | 5 | Medium-frequency MQTT simulators |
-| `smart-city` | iot-simulator-burst | 1 | Bursty MQTT traffic simulator |
+| `smart-city` | iot-devices-enhanced | 10 | MQTT sensor emulators (standard rate) |
+| `smart-city` | iot-device-high | 4 | High-frequency MQTT emulators |
+| `smart-city` | iot-device-medium | 5 | Medium-frequency MQTT emulators |
+| `smart-city` | iot-device-burst | 1 | Bursty MQTT traffic emulator |
 | `falco-system` | falco | 1 (DaemonSet) | Runtime syscall detection (eBPF) |
 | `falco-system` | falco-forwarder | 1 | Deduplicates + reshapes Falco alerts → IDS API |
 | `falco-system` | falco-k8s-metacollector | 1 | K8s metadata enrichment for Falco |
@@ -188,7 +188,8 @@ Six providers with priority-ordered failover:
 | 2 | Anthropic Claude | `api.anthropic.com/v1/messages` | claude-3-5-sonnet | `ANTHROPIC_API_KEY` |
 | 3 | OpenAI GPT-4 | `api.openai.com/v1/chat/completions` | gpt-4-turbo | `OPENAI_API_KEY` |
 | 4 | Google Gemini | `generativelanguage.googleapis.com` | gemini-2.0-flash | `GEMINI_API_KEY` |
-| 5 | Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | moonshot-v1-128k | `KIMI_API_KEY` |
+| 5 | Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | moonshot-v1-128k | `KIMI
+_API_KEY` |
 | 6 | Local Fallback | (no network call) | 11 rule patterns | (always available) |
 
 ### Resilience

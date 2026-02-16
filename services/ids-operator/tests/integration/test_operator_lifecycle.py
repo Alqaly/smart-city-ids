@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 from src import handlers, actions, validators
 
 def test_threat_response_lifecycle(monkeypatch):
-    # Simulate a full lifecycle: validate, execute, update status
+    # Reproduce a full lifecycle: validate, execute, update status
     body = {
         'metadata': {'name': 'threatX', 'namespace': 'default'}
     }

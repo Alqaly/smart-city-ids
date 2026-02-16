@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smart City IDS - Enhanced IoT Device Simulator
+Smart City IDS - Enhanced IoT Device Emulator
 Implements realistic IoT traffic patterns for Capstone II validation.
 
 Features:
@@ -114,7 +114,7 @@ class MetricsCollector:
         self.messages_sent = 0
         self.messages_received = 0
         self.messages_failed = 0
-        self.messages_lost = 0  # Simulated packet loss
+        self.messages_lost = 0  # Emulated packet loss
         self.disconnects_total = 0
         self.latency_spikes_total = 0
         self.anomalies_injected = 0
@@ -209,7 +209,7 @@ class MetricsCollector:
                 "# TYPE iot_messages_failed_total counter",
                 f'iot_messages_failed_total{{device="{POD_NAME}",namespace="{DEVICE_NAMESPACE}",class="{DEVICE_CLASS}"}} {self.messages_failed}',
                 "",
-                "# HELP iot_messages_lost_total Total messages lost to simulated packet loss",
+                "# HELP iot_messages_lost_total Total messages lost to emulated packet loss",
                 "# TYPE iot_messages_lost_total counter",
                 f'iot_messages_lost_total{{device="{POD_NAME}",namespace="{DEVICE_NAMESPACE}",class="{DEVICE_CLASS}"}} {self.messages_lost}',
                 "",
@@ -217,7 +217,7 @@ class MetricsCollector:
                 "# TYPE iot_anomalies_injected_total counter",
                 f'iot_anomalies_injected_total{{device="{POD_NAME}",namespace="{DEVICE_NAMESPACE}",class="{DEVICE_CLASS}"}} {self.anomalies_injected}',
                 "",
-                "# HELP iot_device_disconnects_total Total simulated disconnects",
+                "# HELP iot_device_disconnects_total Total emulated disconnects",
                 "# TYPE iot_device_disconnects_total counter",
                 f'iot_device_disconnects_total{{device="{POD_NAME}"}} {self.disconnects_total}',
                 "",
@@ -361,7 +361,7 @@ def maybe_inject_disconnect():
         mqtt_paused = True
         
         duration = random.uniform(5, FAILURE_DISCONNECT_DURATION)
-        print(f"[FAILURE] Simulating disconnect for {duration:.1f}s")
+        print(f"[FAILURE] Emulating disconnect for {duration:.1f}s")
         time.sleep(duration)
         
         mqtt_paused = False
@@ -519,10 +519,10 @@ def publish_message():
         metrics.inc_failed()
         return False
 
-    # Simulate packet loss (message never sent)
+    # Emulate packet loss (message never sent)
     if random.random() < NETWORK_PACKET_LOSS:
         metrics.inc_lost()
-        print(f"[PACKET_LOSS] Message dropped (simulated)")
+        print(f"[PACKET_LOSS] Message dropped (emulated)")
         return False
         
     # Maybe inject latency

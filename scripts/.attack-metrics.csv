@@ -1,0 +1,28 @@
+run_id,scenario_id,scenario_name,severity,threat_type,engine,total_ms,llm_ms,status,timestamp
+run-20260216-171958-15916,1,Shell Spawn in Traffic Camera,6,Initial,local,3196,Access ?,processed,2026-02-16T17:20:01Z
+run-20260216-171958-15916,3,Data Exfil — License Plate Dump,7,Data,local,13,Exfiltration ?,processed,2026-02-16T17:20:04Z
+run-20260216-171958-15916,5,Privilege Escalation — SUID Binary,10,Privilege,local,13,Escalation ?,processed,2026-02-16T17:20:06Z
+run-20260216-171958-15916,6,DDoS — NTP Amplification,9,Denial,local,14,of Service ?,processed,2026-02-16T17:20:09Z
+run-20260216-171958-15916,11,Cryptominer in IoT Pod,8,Malware,local,2629,?,processed,2026-02-16T17:20:14Z
+run-20260216-173707-26123,1,Shell Spawn in Traffic Camera,6,Initial,local,3334,Access ?,processed,2026-02-16T17:37:11Z
+run-20260216-173707-26123,2,Read /etc/shadow in Healthcare Pod,7,Credential,local,14,Access ?,processed,2026-02-16T17:37:15Z
+run-20260216-173707-26123,3,Data Exfil — License Plate Dump,8,Data,local,13,Exfiltration ?,processed,2026-02-16T17:37:19Z
+run-20260216-173707-26123,4,Data Exfil — Patient Records,8,Data,local,2560,Exfiltration ?,processed,2026-02-16T17:37:26Z
+run-20260216-173707-26123,5,Privilege Escalation — SUID Binary,9,Privilege,local,14,Escalation ?,processed,2026-02-16T17:37:30Z
+run-20260216-173707-26123,6,DDoS — NTP Amplification,9,Denial,local,14,of Service ?,processed,2026-02-16T17:37:35Z
+run-20260216-173707-26123,7,Network Recon — Port Scan,6,Reconnaissance,local,13,?,processed,2026-02-16T17:37:39Z
+run-20260216-173707-26123,8,DNS-Based Data Exfiltration,8,Data,local,13,Exfiltration ?,processed,2026-02-16T17:37:43Z
+run-20260216-173707-26123,9,Lateral Movement — Service Discovery,9,Lateral,local,13,Movement ?,processed,2026-02-16T17:37:47Z
+run-20260216-173707-26123,10,SQL Injection on Parking System,8,Data,local,14,Exfiltration ?,processed,2026-02-16T17:37:51Z
+run-20260216-173707-26123,11,Cryptominer in IoT Pod,6,Malware,local,13,?,processed,2026-02-16T17:37:55Z
+run-20260216-173707-26123,12,MQTT Message Poisoning,5,Unclassified,local,12,?,processed,2026-02-16T17:37:59Z
+run-20260216-173707-26123,13,Benign IoT Burst (control),5,Unclassified,local,13,?,processed,2026-02-16T17:38:05Z
+run-20260216-180313-14634,1,Shell Spawn in Traffic Camera,7,Initial,local,3229,Access ?,processed,2026-02-16T18:03:17Z
+run-20260216-180313-14634,2,Read /etc/shadow in Healthcare Pod,7,Credential,local,13,Access ?,processed,2026-02-16T18:03:21Z
+run-20260216-180313-14634,3,Data Exfil — License Plate Dump,8,Data,local,13,Exfiltration ?,processed,2026-02-16T18:03:25Z
+run-20260216-180313-14634,4,Data Exfil — Patient Records,7,Data,local,2441,Exfiltration ?,processed,2026-02-16T18:03:32Z
+run-20260216-180313-14634,5,Privilege Escalation — SUID Binary,10,Privilege,local,16,Escalation ?,processed,2026-02-16T18:03:36Z
+run-20260216-180313-14634,6,DDoS — NTP Amplification,9,Denial,local,14,of Service ?,processed,2026-02-16T18:03:41Z
+run-20260216-180313-14634,7,Network Recon — Port Scan,6,Reconnaissance,local,16,?,processed,2026-02-16T18:03:45Z
+run-20260216-180313-14634,8,DNS-Based Data Exfiltration,8,Data,local,13,Exfiltration ?,processed,2026-02-16T18:03:49Z
+run-20260216-180313-14634,9,Lateral Movement — Service Discovery,8,Lateral,local,18,Movement ?,processed,2026-02-16T18:03:53Z

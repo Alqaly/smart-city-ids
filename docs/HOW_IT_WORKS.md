@@ -6,7 +6,7 @@ End-to-end walkthrough of the system, from detection to automated response.
 
 ## 1. The Smart City Environment
 
-The cluster runs intentionally vulnerable IoT services — simulating real smart-city infrastructure:
+The cluster runs intentionally vulnerable IoT services — emulating real smart-city infrastructure:
 
 | Service | What It Does | Vulnerabilities (by design) |
 |---|---|---|
@@ -14,7 +14,7 @@ The cluster runs intentionally vulnerable IoT services — simulating real smart
 | **healthcare-api** | Patient records, medical data | SQL injection, no input validation |
 | **parking-system** | Reservations, payments | Injection, weak session handling |
 | **mqtt-broker** | MQTT pub/sub for sensors | Unauthenticated, no TLS |
-| **iot-simulators** | 20 pods generating sensor telemetry | High event volume for realism |
+| **iot-devices** | 20 pods generating sensor telemetry | High event volume for realism |
 
 These services are deployed from `smart-city-services/` and mounted into Kubernetes via ConfigMaps — no Docker builds required.
 

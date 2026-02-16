@@ -455,7 +455,7 @@ The PostgreSQL database includes 8 tables:
 | WP6 | Testing | 2 weeks | ✅ Complete |
 | WP6.1 | Unit tests (50+ cases) | 5 days | ✅ |
 | WP6.2 | Integration tests | 3 days | ✅ |
-| WP6.3 | Attack simulations | 4 days | ✅ |
+| WP6.3 | Attack reproductions | 4 days | ✅ |
 | WP7 | Documentation | 1 week | ✅ Complete |
 
 ![Figure 5: Project timeline](figures/fig05-project-timeline.png)
@@ -467,7 +467,7 @@ The PostgreSQL database includes 8 tables:
 
 ### 5.1 Software Implementation Overview
 
-Capstone II implementation added approximately 5,000+ lines of production code across 24 source files in the IDS API, forwarders, and IoT simulator.
+Capstone II implementation added approximately 5,000+ lines of production code across 24 source files in the IDS API, forwarders, and IoT emulator.
 
 **Core Module Summary:**
 
@@ -901,7 +901,7 @@ Capstone II testing employed multiple methodologies:
 |-----------|----------|-------|
 | Unit Tests | 50+ test cases | pytest, pytest-asyncio |
 | Integration Tests | End-to-end pipeline | Custom test harness |
-| Attack Simulations | Real security scenarios | DDoS, exfiltration scripts |
+| Attack Reproductions | Real security scenarios | DDoS, exfiltration scripts |
 | Performance Tests | Throughput, latency | Load generators |
 | Resilience Tests | Failover, recovery | Chaos injection |
 
@@ -960,15 +960,15 @@ async def test_governance_assisted_mode():
 | Database persistence | <100ms | 65ms | ✅ |
 | Prometheus emission | Immediate | Verified | ✅ |
 
-### 6.4 Attack Simulation Results
+### 6.4 Attack Reproduction Results
 
 **Test Environment:**
 - K3s cluster on Ubuntu 22.04
-- 10 IoT simulator pods
+- 10 IoT emulator pods
 - 6 smart city service pods
 - xAI Grok-4 as primary LLM
 
-**DDoS Simulation Results:**
+**DDoS Reproduction Results:**
 
 | Metric | Target | Result |
 |--------|--------|--------|
@@ -979,7 +979,7 @@ async def test_governance_assisted_mode():
 | Auto-scaling trigger | Yes | ✅ |
 | RPS during attack | >100 | 450 RPS |
 
-**Privilege Escalation Simulation:**
+**Privilege Escalation Reproduction:**
 
 | Metric | Target | Result |
 |--------|--------|--------|
@@ -990,7 +990,7 @@ async def test_governance_assisted_mode():
 | Pod isolation | Yes | ✅ (in ASSISTED mode, queued for approval) |
 
 ![Figure 13: Attack severity distribution](figures/fig13-attack-severity-pie.png)
-*Figure 13: Attack severity distribution across all simulated attack scenarios.*
+*Figure 13: Attack severity distribution across all reproduced attack scenarios.*
 
 ![Figure 14: MITRE ATT&CK for ICS coverage](figures/fig14-mitre-attack-coverage.png)
 *Figure 14: MITRE ATT&CK for ICS coverage map showing detected technique categories.*
@@ -1084,7 +1084,7 @@ Capstone II successfully delivered a production-grade, LLM-driven Intrusion Dete
 
 4. **Production Resilience** – Alert deduplication (40-60% cost savings), rate limiting, retry logic, PostgreSQL persistence, and Prometheus counter restoration ensure reliable operation.
 
-5. **Comprehensive Testing** – 50+ unit tests, integration testing, attack simulations, and performance validation demonstrate system correctness and reliability.
+5. **Comprehensive Testing** – 50+ unit tests, integration testing, attack reproductions, and performance validation demonstrate system correctness and reliability.
 
 ### 7.2 Key Contributions
 
@@ -1113,7 +1113,7 @@ This capstone makes several novel contributions to smart city cybersecurity:
 
 ### 7.4 Limitations
 
-1. **IoT Simulator Realism** – The IoT simulator generates synthetic traffic patterns; real-world IoT devices would have more complex behaviors
+1. **IoT Emulator Realism** – The IoT emulator generates synthetic traffic patterns; real-world IoT devices would have more complex behaviors
 2. **LLM Knowledge Cutoff** – LLMs cannot detect truly novel zero-day attacks not in training data
 3. **False Positive Rate** – System depends on LLM judgment which can produce false positives
 4. **Cost at Scale** – High-volume deployments require careful cost optimization
@@ -1122,13 +1122,13 @@ This capstone makes several novel contributions to smart city cybersecurity:
 
 **Short-term (3-6 months):**
 - Local LLM deployment (LLaMA, Mistral) for cost reduction and offline operation
-- Enhanced IoT simulator with device-specific behavior models
+- Enhanced IoT emulator with device-specific behavior models
 - Automated LLM prompt optimization based on operator feedback
 
 **Medium-term (6-12 months):**
 - Multi-zone deployment with federated learning
 - Integration with commercial SIEM platforms
-- Advanced attack simulation framework
+- Advanced attack reproduction framework
 
 **Long-term (1-2 years):**
 - Fully autonomous defense with minimal human oversight

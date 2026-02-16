@@ -27,7 +27,7 @@ data:
     recv_count = 0
     latency_records = []
     
-    # Simulation parameters
+    # Emulation parameters
     SIM_LATENCY = float(os.environ.get("SIM_LATENCY", 0.1))  # seconds
     SIM_LOSS = float(os.environ.get("SIM_LOSS", 0.1))        # probability (0.0-1.0)
     FAIL_PROB = float(os.environ.get("FAIL_PROB", 0.05))     # probability (0.0-1.0)
@@ -64,13 +64,13 @@ data:
         global sent_count
         data = request.json
         message = data.get("message", "hello")
-        if simulate_network_conditions():
+        if emulate_network_conditions():
             payload = json.dumps({"pod": POD_NAME, "type": "custom", "message": message, "timestamp": time.time()})
             mqtt_client.publish(MQTT_TOPIC, payload)
             sent_count += 1
             return jsonify({"published": True, "topic": MQTT_TOPIC, "message": message})
         else:
-            return jsonify({"published": False, "topic": MQTT_TOPIC, "message": message, "error": "Simulated packet loss"})
+            return jsonify({"published": False, "topic": MQTT_TOPIC, "message": message, "error": "Emulated packet loss"})
     
     @app.route("/metrics", methods=["GET"])
     def metrics():
@@ -100,26 +100,26 @@ data:
     def periodic_publish():
         global sent_count
         while True:
-            simulate_device_failure()
-            if simulate_network_conditions():
+            emulate_device_failure()
+            if emulate_network_conditions():
                 payload = json.dumps({"pod": POD_NAME, "type": "heartbeat", "timestamp": time.time()})
                 mqtt_client.publish(MQTT_TOPIC, payload)
                 sent_count += 1
             time.sleep(10)
     
-    def simulate_network_conditions():
-        # Simulate network latency
+    def emulate_network_conditions():
+        # Emulate network latency
         latency = random.uniform(0.01, SIM_LATENCY)
         time.sleep(latency)
-        # Simulate packet loss
+        # Emulate packet loss
         if random.random() < SIM_LOSS:
-            return False  # Simulate lost packet
+            return False  # Emulate lost packet
         return True
     
-    def simulate_device_failure():
-        # Simulate device failure
+    def emulate_device_failure():
+        # Emulate device failure
         if random.random() < FAIL_PROB:
-            print(f"[FAILURE] {POD_NAME} is simulating a device failure. Stopping MQTT network loop for {FAIL_DUR} seconds.")
+            print(f"[FAILURE] {POD_NAME} is emulating a device failure. Stopping MQTT network loop for {FAIL_DUR} seconds.")
             mqtt_loop.paused = True
             time.sleep(FAIL_DUR)
             mqtt_loop.paused = False

@@ -28,7 +28,7 @@ The current system exposes several default metrics from the Python services and 
     *   **SOC/IIoT Platform Value**: High. A spike in container restarts for a specific deployment (e.g., `emulated-compromised-device`) is a direct, measurable indicator of anomalous behavior that correlates with the liveness probe I configured. CPU usage can indicate resource exhaustion attacks.
 
 4.  **MQTT Metrics (Current Gap)**:
-    *   **What produces it?**: Currently, nothing. The `iot-simulator` does not expose Prometheus metrics.
+    *   **What produces it?**: Currently, nothing. The `iot-device` does not expose Prometheus metrics.
     *   **Is it realistic?**: This is a **major gap**. A real IIoT platform would absolutely have metrics on MQTT message volume, client connections, and errors from the broker.
     *   **Recommendation**: For full academic rigor, the MQTT broker (e.g., Mosquitto) should be configured to expose metrics, and Prometheus should scrape them. This would allow the dashboards to show a direct correlation between emulated device traffic and broker load.
 

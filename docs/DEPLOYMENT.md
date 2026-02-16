@@ -34,7 +34,7 @@ sudo bash scripts/start-everything.sh
 | **smart-city** | traffic-camera | 2 | Vulnerable demo service |
 | **smart-city** | healthcare-api | 2 | Vulnerable demo service |
 | **smart-city** | parking-system | 2 | Vulnerable demo service |
-| **smart-city** | iot-simulator-* | 30+ | MQTT message generators |
+| **smart-city** | iot-device-* | 30+ | MQTT message generators |
 | **monitoring** | prometheus | 1 | Metrics collection |
 | **monitoring** | grafana | 1 | Live dashboards |
 | **falco-system** | falco-forwarder | 1 | Runtime security alerts |
@@ -197,14 +197,14 @@ kubectl get pods -A -w
 kubectl rollout status deployment/ids-api -n smart-city
 ```
 
-### 5. Deploy IoT Simulators
+### 5. Deploy IoT Devices
 
 ```bash
-# Generate simulator manifests
+# Generate device manifests
 for i in {1..30}; do
-  kubectl run "iot-simulator-$i" \
+  kubectl run "iot-device-$i" \
     -n smart-city \
-    --image=smart-city/iot-simulator:latest \
+    --image=smart-city/iot-device:latest \
     --env="MQTT_BROKER=mqtt-broker:1883" \
     --env="DEVICE_CLASS=high"
 done
@@ -407,7 +407,7 @@ kubectl top pods -n smart-city
 --storage.tsdb.retention.time=7d  # Down from 15d
 
 # Reduce IoT replicas
-kubectl delete deployment iot-simulator-* -n smart-city
+kubectl delete deployment iot-device-* -n smart-city
 ```
 
 ---

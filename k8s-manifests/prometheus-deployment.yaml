@@ -43,11 +43,11 @@ data:
         metrics_path: '/metrics'
         scrape_interval: 5s
 
-      # Scrape IoT simulator pods via headless service DNS
+      # Scrape IoT device pods via headless service DNS
       - job_name: 'smart-city-iot'
         dns_sd_configs:
           - names:
-              - 'iot-simulator-metrics.smart-city.svc.cluster.local'
+              - 'iot-device-metrics.smart-city.svc.cluster.local'
             type: 'A'
             port: 5000
         metrics_path: '/metrics'

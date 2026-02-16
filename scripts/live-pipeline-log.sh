@@ -27,7 +27,7 @@ for arg in "$@"; do
       echo "Usage: $0 [--falco|--suricata] [--attacks]"
       echo "  --falco      Show only Falco-sourced alerts"
       echo "  --suricata   Show only Suricata-sourced alerts"
-      echo "  --attacks    Launch attack simulator in background"
+      echo "  --attacks    Launch attack pipeline in background"
       exit 0 ;;
   esac
 done
@@ -68,7 +68,7 @@ printf "\n${W}  Listening for alerts... ${D}(Ctrl+C to stop)${N}\n\n"
 # ── Optionally launch attacks ──
 ATTACK_PID=""
 if $LAUNCH_ATTACKS; then
-  printf "  ${Y}► Launching attack simulator in background...${N}\n\n"
+  printf "  ${Y}► Launching attack pipeline in background...${N}\n\n"
   bash "$(dirname "$0")/attack-iot-pipeline.sh" >/dev/null 2>&1 &
   ATTACK_PID=$!
 fi

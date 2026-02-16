@@ -8,6 +8,10 @@ Summary
 - Replaced alert() flows with small toast notifications for success/error/info.
 - Wired UI buttons to real governance endpoints (`/api/governance/pending`, `/api/governance/approve/{id}`, `/api/governance/reject/{id}`, `/api/governance/mode`).
 
+Planning note (2026-02-16)
+- Next-phase stakeholder and presentation improvements are tracked in:
+  - `docs/LLM_SECURITY_INTERFACE_IMPROVEMENT_PLAN.md`
+
 Files changed
 - services/ids-api/static/index.html
   - Added: Approvals nav item and `#approvals` section

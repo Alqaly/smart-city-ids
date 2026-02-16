@@ -32,7 +32,7 @@ Detection                    Analysis                    Response
                             └──────────┘
 ```
 
-**4 namespaces · ~45 pods · 37 API endpoints · 38 Prometheus metrics · 6 LLM providers**
+**4 namespaces · ~45 pods · 45 API endpoints · 38 Prometheus metrics · 6 LLM providers**
 
 ---
 
@@ -74,17 +74,24 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## Run Attack Simulation
+## Run Attack Pipeline
 
 ```bash
-# Full pipeline: 12 attacks through detection → LLM → response
+# Full pipeline: 13 scenarios (12 attacks + 1 benign control)
 ./scripts/attack-iot-pipeline.sh
 
-# Quick mode: 5 attacks
+# Quick mode: 5 scenarios
 ./scripts/attack-iot-pipeline.sh --quick
 
 # Single scenario
 ./scripts/attack-iot-pipeline.sh --scenario 3
+```
+
+### Demo Day (all-in-one)
+
+```bash
+# Bootstrap + verify + run attacks + validate
+./scripts/demo-day.sh --profile minimal
 ```
 
 ---
@@ -105,14 +112,31 @@ No Docker builds required — code is mounted via ConfigMaps:
 
 | Component | Location | Lines | Description |
 |---|---|---|---|
-| IDS API | `services/ids-api/src/main.py` | 2327 | FastAPI app, alert pipeline, 37 endpoints |
-| LLM Manager | `services/ids-api/src/llm_manager.py` | 870 | 6-provider failover with circuit breakers |
+| IDS API | `services/ids-api/src/main.py` | 3105 | FastAPI app, alert pipeline, 45 endpoints |
+| LLM Manager | `services/ids-api/src/llm_manager.py` | 1091 | 6-provider failover with circuit breakers |
 | K8s Automation | `services/ids-api/src/k8s_automation.py` | 207 | Pod isolation, scaling, IP blocking |
 | Governance | `services/ids-api/src/governance.py` | 507 | HITL modes: autopilot/assisted/manual |
-| Database | `services/ids-api/src/database.py` | 893 | PostgreSQL (8 tables) + memory fallback |
-| Dashboard | `services/ids-api/static/index.html` | ~700 | 7-tab operator SPA |
+| Database | `services/ids-api/src/database.py` | 912 | PostgreSQL (8 tables) + memory fallback |
+| Dashboard | `services/ids-api/static/index.html` | ~1700 | 7-tab operator SPA |
 | Falco Forwarder | `services/forwarders/falco/src/main.py` | 187 | Alert dedup + reshape |
 | Suricata Forwarder | `services/forwarders/suricata/src/main.py` | 453 | EVE log parsing + dedup |
+
+---
+
+## Scripts
+
+| Script | Purpose |
+|---|---|
+| `start-everything.sh` | Deploy K3s cluster + all services |
+| `deploy-code.sh` | Hot-reload code via ConfigMaps (no Docker) |
+| `cleanup.sh` | Teardown and cleanup |
+| `check-setup.sh` | Pre-deploy requirements validation |
+| `demo-day.sh` | All-in-one: bootstrap + verify + attacks + validate |
+| `demo-readiness.sh` | Pre-demo health checks |
+| `one-command-ready.sh` | Bootstrap + seed demo data |
+| `attack-iot-pipeline.sh` | 13-scenario MITRE ATT&CK pipeline with metrics CSV |
+| `scalability-test.sh` | Scale testing (10→1000 devices) |
+| `live-pipeline-log.sh` | Real-time pipeline observer |
 
 ---
 

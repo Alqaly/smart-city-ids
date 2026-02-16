@@ -148,7 +148,7 @@ record_metrics() {
     
     # Pod counts
     local running_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
-    local iot_pods=$(kubectl get pods -n "$NAMESPACE" -l app=iot-simulator --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+    local iot_pods=$(kubectl get pods -n "$NAMESPACE" -l app=iot-device --no-headers 2>/dev/null | grep -c "Running" || echo "0")
     
     # CPU/Memory (if metrics-server available)
     local cpu_usage=$(kubectl top pods -n "$NAMESPACE" --no-headers 2>/dev/null | awk '{sum+=$2} END {print sum"m"}' || echo "N/A")
@@ -227,11 +227,11 @@ EOF
     echo -e "${GREEN}✅ Metrics recorded for scale=$scale${NC}"
 }
 
-# Function to scale IoT simulators
+# Function to scale IoT devices
 scale_iot() {
     local target=$1
     
-    echo -e "${BLUE}🔄 Scaling IoT simulators to $target devices...${NC}"
+    echo -e "${BLUE}🔄 Scaling IoT devices to $target devices...${NC}"
     
     # Calculate distribution across device classes
     # 40% high, 50% medium, 10% burst
@@ -242,15 +242,15 @@ scale_iot() {
     echo "   HIGH: $high_count, MEDIUM: $medium_count, BURST: $burst_count"
     
     # Scale deployments
-    kubectl scale deployment/iot-simulator-high -n "$NAMESPACE" --replicas=$high_count 2>/dev/null || echo "   (iot-simulator-high not found)"
-    kubectl scale deployment/iot-simulator-medium -n "$NAMESPACE" --replicas=$medium_count 2>/dev/null || echo "   (iot-simulator-medium not found)"
-    kubectl scale deployment/iot-simulator-burst -n "$NAMESPACE" --replicas=$burst_count 2>/dev/null || echo "   (iot-simulator-burst not found)"
+    kubectl scale deployment/iot-device-high -n "$NAMESPACE" --replicas=$high_count 2>/dev/null || echo "   (iot-device-high not found)"
+    kubectl scale deployment/iot-device-medium -n "$NAMESPACE" --replicas=$medium_count 2>/dev/null || echo "   (iot-device-medium not found)"
+    kubectl scale deployment/iot-device-burst -n "$NAMESPACE" --replicas=$burst_count 2>/dev/null || echo "   (iot-device-burst not found)"
     
     # Wait for pods to be ready
     echo "   Waiting for pods to be ready..."
-    kubectl rollout status deployment/iot-simulator-high -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-    kubectl rollout status deployment/iot-simulator-medium -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-    kubectl rollout status deployment/iot-simulator-burst -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+    kubectl rollout status deployment/iot-device-high -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+    kubectl rollout status deployment/iot-device-medium -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+    kubectl rollout status deployment/iot-device-burst -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
     
     # Stabilization wait
     echo -e "${YELLOW}   Stabilizing for ${WAIT_SECONDS}s...${NC}"

@@ -120,33 +120,22 @@ run_controlled_attacks() {
     log_section "Controlled Attack Run"
     echo "Profile: $PROFILE"
     echo "Runs: $RUNS"
-    echo "Attack budget (API cost control): low and bounded"
     echo ""
+
+    local pipeline_args=(--url "http://localhost:8000")
+
+    case "$PROFILE" in
+        minimal)  pipeline_args+=(--quick) ;;
+        standard) pipeline_args+=(--quick) ;;
+        full)     ;; # all 13 scenarios
+    esac
 
     local i
     for i in $(seq 1 "$RUNS"); do
-        echo "Run $i/$RUNS - runtime attack"
-        bash "$SCRIPT_DIR/demo.sh" --wait 5
-        echo ""
-        echo "Run $i/$RUNS - network/suricata path"
-        bash "$SCRIPT_DIR/demo.sh" --attack-type network --wait 5
+        echo "Run $i/$RUNS"
+        bash "$SCRIPT_DIR/attack-iot-pipeline.sh" "${pipeline_args[@]}" || true
         echo ""
     done
-
-    if [[ "$PROFILE" == "standard" || "$PROFILE" == "full" ]]; then
-        echo "Extra: attack-simulations/generate-security-events.sh"
-        bash "$PROJECT_ROOT/attack-simulations/generate-security-events.sh" || true
-        echo ""
-    fi
-
-    if [[ "$PROFILE" == "full" ]]; then
-        echo "Extra: attack-simulations/generate-network-attacks.sh"
-        bash "$PROJECT_ROOT/attack-simulations/generate-network-attacks.sh" || true
-        echo ""
-        echo "Extra: attack-simulations/generate-advanced-attacks.sh"
-        bash "$PROJECT_ROOT/attack-simulations/generate-advanced-attacks.sh" || true
-        echo ""
-    fi
 }
 
 show_workloads() {
@@ -169,7 +158,6 @@ check_llm_runtime_status
 run_controlled_attacks
 
 log_section "Phase 2 - Final Checks"
-bash "$SCRIPT_DIR/check-system.sh" || true
 bash "$SCRIPT_DIR/demo-readiness.sh" --quick || true
 
 log_info "Demo day script completed"

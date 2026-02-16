@@ -443,7 +443,7 @@ kubectl exec deploy/postgres -- psql -U idsuser -d idsdb -c "SELECT COUNT(*) FRO
 | 2:00 | System Health | `kubectl get pods`, IDS API health | "All components running in real K8s cluster" | Realism check |
 | 5:00 | Architecture | Diagram walkthrough | "Falco → IDS API → LLM → K8s automation → Grafana" | Understanding flow |
 | 8:00 | Baseline Metrics | Grafana dashboard, metrics CLI | "BEFORE attack: 0 alerts in last 5 minutes" | Scientific rigor |
-| 10:00 | Execute Attack | kubectl exec /etc/shadow read | "Simulating credential harvesting attack" | Threat realism |
+| 10:00 | Execute Attack | kubectl exec /etc/shadow read | "Executing credential harvesting attack" | Threat realism |
 | 12:00 | Falco Detection | Show Falco logs | "Syscall intercepted within 2 seconds" | Detection proof |
 | 14:00 | LLM Analysis | Show IDS API logs | "LLM assigns severity 7, recommends isolation" | Novel contribution |
 | 16:00 | Automated Response | Show isolation in logs | "Pod network policy applied automatically" | Practical value |

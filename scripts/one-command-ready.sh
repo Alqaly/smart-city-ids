@@ -167,7 +167,7 @@ apply_iot_manifest() {
     if [[ -f "$fallback" ]]; then
         kubectl apply -f "$fallback" >/dev/null
     else
-        log_warn "ServiceMonitor CRD missing and no fallback IoT manifest found; skipping IoT simulator apply"
+        log_warn "ServiceMonitor CRD missing and no fallback IoT manifest found; skipping IoT device apply"
     fi
 }
 
@@ -182,7 +182,7 @@ seed_demo_data_if_needed() {
     if [[ "${iot_count%.*}" -eq 0 ]]; then
         log_warn "IoT active metric is 0; seeding heartbeat events"
         for d in cam-1 cam-2 env-1; do
-            kubectl exec -n smart-city "$exec_target" -- sh -lc "curl -s -X POST localhost:8000/api/iot/sensor -H 'Content-Type: application/json' -d '{\"device_id\":\"$d\",\"device_type\":\"simulator\",\"event_type\":\"heartbeat\",\"value\":1}' >/dev/null" || true
+            kubectl exec -n smart-city "$exec_target" -- sh -lc "curl -s -X POST localhost:8000/api/iot/sensor -H 'Content-Type: application/json' -d '{\"device_id\":\"$d\",\"device_type\":\"emulator\",\"event_type\":\"heartbeat\",\"value\":1}' >/dev/null" || true
         done
     fi
 
@@ -262,7 +262,16 @@ print_workload_summary() {
 log_section "Phase 1 - Kubeconfig and Cluster"
 fix_kubeconfig
 load_local_env_keys
-if ! kubectl_retry 8 kubectl cluster-info >/dev/null 2>&1; then
+
+# Quick cluster check — avoid unnecessary K3s restart
+CLUSTER_OK=false
+if kubectl cluster-info >/dev/null 2>&1; then
+    CLUSTER_OK=true
+elif kubectl_retry 4 kubectl get nodes >/dev/null 2>&1; then
+    CLUSTER_OK=true
+fi
+
+if ! $CLUSTER_OK; then
     log_warn "Cluster not reachable; attempting lightweight k3s recovery"
     if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
         sudo systemctl restart k3s >/dev/null 2>&1 || true

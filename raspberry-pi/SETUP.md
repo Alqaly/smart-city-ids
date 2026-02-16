@@ -137,9 +137,9 @@ ipconfig
 
 ## Running the Sensor
 
-### Test Mode (Simulation - No Sensor Required)
+### Test Mode (Emulation - No Sensor Required)
 ```bash
-python3 motion_sensor.py --ids-url http://<WINDOWS_IP>:30800 --simulate
+python3 motion_sensor.py --ids-url http://<WINDOWS_IP>:30800 --emulate
 ```
 
 ### Live Mode (With Real PIR Sensor)
@@ -153,7 +153,7 @@ python3 motion_sensor.py --ids-url http://<WINDOWS_IP>:30800 --gpio-pin 17
 | `--ids-url` | Required | IDS API URL (e.g., http://172.20.10.3:30800) |
 | `--gpio-pin` | 17 | GPIO pin number for PIR sensor |
 | `--device-id` | auto | Device ID (default: rpi5-motion-hostname) |
-| `--simulate` | false | Run without real sensor |
+| `--emulate` | false | Run without real sensor |
 | `--heartbeat` | 60 | Heartbeat interval in seconds |
 
 ### Run as Background Service
@@ -196,7 +196,7 @@ sudo systemctl status smart-city-sensor
 curl http://<VM_IP>:30800/health
 
 # Check if sensor data is being sent
-python3 motion_sensor.py --ids-url http://<VM_IP>:30800 --simulate
+python3 motion_sensor.py --ids-url http://<VM_IP>:30800 --emulate
 ```
 
 ### On the Azure VM (K3s cluster):
@@ -216,14 +216,14 @@ curl http://localhost:8000/api/iot/events
 The sensor automatically generates security alerts when:
 
 1. **Rapid Motion** - 5+ motion events in 10 seconds
-   - This simulates potential intrusion
+   - This emulates potential intrusion
    - Triggers LLM analysis with xAI Grok-4
 
-### Manual Test (Simulate Intrusion)
+### Manual Test (Trigger Intrusion)
 Wave your hand in front of the sensor rapidly (5+ times in 10 seconds) to trigger a security alert.
 
-### Simulated Intrusion
-The simulation mode randomly generates rapid motion events (~2% chance) to test the security pipeline.
+### Emulated Intrusion
+The emulation mode randomly generates rapid motion events (~2% chance) to test the security pipeline.
 
 ## Troubleshooting
 

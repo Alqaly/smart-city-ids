@@ -46,7 +46,7 @@ data:
             self.received_count = 0
             self.latencies = []
             
-            # Realistic simulation parameters
+            # Realistic emulation parameters
             self.latency_range = (0.01, 0.5)  # 10-500ms
             self.packet_loss_prob = 0.1  # 10%
             self.failure_prob = 0.05  # 5%
@@ -146,7 +146,7 @@ data:
                         }
                     }
                     
-                    # Simulate network latency
+                    # Emulate network latency
                     time.sleep(random.uniform(*self.latency_range))
                     
                     self.client.publish(
@@ -160,12 +160,12 @@ data:
                     
                 time.sleep(self.heartbeat_interval)
                 
-        def simulate_failure(self):
+        def emulate_failure(self):
             while True:
                 if random.random() < self.failure_prob:
-                    logger.warning(f"🔴 Device {self.device_id} simulating failure")
+                    logger.warning(f"🔴 Device {self.device_id} emulating failure")
                     device_status.labels(device_id=self.device_id).set(0)
-                    # Simulate device going offline
+                    # Emulate device going offline
                     time.sleep(random.randint(20, 60))  # 20-60 second outage
                     device_status.labels(device_id=self.device_id).set(1)
                     logger.info(f"🟢 Device {self.device_id} recovered")
@@ -176,7 +176,7 @@ data:
     
     @app.route('/')
     def index():
-        return {"message": "IoT Device Simulator", "status": "running"}
+        return {"message": "IoT Device Emulator", "status": "running"}
     
     @app.route('/status')
     def status():
@@ -241,7 +241,7 @@ data:
         if device.connect():
             # Start background threads
             threading.Thread(target=device.publish_telemetry, daemon=True).start()
-            threading.Thread(target=device.simulate_failure, daemon=True).start()
+            threading.Thread(target=device.emulate_failure, daemon=True).start()
             logger.info(f"🚀 Started {device_type} device: {device_id}")
         else:
             logger.error(f"❌ Failed to start device: {device_id}")

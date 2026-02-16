@@ -102,9 +102,9 @@ smart-city          mqtt-broker-...                         1/1     Running
 smart-city          traffic-camera-...                      2/2     Running
 smart-city          healthcare-api-...                      2/2     Running
 smart-city          parking-system-...                      2/2     Running
-smart-city          iot-simulator-burst-...                 5/5     Running
-smart-city          iot-simulator-high-...                  5/5     Running
-smart-city          iot-simulator-medium-...               10/10    Running
+smart-city          iot-device-burst-...                    5/5     Running
+smart-city          iot-device-high-...                     5/5     Running
+smart-city          iot-device-medium-...                  10/10    Running
 monitoring          prometheus-...                          1/1     Running
 monitoring          grafana-...                             1/1     Running
 falco-system        falco-forwarder-...                     1/1     Running
@@ -217,7 +217,7 @@ kubectl logs -n falco-system -l app=falco-forwarder | head -20
 
 **Verify IoT pods are generating traffic:**
 ```bash
-kubectl exec -n smart-city <iot-simulator-pod> -- curl http://mqtt-broker:1883 --max-time 1
+kubectl exec -n smart-city <iot-device-pod> -- curl http://mqtt-broker:1883 --max-time 1
 # Should show MQTT broker responding
 ```
 
@@ -279,7 +279,7 @@ SCALING_THRESHOLD = 6
 | **Traffic Camera** | Demo vulnerable service #1 | 30100 | Python (Flask) |
 | **Healthcare API** | Demo vulnerable service #2 | 30101 | Python (Flask) |
 | **Parking System** | Demo vulnerable service #3 | 30102 | Python (Flask) |
-| **IoT Simulators** | 30-100 MQTT message generators | (internal) | Python |
+| **IoT Devices** | 30-100 MQTT message generators | (internal) | Python |
 
 ---
 

@@ -1,5 +1,5 @@
 ---
-# IoT Simulator Enhanced - Multi-Class Deployment
+# IoT Device Enhanced - Multi-Class Deployment
 # Implements Poisson arrival, rush-hour bursts, and device class differentiation
 apiVersion: v1
 kind: Namespace
@@ -10,14 +10,14 @@ metadata:
 apiVersion: v1
 kind: Service
 metadata:
-  name: iot-simulator
+  name: iot-device
   namespace: smart-city
   labels:
-    app: iot-simulator
+    app: iot-device
 spec:
   clusterIP: None
   selector:
-    app: iot-simulator
+    app: iot-device
   ports:
     - port: 5000
       name: http
@@ -27,13 +27,13 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: iot-simulator-metrics
+  name: iot-device-metrics
   namespace: smart-city
   labels:
-    app: iot-simulator
+    app: iot-device
 spec:
   selector:
-    app: iot-simulator
+    app: iot-device
   ports:
     - port: 5000
       name: http
@@ -44,21 +44,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: iot-simulator-high
+  name: iot-device-high
   namespace: smart-city
   labels:
-    app: iot-simulator
+    app: iot-device
     class: high
 spec:
   replicas: 5
   selector:
     matchLabels:
-      app: iot-simulator
+      app: iot-device
       class: high
   template:
     metadata:
       labels:
-        app: iot-simulator
+        app: iot-device
         class: high
         namespace: traffic
       annotations:
@@ -67,7 +67,7 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       containers:
-      - name: simulator
+      - name: device
         image: python:3.11-slim
         workingDir: /app
         command: ["python", "mqtt_device_enhanced.py"]
@@ -120,28 +120,28 @@ spec:
       volumes:
       - name: app-code
         configMap:
-          name: iot-simulator-code
+          name: iot-device-code
 ---
 # MEDIUM-FREQUENCY DEVICES (Environment Sensors, Parking)
 # Base rate: 6 msg/min, peaks at 60 msg/min during rush hour
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: iot-simulator-medium
+  name: iot-device-medium
   namespace: smart-city
   labels:
-    app: iot-simulator
+    app: iot-device
     class: medium
 spec:
   replicas: 10
   selector:
     matchLabels:
-      app: iot-simulator
+      app: iot-device
       class: medium
   template:
     metadata:
       labels:
-        app: iot-simulator
+        app: iot-device
         class: medium
         namespace: environment
       annotations:
@@ -150,7 +150,7 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       containers:
-      - name: simulator
+      - name: device
         image: python:3.11-slim
         workingDir: /app
         command: ["python", "mqtt_device_enhanced.py"]
@@ -203,28 +203,28 @@ spec:
       volumes:
       - name: app-code
         configMap:
-          name: iot-simulator-code
+          name: iot-device-code
 ---
 # BURST DEVICES (Motion Sensors, Alarms)
 # Base rate: 0.5 msg/min, event-driven bursts
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: iot-simulator-burst
+  name: iot-device-burst
   namespace: smart-city
   labels:
-    app: iot-simulator
+    app: iot-device
     class: burst
 spec:
   replicas: 5
   selector:
     matchLabels:
-      app: iot-simulator
+      app: iot-device
       class: burst
   template:
     metadata:
       labels:
-        app: iot-simulator
+        app: iot-device
         class: burst
         namespace: energy
       annotations:
@@ -233,7 +233,7 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       containers:
-      - name: simulator
+      - name: device
         image: python:3.11-slim
         workingDir: /app
         command: ["python", "mqtt_device_enhanced.py"]
@@ -286,18 +286,18 @@ spec:
       volumes:
       - name: app-code
         configMap:
-          name: iot-simulator-code
+          name: iot-device-code
 ---
-# ConfigMap containing the enhanced simulator code
+# ConfigMap containing the enhanced device code
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: iot-simulator-code
+  name: iot-device-code
   namespace: smart-city
 data:
   mqtt_device_enhanced.py: |
     #!/usr/bin/env python3
-    """Smart City IDS - Enhanced IoT Device Simulator"""
+    """Smart City IDS - Enhanced IoT Device Emulator"""
     
     import os
     import subprocess
@@ -422,7 +422,7 @@ data:
             metrics.set_active(False)
             mqtt_paused = True
             duration = random.uniform(5, FAILURE_DISCONNECT_DURATION)
-            print(f"[FAILURE] Simulating disconnect for {duration:.1f}s")
+            print(f"[FAILURE] Emulating disconnect for {duration:.1f}s")
             time.sleep(duration)
             mqtt_paused = False
             metrics.set_active(True)
@@ -514,14 +514,14 @@ data:
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: iot-simulator
+  name: iot-device
   namespace: smart-city
   labels:
-    app: iot-simulator
+    app: iot-device
 spec:
   selector:
     matchLabels:
-      app: iot-simulator
+      app: iot-device
   endpoints:
   - port: http
     interval: 15s

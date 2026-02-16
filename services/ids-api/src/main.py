@@ -525,8 +525,9 @@ def refresh_iot_active_metric() -> int:
             )
             iot_prefixes = [
                 "traffic-camera", "healthcare-api", "parking-system",
-                "iot-devices-enhanced", "iot-simulator-high",
-                "iot-simulator-medium", "iot-simulator-burst", "mqtt-broker",
+                "iot-devices-enhanced", "iot-device-high",
+                "iot-device-medium", "iot-device-burst", "mqtt-broker",
+                "env-sensor", "street-lighting", "iot-simulator",
             ]
             for p in pod_list.items:
                 name = p.metadata.name
@@ -2749,10 +2750,10 @@ _IOT_POD_PREFIXES = [
     ("parking-system", "MQTT/CoAP Sensor"),
     ("env-sensor", "Modbus/OPC UA Env"),
     ("street-lighting", "DALI-2 Luminaire"),
-    ("iot-devices-enhanced", "MQTT Simulator"),
-    ("iot-simulator-high", "MQTT High-Freq"),
-    ("iot-simulator-medium", "MQTT Med-Freq"),
-    ("iot-simulator-burst", "MQTT Burst"),
+    ("iot-devices-enhanced", "MQTT Emulator"),
+    ("iot-device-high", "MQTT High-Freq"),
+    ("iot-device-medium", "MQTT Med-Freq"),
+    ("iot-device-burst", "MQTT Burst"),
     ("mqtt-broker", "Message Broker"),
 ]
 

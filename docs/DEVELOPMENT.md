@@ -218,7 +218,7 @@ kubectl logs -l app=suricata-forwarder -n monitoring --tail=50 -f
 | K8s automation does nothing | Wrong KUBECONFIG, RBAC missing | `export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`, check pod service account |
 | Falco not forwarding | Forwarder can't reach IDS API | Check service DNS, `kubectl get svc -n smart-city` |
 | Dashboard shows stale data | Browser cache | Hard refresh, check if pods are running |
-| Rate limiter blocking everything | Thresholds too low for attack simulation | Reset via `/api/rate-limiter/reset` or adjust env vars |
+| Rate limiter blocking everything | Thresholds too low for attack reproduction | Reset via `/api/rate-limiter/reset` or adjust env vars |
 | PostgreSQL unavailable | Pod not ready, wrong connection string | Check `kubectl get pods -n smart-city`, verify `DATABASE_URL` |
 
 ### Health Check
