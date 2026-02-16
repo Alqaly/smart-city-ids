@@ -16,8 +16,6 @@ import { store } from '../state.js';
 import { api } from '../api.js';
 import { esc } from '../utils.js';
 
-// ── Module-level WebSocket state ─────────────────────────────────────────
-let iotWS = null;
 
 // ══════════════════════════════════════════════════════════════════════════
 // IoT Devices Tab
@@ -328,107 +326,91 @@ function renderStreetLighting(telem) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// IoT WebSocket MQTT Bridge Stream
+// IoT Event Feed (polling-based — replaces broken WebSocket bridge)
 // ══════════════════════════════════════════════════════════════════════════
+//
+// The iot-stream-bridge (NodePort 30810) is not deployed in most setups,
+// so the old WebSocket approach just showed "Bridge unavailable" forever.
+// This replacement polls /api/iot/events every 10 seconds and renders
+// real device events that are already collected by the backend.
+
+let iotFeedTimer = null;
+let lastEventCount = 0;
 
 /**
- * Build candidate WebSocket URLs for the IoT stream bridge.
- */
-function getIoTStreamUrls() {
-  const host = window.location.hostname;
-  return [
-    'ws://' + host + ':30810',
-    'ws://localhost:30810',
-    'ws://localhost:8081',
-    'ws://127.0.0.1:8081',
-  ];
-}
-
-/**
- * Connect to the IoT stream bridge (WebSocket → MQTT traffic).
+ * Start the IoT Event Feed — polls /api/iot/events every 10 seconds.
  */
 export function connectIoTStream() {
-  if (iotWS) { try { iotWS.close(); } catch (e) { /* */ } }
   const dot = document.getElementById('iotStreamDot');
   const status = document.getElementById('iotStreamStatus');
   const log = document.getElementById('iotStreamLog');
-  dot.className = 'dot dot-yellow';
-  status.textContent = 'Connecting to MQTT bridge...';
 
-  const urls = getIoTStreamUrls();
-  let idx = 0;
+  dot.className = 'dot dot-green';
+  status.textContent = 'Polling IoT events';
+  log.innerHTML = '<span style="color:var(--green)">\u2713 IoT Event Feed active — polling every 10s</span>\n';
 
-  function tryNext() {
-    if (idx >= urls.length) {
-      dot.className = 'dot dot-red';
-      status.textContent = 'Bridge unavailable (check iot-stream-bridge service)';
+  fetchIoTEvents(); // immediate first fetch
+  iotFeedTimer = setInterval(fetchIoTEvents, 10000);
+}
+
+function fetchIoTEvents() {
+  api.getIoTEvents(30).then(data => {
+    if (!data || !data.events) return;
+    const events = data.events;
+    const dot = document.getElementById('iotStreamDot');
+    const status = document.getElementById('iotStreamStatus');
+    const log = document.getElementById('iotStreamLog');
+    const countEl = document.getElementById('iotStreamCount');
+
+    if (events.length === 0) {
+      dot.className = 'dot dot-yellow';
+      status.textContent = 'No events yet — waiting for IoT traffic';
       return;
     }
-    const ws = new WebSocket(urls[idx]);
-    idx += 1;
 
-    ws.onopen = () => {
-      iotWS = ws;
-      dot.className = 'dot dot-green';
-      status.textContent = 'Live IoT MQTT traffic';
-      log.innerHTML = '<span style="color:var(--green)">\u2713 Connected to IoT stream bridge.</span>';
-    };
+    dot.className = 'dot dot-green';
+    status.textContent = 'Live — ' + data.total + ' total events';
+    store.setState({ iotStreamCount: data.total });
+    countEl.textContent = data.total;
 
-    ws.onmessage = event => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type !== 'iot_message') return;
-        const state = store.getState();
-        const newCount = state.iotStreamCount + 1;
-        store.setState({ iotStreamCount: newCount });
-        document.getElementById('iotStreamCount').textContent = newCount;
-        const msg = data.data || {};
-        const ts = new Date().toLocaleTimeString();
-        const device = msg.device || msg.device_id || 'unknown';
-        const ns = msg.namespace || 'smart-city';
-        const sample = msg.vehicle_count || msg.temperature_c || msg.power_kw || msg.value || 'data';
-        const rate = Math.round((data.total_rate || 0) * 60);
-        const line = '[' + ts + '] ' + device + ' (' + ns + ') -> ' + sample + ' | ' + rate + '/min\n';
-        log.textContent = line + log.textContent.slice(0, 8000);
-      } catch (e) {
-        console.warn('IoT WS parse error', e);
-      }
-    };
+    // Only re-render if count changed
+    if (data.total === lastEventCount) return;
+    lastEventCount = data.total;
 
-    ws.onerror = () => { try { ws.close(); } catch (e) { /* */ } };
+    // Render most recent events (newest first)
+    const lines = events.slice().reverse().map(ev => {
+      const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleTimeString() : '--:--:--';
+      const device = ev.device_id || ev.device || 'unknown';
+      const evType = ev.event_type || ev.type || 'data';
+      const ns = ev.namespace || 'smart-city';
+      const detail = ev.value || ev.message || JSON.stringify(ev.data || '').slice(0, 60);
+      return '[' + ts + '] ' + device + ' (' + ns + ') ' + evType + ' → ' + detail;
+    });
 
-    ws.onclose = () => {
-      if (iotWS === ws) { iotWS = null; }
-      if (dot.className.indexOf('dot-green') !== -1) {
-        dot.className = 'dot dot-red';
-        status.textContent = 'Disconnected — reconnecting...';
-        setTimeout(connectIoTStream, 2000);
-      } else {
-        tryNext();
-      }
-    };
-  }
-
-  tryNext();
+    log.textContent = lines.join('\n');
+  }).catch(() => {
+    // silently retry on next interval
+  });
 }
 
-/** Close the WebSocket connection (called on logout). */
+/** Stop the IoT Event Feed (called on logout). */
 export function disconnectIoTStream() {
-  if (iotWS) { try { iotWS.close(); } catch (e) { /* */ } iotWS = null; }
+  if (iotFeedTimer) { clearInterval(iotFeedTimer); iotFeedTimer = null; }
 }
 
-/** Toggle IoT stream panel visibility. */
+/** Toggle IoT event feed panel visibility. */
 export function toggleIoTStream() {
   const state = store.getState();
   const open = !state.ui.iotStreamOpen;
   store.setState({ ui: { ...state.ui, iotStreamOpen: open } });
   document.getElementById('iotStreamBody').style.display = open ? 'block' : 'none';
-  document.getElementById('iotStreamToggleBtn').textContent = open ? '▼' : '▲';
+  document.getElementById('iotStreamToggleBtn').textContent = open ? '\u25BC' : '\u25B2';
 }
 
-/** Clear the IoT stream log. */
+/** Clear the IoT event feed log. */
 export function clearIoTStream() {
-  document.getElementById('iotStreamLog').textContent = 'IoT stream cleared.';
+  document.getElementById('iotStreamLog').textContent = 'IoT event feed cleared.';
   store.setState({ iotStreamCount: 0 });
   document.getElementById('iotStreamCount').textContent = '0';
+  lastEventCount = 0;
 }

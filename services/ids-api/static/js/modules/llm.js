@@ -40,7 +40,7 @@ export function renderLLMTab(llm, cb, dedup, llmDiag) {
     '<div class="stat-card purple"><div class="stat-label">Total Providers</div><div class="stat-value">' + ALL_PROVIDERS.length + '</div><div class="stat-sub">' + ALL_PROVIDERS.map(p => p.id).join(', ') + '</div></div>' +
     '<div class="stat-card green"><div class="stat-label">Operational</div><div class="stat-value">' + (smry.operational || 0) + '/' + ALL_PROVIDERS.length + '</div><div class="stat-sub">Configured: ' + configCount + '</div></div>' +
     '<div class="stat-card red"><div class="stat-label">Errors / Cooldown</div><div class="stat-value">' + ((smry.error || 0) + (smry.cooldown || 0)) + '</div><div class="stat-sub">' + (smry.error || 0) + ' errors, ' + (smry.cooldown || 0) + ' in cooldown</div></div>' +
-    '<div class="stat-card blue"><div class="stat-label">Cost Saved</div><div class="stat-value">$' + (dedup && dedup.cost_saved_usd ? dedup.cost_saved_usd.toFixed(3) : '0.000') + '</div><div class="stat-sub">Dedup: ' + (dedup && dedup.hit_rate_percent ? dedup.hit_rate_percent.toFixed(1) : '0') + '% hit rate</div></div>';
+    '<div class="stat-card blue"><div class="stat-label">Avg Latency</div><div class="stat-value" id="llmAvgLatVal">--</div><div class="stat-sub" id="llmAvgLatSub">Primary engine response time</div></div>';
 
   // ── Latency/cost charts (async — need stats export) ────────────────
   api.getLLMStatsExport().then(stats => {
@@ -50,6 +50,14 @@ export function renderLLMTab(llm, cb, dedup, llmDiag) {
     renderLatencyChart(eng, names);
     renderCostChart(eng, names);
     renderTokenTable(eng, names);
+
+    // Update Avg Latency card with primary engine data
+    const primary = names.find(n => eng[n].total_requests > 0);
+    if (primary) {
+      const avg = eng[primary].avg_latency_s || 0;
+      document.getElementById('llmAvgLatVal').textContent = avg.toFixed(2) + 's';
+      document.getElementById('llmAvgLatSub').textContent = primary + ' (' + eng[primary].total_requests + ' requests)';
+    }
   });
 
   // ── Provider cards ─────────────────────────────────────────────────

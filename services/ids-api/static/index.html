@@ -406,11 +406,11 @@
   </div>
 </div>
 
-<!-- IoT Live Stream — MQTT bridge -->
-<div class="card" id="iotLiveCard" style="margin:0 24px 16px;border:1px solid var(--accent2);border-radius:8px">
+<!-- IoT Event Feed — polls /api/iot/events -->
+<div class="card" id="iotLiveCard" style="margin:0 24px 16px;border:1px solid var(--green);border-radius:8px">
   <div class="card-header" style="cursor:pointer" onclick="toggleIoTStream()">
-    <h3><span id="iotStreamDot" class="dot dot-yellow" style="margin-right:6px"></span>IoT Live Stream</h3>
-    <span style="font-size:11px;color:var(--text3);margin-left:8px" id="iotStreamStatus">Connecting...</span>
+    <h3><span id="iotStreamDot" class="dot dot-yellow" style="margin-right:6px"></span>IoT Event Feed</h3>
+    <span style="font-size:11px;color:var(--text3);margin-left:8px" id="iotStreamStatus">Starting...</span>
     <span class="badge badge-purple" id="iotStreamCount" style="margin-left:8px">0</span>
     <div style="margin-left:auto;display:flex;gap:6px">
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearIoTStream()">Clear</button>
@@ -418,7 +418,7 @@
     </div>
   </div>
   <div class="card-body" id="iotStreamBody" style="display:block">
-    <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to IoT stream...</pre>
+    <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Starting IoT event feed...</pre>
   </div>
 </div>
 

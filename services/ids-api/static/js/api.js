@@ -94,6 +94,7 @@ export const api = {
   // ── IoT ─────────────────────────────────────────────────────────────
   getIoTDevices:   () => requestNoAuth('/api/iot/devices'),
   getIoTTelemetry: () => requestNoAuth('/api/iot/telemetry'),
+  getIoTEvents:    (limit = 30) => requestNoAuth(`/api/iot/events?limit=${limit}`),
 
   // ── Governance (requires auth) ──────────────────────────────────────
   getGovernanceStatus: () => request('/api/governance/status'),
