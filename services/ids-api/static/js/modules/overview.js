@@ -40,13 +40,37 @@ export function renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDi
       : 'none configured';
   }
 
+  // Build smarter subtitles
+  const totalAlerts = m.total_alerts || 0;
+  const critAlerts = m.critical_alerts || 0;
+  const critPct = totalAlerts > 0 ? Math.round((critAlerts / totalAlerts) * 100) : 0;
+  const critSub = totalAlerts > 0
+    ? `Severity 8-10 (${critPct}% of total)`
+    : 'Severity 8-10 — no alerts yet';
+  const iotCount = m.iot_devices_active || 0;
+  const iotSub = iotCount > 0
+    ? `${iotCount} pod(s) running in K8s`
+    : 'Scanning cluster for IoT pods…';
+  const dedupPct = m.alert_reduction_percentage;
+  const dedupRaw = m.raw_alerts || m.total_alerts || 0;
+  let dedupSub;
+  if (dedupRaw === 0) {
+    dedupSub = 'No alerts processed yet';
+  } else if (dedupPct === 100) {
+    dedupSub = 'All duplicates suppressed';
+  } else if (dedupPct === 0) {
+    dedupSub = 'No duplicates detected';
+  } else {
+    dedupSub = `${dedupPct}% duplicate alerts suppressed`;
+  }
+
   document.getElementById('overviewStats').innerHTML =
-    `<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">${m.total_alerts || 0}</div><div class="stat-sub">Processed by IDS pipeline</div></div>` +
-    `<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">${m.critical_alerts || 0}</div><div class="stat-sub">Severity 8+</div></div>` +
-    `<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">${m.iot_devices_active || 0}</div><div class="stat-sub">Active in cluster</div></div>` +
+    `<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">${totalAlerts}</div><div class="stat-sub">Ingested via Falco / Suricata</div></div>` +
+    `<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">${critAlerts}</div><div class="stat-sub">${critSub}</div></div>` +
+    `<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">${iotCount}</div><div class="stat-sub">${iotSub}</div></div>` +
     `<div class="stat-card ${(smry.error > 0 || smry.cooldown > 0) ? 'red' : 'purple'}"><div class="stat-label">LLM Engines</div><div class="stat-value">${smry.operational || (h && h.llm_provider_count) || countCB(cb)}/${ALL_PROVIDERS.length}</div><div class="stat-sub">${llmSub}</div></div>` +
-    `<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">${m.alert_reduction_percentage || 0}%</div><div class="stat-sub">Duplicate alerts suppressed</div></div>` +
-    `<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">${uptime}</div><div class="stat-sub">System operational</div></div>`;
+    `<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">${dedupPct != null ? dedupPct : 0}%</div><div class="stat-sub">${dedupSub}</div></div>` +
+    `<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">${uptime}</div><div class="stat-sub">IDS API process uptime</div></div>`;
 }
 
 // ── Pipeline Overview ────────────────────────────────────────────────────
@@ -76,14 +100,22 @@ export function renderPipelineOverview(data) {
   pipeEl.innerHTML = html;
 
   const f = data.alert_fatigue || {};
-  fatigueEl.innerHTML =
-    `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:13px">` +
-    `<div><span style="color:var(--text3)">Raw Alerts</span><br><strong>${f.raw_total || 0}</strong></div>` +
-    `<div><span style="color:var(--text3)">After Dedup</span><br><strong>${f.after_dedup_total || 0}</strong></div>` +
-    `<div><span style="color:var(--text3)">Human Review</span><br><strong>${f.human_review_required_total || 0}</strong></div>` +
-    `<div><span style="color:var(--text3)">Auto-Handled</span><br><strong>${f.auto_handled_total || 0}</strong></div>` +
-    `<div><span style="color:var(--text3)">Reduction</span><br><strong>${f.reduction_percent || 0}%</strong></div>` +
-    `</div>`;
+  const hasData = (f.raw_total || 0) > 0;
+  if (!hasData) {
+    fatigueEl.innerHTML =
+      `<div style="color:var(--text3);font-size:13px;text-align:center;padding:8px">` +
+      `No alerts processed in this session yet. Send alerts or run an attack simulation to see fatigue metrics.` +
+      `</div>`;
+  } else {
+    fatigueEl.innerHTML =
+      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:13px">` +
+      `<div><span style="color:var(--text3)">Raw Alerts</span><br><strong>${f.raw_total}</strong></div>` +
+      `<div><span style="color:var(--text3)">After Dedup</span><br><strong>${f.after_dedup_total || 0}</strong></div>` +
+      `<div><span style="color:var(--text3)">Human Review</span><br><strong>${f.human_review_required_total || 0}</strong></div>` +
+      `<div><span style="color:var(--text3)">Auto-Handled</span><br><strong>${f.auto_handled_total || 0}</strong></div>` +
+      `<div><span style="color:var(--text3)">Reduction</span><br><strong>${f.reduction_percent || 0}%</strong></div>` +
+      `</div>`;
+  }
 }
 
 // ── Live Alert Feed ──────────────────────────────────────────────────────
@@ -144,7 +176,11 @@ export function renderLLMOverview(llm, cb, llmDiag) {
       (ds === 'error' || ds === 'circuit_open') ? 'dot-red' :
       !isConfigured ? 'dot-yellow' : 'dot-green';
 
-    const stats = info ? ` | ${info.successes || 0} ok / ${info.failures || 0} fail` : '';
+    const stats = info
+      ? ((info.successes || 0) === 0 && (info.failures || 0) === 0
+          ? ' | idle'
+          : ` | ${info.successes || 0} ok / ${info.failures || 0} fail`)
+      : '';
     const reason = (d.reason && ds !== 'operational' && ds !== 'not_configured')
       ? ` <span style="font-size:10px;color:var(--text3);display:block;margin-top:1px">${esc(d.reason.substring(0, 60))}</span>` : '';
 

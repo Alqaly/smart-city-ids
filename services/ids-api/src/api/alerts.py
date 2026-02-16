@@ -856,3 +856,87 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None):
         "storage": db.get_stats()["storage_type"],
         "alerts": alerts,
     }
+
+
+# ─── POST /api/alerts/{id}/reanalyze — re-send alert to a specific LLM ───
+
+@router.post("/api/alerts/{alert_id}/reanalyze")
+async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends(verify_token)):
+    """Re-analyze an existing alert using a specific (or default) LLM engine.
+
+    Fetches the stored alert from the database, rebuilds the raw alert payload,
+    and sends it through the LLM analysis pipeline — optionally targeting a
+    specific engine (e.g. "xai", "openai", "kimi", "local").
+
+    The new analysis replaces the old one in the database so the dashboard
+    reflects the updated severity, summary, and threat classification.
+
+    Args:
+        alert_id: Database ID of the alert to re-analyze.
+        engine:   Optional LLM engine name to use (e.g. "xai", "openai",
+                  "kimi", "local").  If omitted, uses the default priority
+                  order with failover.
+
+    Returns:
+        dict with keys: alert_id, engine_used, latency_s, previous_severity,
+        new_severity, analysis (the full LLM result), and updated (bool).
+    """
+    from api._state import db, llm_manager
+
+    # 1. Fetch the alert from DB
+    alert_record = db.get_alert_by_id(alert_id)
+    if not alert_record:
+        raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
+
+    # 2. Reconstruct the raw alert dict for the LLM
+    raw = alert_record.get("raw_alert") or {}
+    alert_dict = {
+        "output": raw.get("output", alert_record.get("summary", "")),
+        "rule": alert_record.get("rule", raw.get("rule", "Unknown")),
+        "priority": alert_record.get("priority", raw.get("priority", "Warning")),
+        "time": str(alert_record.get("timestamp", "")),
+        "output_fields": raw.get("output_fields", {}),
+        "source": alert_record.get("source", "unknown"),
+    }
+
+    # 3. Run LLM analysis (with optional preferred engine)
+    started = time.perf_counter()
+    try:
+        result = await llm_manager.analyze(alert_dict, preferred_engine=engine)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM analysis failed: {str(e)}")
+
+    llm_duration = time.perf_counter() - started
+    engine_used = result.get("provider") or result.get("engine", "unknown")
+
+    if result.get("status") != "success":
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM returned error: {result.get('error', 'unknown')}"
+        )
+
+    analysis = result.get("analysis", {})
+    new_severity = analysis.get("severity", 5)
+    new_summary = analysis.get("summary", "")
+    new_threat = analysis.get("threat_type", "Unknown")
+    prev_severity = alert_record.get("severity", 0)
+
+    # 4. Update the DB with the new analysis
+    updated = db.update_alert_analysis(
+        alert_id, analysis, new_severity, new_summary, new_threat
+    )
+
+    logger.info(
+        f"Re-analyzed alert {alert_id} with {engine_used}: "
+        f"severity {prev_severity} → {new_severity} ({llm_duration:.2f}s)"
+    )
+
+    return {
+        "alert_id": alert_id,
+        "engine_used": engine_used,
+        "latency_s": round(llm_duration, 3),
+        "previous_severity": prev_severity,
+        "new_severity": new_severity,
+        "analysis": analysis,
+        "updated": updated,
+    }

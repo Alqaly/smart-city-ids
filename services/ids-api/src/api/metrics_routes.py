@@ -336,6 +336,11 @@ async def get_metrics():
         restore_data = d["db"].get_prometheus_restore_data()
         d["metrics"]["alerts_by_threat_type"] = restore_data.get("alerts_by_threat_type", {})
         d["metrics"]["alerts_by_severity"] = restore_data.get("alerts_by_severity", {})
+        # Restore critical_alerts from DB — the in-memory counter resets on
+        # restart but the DB always has the true count of severity >= 8 alerts.
+        db_critical = restore_data.get("critical_alerts", 0)
+        if db_critical > d["metrics"]["critical_alerts"]:
+            d["metrics"]["critical_alerts"] = db_critical
     except Exception:
         pass  # Non-critical — dashboard will show partial data.
 

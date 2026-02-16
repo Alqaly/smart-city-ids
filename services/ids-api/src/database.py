@@ -583,6 +583,74 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting alert count: {e}")
             return len(self._memory_alerts)
+
+    def get_alert_by_id(self, alert_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single alert by its database ID.
+
+        Args:
+            alert_id: Integer primary key of the alert row.
+
+        Returns:
+            Alert dict if found, None otherwise.
+        """
+        if self.use_memory or not self._ensure_connection():
+            for a in self._memory_alerts:
+                if a.get("id") == alert_id:
+                    return a
+            return None
+
+        try:
+            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM alerts WHERE id = %s", (alert_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting alert {alert_id}: {e}")
+            return None
+
+    def update_alert_analysis(self, alert_id: int, analysis: dict, severity: int,
+                               summary: str, threat_type: str) -> bool:
+        """Update the LLM analysis fields of an existing alert.
+
+        Used by the re-analyze feature to overwrite a previous analysis
+        with a fresh one from a different (or the same) LLM engine.
+
+        Args:
+            alert_id:    Database row ID.
+            analysis:    Full LLM analysis dict (stored as JSONB).
+            severity:    Updated severity score (1-10).
+            summary:     Updated summary text.
+            threat_type: Updated threat classification.
+
+        Returns:
+            True if the update succeeded, False otherwise.
+        """
+        if self.use_memory or not self._ensure_connection():
+            for a in self._memory_alerts:
+                if a.get("id") == alert_id:
+                    a["analysis"] = analysis
+                    a["severity"] = severity
+                    a["summary"] = summary
+                    a["threat_type"] = threat_type
+                    return True
+            return False
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE alerts
+                    SET analysis = %s, severity = %s, summary = %s, threat_type = %s
+                    WHERE id = %s
+                """, (json.dumps(analysis), severity, summary, threat_type, alert_id))
+                self.conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating alert {alert_id}: {e}")
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
+            return False
     
     def get_alerts_by_severity(self) -> Dict[str, int]:
         """Get alert counts grouped by severity."""

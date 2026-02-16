@@ -727,9 +727,10 @@ def refresh_iot_active_metric() -> int:
             # Known pod-name prefixes for IoT-related services in this deployment
             iot_prefixes = [
                 "traffic-camera", "healthcare-api", "parking-system",
-                "iot-devices-enhanced", "iot-device-high",
-                "iot-device-medium", "iot-device-burst", "mqtt-broker",
-                "env-sensor", "street-lighting", "iot-simulator",
+                "iot-devices-enhanced", "iot-simulator-high",
+                "iot-simulator-medium", "iot-simulator-burst",
+                "iot-mqtt", "mqtt-broker",
+                "env-sensor", "street-lighting",
             ]
             for p in pod_list.items:
                 name = p.metadata.name

@@ -4,6 +4,49 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [v2.4.0] Re-analyze, Metrics Fixes & Dashboard Clarity — 2025-07-16
+
+### Summary
+
+Fixed multiple broken dashboard metrics (Critical Alerts, IoT Devices both showing 0),
+added a per-alert LLM re-analyze feature with engine selection and verbose output, and
+improved dashboard stat-card subtitles for clarity.
+
+### Fixes
+
+- **Critical Alerts counter always 0**: The in-memory counter reset on API restart.
+  Now restored from PostgreSQL via `get_prometheus_restore_data()` in the `/api/metrics`
+  endpoint (`metrics_routes.py`).
+- **IoT Devices Active always 0**: Pod prefix list in `_state.py` had wrong names
+  (`iot-device-high` etc.) — updated to match actual K8s pod names
+  (`iot-simulator-high`, `iot-simulator-medium`, `iot-simulator-burst`, `iot-mqtt`).
+
+### New features
+
+- **Re-analyze alerts with LLM engine picker** (backend + frontend):
+  - `POST /api/alerts/{id}/reanalyze?engine=xai` — sends an existing alert back
+    through the LLM pipeline using a specific engine (or auto-failover).
+  - Returns verbose result: engine used, latency, severity change, full analysis.
+  - Updates the alert record in the database with the new analysis.
+  - New `database.py` methods: `get_alert_by_id()`, `update_alert_analysis()`.
+  - Frontend: each alert row now has a "Re-analyze" button with an LLM engine
+    dropdown picker and a verbose box-art result log.
+
+### UI improvements
+
+- **Stat card subtitles are smarter**:
+  - Critical Alerts shows percentage of total (e.g., "Severity 8-10 (47% of total)").
+  - IoT Devices shows "Scanning cluster…" when 0 instead of just "Active in cluster".
+  - Dedup Savings distinguishes "No alerts processed yet" / "No duplicates detected" /
+    "All duplicates suppressed" instead of generic text.
+  - Uptime card subtitle changed to "IDS API process uptime".
+- **Alert fatigue section**: Shows helpful message instead of all-zeros when no alerts
+  have been processed in the current session.
+- **LLM provider sidebar**: Shows "idle" instead of "0 ok / 0 fail" when a provider
+  hasn't been used yet.
+
+---
+
 ## [v2.3.0] Frontend Modular Architecture — 2025-07-16
 
 ### Summary

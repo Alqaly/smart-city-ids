@@ -123,6 +123,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }).then(r => r.json()),
+
+  // ── Re-analyze (requires auth) ─────────────────────────────────────
+  reanalyzeAlert: (alertId, engine) => {
+    let url = `/api/alerts/${alertId}/reanalyze`;
+    if (engine) url += `?engine=${engine}`;
+    return request(url, { method: 'POST' });
+  },
 };
 
 /**
