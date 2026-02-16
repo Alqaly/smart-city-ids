@@ -51,7 +51,12 @@ class Config:
     ALERT_CACHE_MAX_SIZE: int = int(os.getenv("ALERT_CACHE_MAX_SIZE", "100"))
     
     # Security / Auth
-    SECRET_KEY: str = os.getenv("SECRET_KEY", os.getenv("JWT_SECRET_KEY", "smart-city-ids-demo-secret-change-in-production"))
+    # Generate a random secret at startup if none is provided.
+    # Production deployments MUST set SECRET_KEY or JWT_SECRET_KEY in the environment.
+    SECRET_KEY: str = os.getenv(
+        "SECRET_KEY",
+        os.getenv("JWT_SECRET_KEY", ""),
+    ) or __import__("secrets").token_urlsafe(32)
     
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:idspassword@postgres:5432/smartcity_ids")
