@@ -21,8 +21,11 @@ WORKDIR /app
 COPY services/ids-api/src/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
+# Copy application source code (all packages)
 COPY services/ids-api/src/ ./
+
+# Copy static frontend (HTML, CSS, JS modules)
+COPY services/ids-api/static/ ./static/
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \

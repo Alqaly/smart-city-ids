@@ -51,40 +51,19 @@ fi
 log "Deploying from: $PROJECT_ROOT"
 echo ""
 
-# ─── Full rebuild (only when --full or requirements changed) ────────────
-if [[ "${1:-}" == "--full" ]]; then
-    log "Full rebuild requested — building Docker image..."
-    if command -v docker &>/dev/null; then
-        docker build -t ids-api:latest -f docker/ids-api/Dockerfile . 2>&1 | tail -5
-        docker save ids-api:latest -o /tmp/ids-api.tar
-        sudo k3s ctr images import /tmp/ids-api.tar
-        rm -f /tmp/ids-api.tar
-        log "Docker image rebuilt and imported"
-    else
-        warn "Docker not found — skipping image rebuild"
-        warn "Install Docker or use code-only deploy (no --full flag)"
-    fi
-    echo ""
+# ─── Full rebuild (always — Docker image is the deployment unit) ────────
+log "Building Docker image (includes all source + static files)..."
+if command -v docker &>/dev/null; then
+    docker build -t ids-api:latest -f docker/ids-api/Dockerfile . 2>&1 | tail -5
+    docker save ids-api:latest -o /tmp/ids-api.tar
+    sudo k3s ctr images import /tmp/ids-api.tar
+    rm -f /tmp/ids-api.tar
+    log "Docker image rebuilt and imported"
+else
+    err "Docker not found — required for deployment"
+    err "Install Docker to deploy: sudo apt install docker.io"
+    exit 1
 fi
-
-# ─── Update ConfigMaps (always — this is the fast path) ────────────────
-log "Updating ConfigMap: ids-app-code"
-kubectl delete configmap ids-app-code -n "$NAMESPACE" --ignore-not-found >/dev/null
-
-# Build --from-file args for ALL .py and .txt files in src/
-FROM_FILES=()
-for f in "$SRC_DIR"/*.py "$SRC_DIR"/*.txt; do
-    [[ -f "$f" ]] && FROM_FILES+=("--from-file=$f")
-done
-
-kubectl create configmap ids-app-code -n "$NAMESPACE" "${FROM_FILES[@]}" 2>/dev/null
-log "✓ ids-app-code updated (${#FROM_FILES[@]} files)"
-
-log "Updating ConfigMap: ids-app-static"
-kubectl delete configmap ids-app-static -n "$NAMESPACE" --ignore-not-found >/dev/null
-kubectl create configmap ids-app-static -n "$NAMESPACE" \
-    --from-file="$STATIC_DIR/index.html" 2>/dev/null
-log "✓ ids-app-static updated"
 echo ""
 
 # ─── Restart pods ───────────────────────────────────────────────────────
