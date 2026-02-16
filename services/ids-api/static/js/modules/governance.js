@@ -20,16 +20,31 @@ import { esc, shortTime, sevBadge } from '../utils.js';
  * @param {Function} refreshFn — callback to trigger a full refresh after actions
  */
 export function renderGovernanceTab(gov, dashboard, refreshFn) {
-  if (!gov) return;
+  if (!gov) {
+    // Show helpful fallback instead of blank
+    document.getElementById('govStats').innerHTML =
+      '<div class="stat-card purple"><div class="stat-label">Mode</div><div class="stat-value" style="font-size:20px">Loading...</div><div class="stat-sub">Connecting to governance API</div></div>' +
+      '<div class="stat-card yellow"><div class="stat-label">Pending</div><div class="stat-value">-</div><div class="stat-sub">Actions awaiting decision</div></div>' +
+      '<div class="stat-card green"><div class="stat-label">Approved</div><div class="stat-value">-</div><div class="stat-sub">Total approved actions</div></div>' +
+      '<div class="stat-card red"><div class="stat-label">Rejected</div><div class="stat-value">-</div><div class="stat-sub">Actions blocked by analyst</div></div>';
+    document.getElementById('govModeControl').innerHTML =
+      '<div style="padding:16px;text-align:center;color:var(--text3)">' +
+      '<div style="font-size:24px;margin-bottom:8px">&#x1F512;</div>' +
+      '<div style="font-size:13px;margin-bottom:4px"><strong style="color:var(--text)">Governance Controls Loading</strong></div>' +
+      '<div style="font-size:12px">Ensure you are logged in. Governance requires authentication.</div>' +
+      '</div>';
+    return;
+  }
   const gm = gov.metrics || {};
 
   // ── Summary stat cards ─────────────────────────────────────────────
+  const modeLabel = gov.mode === 'assisted' ? '&#x1F6E1;&#xFE0F; Assisted' : gov.mode === 'autopilot' ? '&#x26A1; Autopilot' : '&#x1F6D1; Manual';
+  const modeColor = gov.mode === 'autopilot' ? 'orange' : gov.mode === 'assisted' ? 'purple' : 'blue';
   document.getElementById('govStats').innerHTML =
-    '<div class="stat-card purple"><div class="stat-label">Mode</div><div class="stat-value" style="font-size:20px">' +
-    (gov.mode === 'assisted' ? 'Assisted' : gov.mode === 'autopilot' ? 'Autopilot' : 'Manual') +
-    '</div><div class="stat-sub">Threshold: severity &gt;= ' + (gov.assisted_threshold || 8) + ' requires approval</div></div>' +
-    '<div class="stat-card yellow"><div class="stat-label">Pending</div><div class="stat-value">' + (gov.pending_count || 0) + '</div><div class="stat-sub">Actions awaiting decision</div></div>' +
-    '<div class="stat-card green"><div class="stat-label">Approved</div><div class="stat-value">' + (gm.approved || 0) + '</div><div class="stat-sub">of ' + (gm.total_actions_requested || 0) + ' total</div></div>' +
+    '<div class="stat-card ' + modeColor + '"><div class="stat-label">Automation Mode</div><div class="stat-value" style="font-size:20px">' + modeLabel +
+    '</div><div class="stat-sub">Severity &ge; ' + (gov.assisted_threshold || 8) + ' requires analyst approval</div></div>' +
+    '<div class="stat-card yellow"><div class="stat-label">Pending Review</div><div class="stat-value">' + (gov.pending_count || 0) + '</div><div class="stat-sub">Actions awaiting analyst decision</div></div>' +
+    '<div class="stat-card green"><div class="stat-label">Approved</div><div class="stat-value">' + (gm.approved || 0) + '</div><div class="stat-sub">' + (gm.total_actions_requested || 0) + ' total actions requested</div></div>' +
     '<div class="stat-card red"><div class="stat-label">Rejected</div><div class="stat-value">' + (gm.rejected || 0) + '</div><div class="stat-sub">Actions blocked by analyst</div></div>';
 
   // Update navbar badge
@@ -37,16 +52,26 @@ export function renderGovernanceTab(gov, dashboard, refreshFn) {
 
   // ── Mode control ───────────────────────────────────────────────────
   const modes = ['manual', 'assisted', 'autopilot'];
-  const labels = ['Manual', 'Assisted', 'Autopilot'];
-  let mHtml = '<div style="display:flex;gap:8px;margin-bottom:12px">';
+  const labels = ['&#x1F6D1; Manual', '&#x1F6E1;&#xFE0F; Assisted', '&#x26A1; Autopilot'];
+  const descriptions = [
+    'All automated actions are blocked. Every response requires analyst approval before execution.',
+    'Low-severity actions auto-execute. Critical severity (&ge; ' + (gov.assisted_threshold || 8) + ') requires analyst approval.',
+    'All actions auto-execute immediately. Use for demos only — no human review.'
+  ];
+  let mHtml = '<div style="font-size:13px;color:var(--text2);margin-bottom:12px"><strong style="color:var(--text)">Select Automation Mode</strong> — Controls how the IDS responds to detected threats</div>';
+  mHtml += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">';
   modes.forEach((m, idx) => {
-    mHtml += '<button class="btn ' + (gov.mode === m ? 'btn-primary' : 'btn-outline') +
-      '" onclick="window._setGovMode(\'' + m + '\')">' + labels[idx] + '</button>';
+    const active = gov.mode === m;
+    const borderColor = m === 'manual' ? 'var(--accent)' : m === 'assisted' ? 'var(--accent2)' : 'var(--orange)';
+    mHtml += '<div onclick="window._setGovMode(\'' + m + '\')" style="cursor:pointer;padding:16px;border-radius:8px;border:2px solid ' +
+      (active ? borderColor : 'var(--border)') + ';background:' + (active ? 'rgba(0,212,255,.06)' : 'var(--bg)') +
+      ';transition:all .2s;text-align:center">' +
+      '<div style="font-size:16px;font-weight:700;margin-bottom:6px;color:' + (active ? borderColor : 'var(--text)') + '">' + labels[idx] + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);line-height:1.5">' + descriptions[idx] + '</div>' +
+      (active ? '<div style="margin-top:8px"><span class="badge badge-info">ACTIVE</span></div>' : '') +
+      '</div>';
   });
-  mHtml += '</div><div style="font-size:12px;color:var(--text3)">' +
-    '<strong>Manual:</strong> All actions require analyst approval<br>' +
-    '<strong>Assisted:</strong> Low-severity auto-executes; critical requires approval<br>' +
-    '<strong>Autopilot:</strong> All actions auto-execute (demo mode)</div>';
+  mHtml += '</div>';
   document.getElementById('govModeControl').innerHTML = mHtml;
 
   loadPending(refreshFn);

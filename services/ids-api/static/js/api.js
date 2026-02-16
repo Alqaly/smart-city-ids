@@ -155,5 +155,5 @@ export async function fetchOverviewBundle() {
       api.getLLMDiagnostics(),
       api.getPipelineOverview(),
     ]);
-  return { health, metrics, cb, safety, prod, gov, dedup, alerts, dashboard, llmDiag, pipeline };
+  return [health, metrics, cb, safety, prod, gov, dedup, alerts, dashboard, llmDiag, pipeline];
 }

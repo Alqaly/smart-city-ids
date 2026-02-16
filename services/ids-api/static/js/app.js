@@ -195,10 +195,15 @@ function initTabSwitching() {
 
       // Immediate data load for the newly-activated tab
       switch (tabId) {
-        case 'alerts':   loadAlerts(); break;
+        case 'alerts':     loadAlerts(); break;
         case 'kubernetes': loadK8s(); break;
-        case 'iot':      loadIoT(); break;
-        // llm, governance, attacks are rendered from cached data in refreshAll
+        case 'iot':        loadIoT(); break;
+        case 'llm':
+        case 'governance':
+        case 'attacks':
+          // These tabs use data from refreshAll, so trigger it immediately
+          refreshAll();
+          break;
       }
     });
   });
