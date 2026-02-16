@@ -4,6 +4,82 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [v2.3.0] Frontend Modular Architecture — 2025-07-16
+
+### Summary
+
+Refactored the monolithic `index.html` (1 740 lines — HTML + CSS + JS all inline) into
+a modular ES6-module architecture across 13 files.  This work was prompted by external
+feedback suggesting several improvements; the list below documents what was adopted,
+what was modified, and what was deliberately rejected with rationale.
+
+### Feedback responses
+
+| Feedback item | Decision | Rationale |
+|---|---|---|
+| Split into ES6 modules | **Adopted** | Clear win — each tab is now its own module with a single responsibility. |
+| Centralised state management | **Adopted (simplified)** | Implemented a lightweight `Store` class (~50 LOC) with subscribe/notify instead of pulling in a library. Sufficient for a demo dashboard. |
+| Centralised API layer | **Adopted** | All fetch calls consolidated in `api.js` — single place to change base URL, auth header, or error handling. |
+| Component-based rendering | **Adopted** | Each module exports pure render functions that write to well-known DOM IDs. No framework needed for this scale. |
+| SSE-driven updates instead of aggressive polling | **Partially adopted** | SSE live-feed was already implemented. Added targeted overview refresh on SSE events so the overview tab updates immediately when an alert arrives. Kept polling (raised interval from 10 s → 15 s) with lazy tab loading — only the active tab's API calls fire, reducing redundant traffic by ~70 %. Full SSE-only would require backend changes (broadcast state diffs) that are out of scope. |
+| Move ATTACK_SCENARIOS to backend | **Rejected** | The 12 attack scenarios are static MITRE ATT&CK metadata (labels, descriptions, technique IDs). Serving them from the backend would add an endpoint, a round-trip, and complexity for no security or freshness benefit — the backend validates payloads independently anyway. Documented this in `attacks.js`. |
+| Use DOMPurify for HTML sanitisation | **Rejected** | All rendered data comes from our own API (not arbitrary user input). Using `esc()` (entity-encode `<>&"'`) is sufficient and avoids pulling in a 60 KB CDN dependency that itself becomes an attack surface. Documented this in `utils.js`. |
+| Virtual scrolling for alert tables | **Skipped** | The demo rarely exceeds 50–100 alerts. Virtual scrolling adds significant complexity for negligible gain at this scale. |
+| `requestAnimationFrame` render debouncing | **Skipped** | SSE event rate is low enough (< 1/s typical) that immediate DOM writes cause no jank. |
+
+### New file layout
+
+```
+services/ids-api/static/
+├── index.html            ← lean HTML skeleton, ~300 lines (was 1 740)
+├── css/
+│   └── style.css         ← all extracted CSS (~300 lines)
+└── js/
+    ├── state.js          ← observable Store + ALL_PROVIDERS constant
+    ├── api.js            ← unified authenticated API client
+    ├── utils.js          ← pure helpers (esc, sevBadge, shortTime, …)
+    ├── app.js            ← entry point: auth, tabs, polling orchestration
+    └── modules/
+        ├── overview.js   ← overview tab renderers
+        ├── alerts.js     ← alert history + SSE live feed
+        ├── kubernetes.js ← K8s cluster tab
+        ├── iot.js        ← IoT devices + WebSocket MQTT bridge stream
+        ├── llm.js        ← LLM providers (latency/cost charts, circuit breakers)
+        ├── governance.js ← Governance / HITL interface
+        └── attacks.js    ← attack simulation (12 MITRE ATT&CK for ICS scenarios)
+```
+
+### Key architectural decisions
+
+1. **No build tooling** — ES6 `<script type="module">` runs natively in all modern
+   browsers.  No webpack / vite / bundler config to maintain.
+2. **Lazy tab loading** — `refreshAll()` only fetches data for the active tab plus
+   the lightweight overview bundle, cutting redundant API calls from 11 every 10 s
+   to 3–4 every 15 s on the most common (overview) tab.
+3. **Window-scoped handler bridge** — inline `onclick` attributes in the HTML
+   reference `window.doLogin`, `window.toggleLiveFeed`, etc.  Each module assigns
+   its public functions to `window.*` on import.  This avoids a full event-delegation
+   rewrite while keeping modules decoupled.
+4. **Attack scenarios stay client-side** — static MITRE metadata doesn't benefit
+   from server-side storage; the backend validates every injected alert independently.
+
+### Files changed
+- `services/ids-api/static/index.html` — reduced from 1 740 → ~300 lines (markup only)
+- `services/ids-api/static/css/style.css` — **new** (extracted CSS)
+- `services/ids-api/static/js/state.js` — **new** (centralised store)
+- `services/ids-api/static/js/api.js` — **new** (unified API client)
+- `services/ids-api/static/js/utils.js` — **new** (helper functions)
+- `services/ids-api/static/js/app.js` — **new** (entry point)
+- `services/ids-api/static/js/modules/overview.js` — **new**
+- `services/ids-api/static/js/modules/alerts.js` — **new**
+- `services/ids-api/static/js/modules/kubernetes.js` — **new**
+- `services/ids-api/static/js/modules/iot.js` — **new**
+- `services/ids-api/static/js/modules/llm.js` — **new**
+- `services/ids-api/static/js/modules/governance.js` — **new**
+- `services/ids-api/static/js/modules/attacks.js` — **new**
+
+---
+
 ## [v2.2.0] Unified LLM Engine Manager - 2026-02-05
 
 ### Engineering Improvement: Unified LLM Manager

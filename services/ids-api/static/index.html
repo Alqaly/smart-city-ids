@@ -1,423 +1,394 @@
 <!DOCTYPE html>
+<!--
+  Smart City IDS — Security Analyst Dashboard
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Lean HTML skeleton — all CSS lives in css/style.css, all JS in ES6 modules
+  under js/.  This file contains ONLY structure and semantic markup.
+
+  Architecture (post-refactor):
+    index.html          ← you are here (markup only)
+    css/style.css       ← extracted styles (~300 lines)
+    js/state.js         ← centralised observable Store
+    js/api.js           ← unified API client (one place for all fetch calls)
+    js/utils.js         ← pure helper functions (esc, sevBadge, …)
+    js/app.js           ← entry point: auth, tab switching, polling orchestration
+    js/modules/
+      overview.js       ← overview tab renderers
+      alerts.js         ← alert history + SSE live feed
+      kubernetes.js     ← K8s cluster tab
+      iot.js            ← IoT devices tab + WebSocket MQTT bridge
+      llm.js            ← LLM providers tab (latency/cost charts)
+      governance.js     ← Governance / HITL interface
+      attacks.js        ← Attack simulation engine (12 MITRE ATT&CK scenarios)
+-->
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Smart City IDS — Security Analyst Dashboard</title>
-<style>
-:root{--bg:#0f1923;--surface:#1a2736;--surface2:#243447;--border:#2d4a5e;--accent:#00d4ff;--accent2:#7c5cfc;--green:#22c55e;--yellow:#eab308;--red:#ef4444;--orange:#f97316;--text:#e2e8f0;--text2:#94a3b8;--text3:#64748b;--radius:8px;--shadow:0 4px 24px rgba(0,0,0,.3)}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
-#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#0f1923 0%,#1a1040 50%,#0f1923 100%)}
-.login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:48px;width:400px;box-shadow:var(--shadow)}
-.login-card h1{font-size:22px;margin-bottom:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.login-card p{color:var(--text2);font-size:13px;margin-bottom:28px}
-.login-card label{display:block;color:var(--text2);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-.login-card input{width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;margin-bottom:16px;outline:none;transition:border .2s}
-.login-card input:focus{border-color:var(--accent)}
-.login-card button{width:100%;padding:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:none;border-radius:var(--radius);font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
-.login-card button:hover{opacity:.9}
-#loginError{color:var(--red);font-size:13px;margin-top:8px;display:none}
-#dashboard{display:none}
-.topbar{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:56px;background:var(--surface);border-bottom:1px solid var(--border);backdrop-filter:blur(12px)}
-.topbar .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px}
-.topbar-right{display:flex;align-items:center;gap:16px}
-.topbar-right .pill{font-size:11px;padding:4px 10px;border-radius:99px;font-weight:600;text-transform:uppercase;letter-spacing:.4px}
-.pill-ok{background:rgba(34,197,94,.15);color:var(--green)}
-.pill-warn{background:rgba(234,179,8,.15);color:var(--yellow)}
-.pill-err{background:rgba(239,68,68,.15);color:var(--red)}
-.pill-success{background:rgba(34,197,94,.18);color:var(--green)}
-.topbar-right button{background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:var(--radius);font-size:12px;cursor:pointer;transition:all .2s}
-.topbar-right button:hover{border-color:var(--accent);color:var(--text)}
-.tab-bar{display:flex;gap:0;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;overflow-x:auto}
-.tab-btn{padding:12px 20px;font-size:13px;font-weight:600;color:var(--text3);background:none;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
-.tab-btn:hover{color:var(--text2)}
-.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
-.tab-panel{display:none;padding:24px;animation:fadeIn .2s}
-.tab-panel.active{display:block}
-@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-@keyframes attackFlow{
-0%{left:0;opacity:.7;transform:scale(1)}
-25%{left:25%;opacity:1;transform:scale(1.25)}
-50%{left:50%;opacity:.8;transform:scale(1.1)}
-75%{left:75%;opacity:.65;transform:scale(1.2)}
-100%{left:100%;opacity:0;transform:scale(.8)}
-}
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden}
-.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
-.stat-card.blue::before{background:var(--accent)}
-.stat-card.purple::before{background:var(--accent2)}
-.stat-card.green::before{background:var(--green)}
-.stat-card.red::before{background:var(--red)}
-.stat-card.yellow::before{background:var(--yellow)}
-.stat-card.orange::before{background:var(--orange)}
-.stat-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:8px}
-.stat-value{font-size:28px;font-weight:700}
-.stat-sub{font-size:12px;color:var(--text2);margin-top:4px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
-.card-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border)}
-.card-header h3{font-size:14px;font-weight:700}
-.card-body{padding:16px 20px}
-.card-body.no-pad{padding:0}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;padding:10px 16px;color:var(--text3);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);background:var(--bg)}
-td{padding:10px 16px;border-bottom:1px solid rgba(45,74,94,.3)}
-tr:hover td{background:rgba(0,212,255,.03)}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
-.dot-green{background:var(--green)}.dot-red{background:var(--red)}.dot-yellow{background:var(--yellow)}.dot-blue{background:var(--accent)}
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
-.badge-crit{background:rgba(239,68,68,.15);color:var(--red)}
-.badge-high{background:rgba(249,115,22,.15);color:var(--orange)}
-.badge-med{background:rgba(234,179,8,.15);color:var(--yellow)}
-.badge-low{background:rgba(34,197,94,.15);color:var(--green)}
-.badge-info{background:rgba(0,212,255,.12);color:var(--accent)}
-.badge-purple{background:rgba(124,92,252,.15);color:var(--accent2)}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.pipeline-grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;margin-bottom:16px}
-.pipeline-stage{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px}
-.pipeline-stage .name{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px}
-.pipeline-stage .rate{font-size:20px;font-weight:700;margin-top:4px}
-.pipeline-stage .meta{font-size:11px;color:var(--text2);margin-top:2px}
-@media(max-width:1200px){.pipeline-grid{grid-template-columns:1fr 1fr}#iotServiceCards{grid-template-columns:1fr!important}}
-@media(max-width:900px){.row{grid-template-columns:1fr}}
-.btn{padding:8px 16px;border-radius:var(--radius);border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
-.btn-primary{background:var(--accent);color:#000}.btn-primary:hover{opacity:.85}
-.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{opacity:.85}
-.btn-outline{background:none;border:1px solid var(--border);color:var(--text2)}.btn-outline:hover{border-color:var(--accent);color:var(--text)}
-.btn-success{background:var(--green);color:#fff}.btn-success:hover{opacity:.85}
-.btn-sm{padding:4px 10px;font-size:11px}
-.provider-card{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg);border-radius:var(--radius);border:1px solid var(--border)}
-.provider-icon{width:36px;height:36px;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--accent)}
-.provider-info{flex:1}
-.provider-name{font-size:13px;font-weight:600}
-.provider-detail{font-size:11px;color:var(--text3)}
-.feed{max-height:350px;overflow-y:auto}
-.feed-item{display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(45,74,94,.3);font-size:12px;transition:background .1s}
-.feed-item:hover{background:rgba(0,212,255,.03)}
-.feed-time{color:var(--text3);min-width:70px;white-space:nowrap}
-.feed-source{min-width:60px}
-.feed-msg{flex:1;color:var(--text2)}
-.progress{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-top:6px}
-.progress-fill{height:100%;border-radius:3px;transition:width .5s}
-.attack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
-.attack-card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:all .2s}
-.attack-card:hover{border-color:var(--accent);transform:translateY(-1px)}
-.attack-card h4{font-size:13px;margin-bottom:4px}
-.attack-card p{font-size:11px;color:var(--text3)}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:200}
-.modal-overlay.open{display:flex}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;width:500px;max-width:90vw;max-height:80vh;overflow-y:auto}
-.modal h2{font-size:18px;margin-bottom:16px}
-::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart City IDS — Security Dashboard</title>
+  <link rel="stylesheet" href="/ui/static/css/style.css">
 </head>
 <body>
 
+<!-- ═══════════════════════════════════════════════════════════════════════
+     LOGIN SCREEN
+     ═══════════════════════════════════════════════════════════════════════ -->
 <div id="loginScreen">
-<div class="login-card">
-  <h1>Smart City IDS</h1>
-  <p>Security Analyst Dashboard &mdash; Intrusion Detection System</p>
-  <label>Username</label>
-  <input id="loginUser" value="analyst" autocomplete="username">
-  <label>Password</label>
-  <input id="loginPass" type="password" value="analyst" autocomplete="current-password">
-  <button onclick="doLogin()">Sign In</button>
-  <div id="loginError"></div>
-</div>
+  <div class="login-card">
+    <h1>Smart City IDS</h1>
+    <p>Security Analyst Dashboard &mdash; Intrusion Detection System</p>
+    <label>Username</label>
+    <input id="loginUser" value="analyst" autocomplete="username">
+    <label>Password</label>
+    <input id="loginPass" type="password" value="analyst" autocomplete="current-password">
+    <button onclick="doLogin()">Sign In</button>
+    <div id="loginError"></div>
+  </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════════════
+     DASHBOARD
+     ═══════════════════════════════════════════════════════════════════════ -->
 <div id="dashboard">
 
-<div class="topbar">
-  <div class="brand">&#x1F6E1;&#xFE0F; Smart City IDS</div>
-  <div class="topbar-right">
-    <span id="clusterPill" class="pill pill-ok">K8s Connected</span>
-    <span id="llmPill" class="pill pill-ok">LLM Ready</span>
-    <span id="govPill" class="pill pill-ok">Assisted Mode</span>
-    <span style="color:var(--text3);font-size:12px" id="uptimeLabel">Uptime: --</span>
-    <button onclick="doLogout()">Sign Out</button>
-  </div>
-</div>
-<div style="padding:8px 24px;border-bottom:1px solid var(--border);background:rgba(0,212,255,.03);font-size:12px;color:var(--text2)">This dashboard helps security analysts triage and explain alerts, not replace them.</div>
-
-<div class="tab-bar">
-  <button class="tab-btn active" data-tab="overview">Overview</button>
-  <button class="tab-btn" data-tab="alerts">Live Alerts</button>
-  <button class="tab-btn" data-tab="kubernetes">Kubernetes</button>
-  <button class="tab-btn" data-tab="iot">IoT Devices</button>
-  <button class="tab-btn" data-tab="llm">LLM Providers</button>
-  <button class="tab-btn" data-tab="governance">Governance / HITL</button>
-  <button class="tab-btn" data-tab="attacks">Attack Simulation</button>
-</div>
-
-<div class="tab-panel active" id="tab-overview">
-  <div class="stat-grid" id="overviewStats"></div>
-  <div class="pipeline-grid" id="pipelineOverview"></div>
-  <div class="card"><div class="card-header"><h3>Alert Fatigue (Last Window)</h3></div><div class="card-body" id="alertFatigue"></div></div>
-  <div class="row">
-    <div class="card">
-      <div class="card-header"><h3>Live Alert Feed</h3><span class="badge badge-info" id="alertCountBadge">0</span></div>
-      <div class="card-body no-pad"><div class="feed" id="alertFeed"><div style="padding:20px;color:var(--text3);text-align:center">Waiting for alerts...</div></div></div>
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="brand">&#x1F6E1;&#xFE0F; Smart City IDS</div>
+    <div class="topbar-right">
+      <span id="clusterPill" class="pill pill-ok">K8s Connected</span>
+      <span id="llmPill" class="pill pill-ok">LLM Ready</span>
+      <span id="govPill" class="pill pill-ok">Assisted Mode</span>
+      <span style="color:var(--text3);font-size:12px" id="uptimeLabel">Uptime: --</span>
+      <button onclick="doLogout()">Sign Out</button>
     </div>
-    <div>
+  </div>
+  <div style="padding:8px 24px;border-bottom:1px solid var(--border);background:rgba(0,212,255,.03);font-size:12px;color:var(--text2)">
+    This dashboard helps security analysts triage and explain alerts, not replace them.
+  </div>
+
+  <!-- Tab Bar -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="alerts">Live Alerts</button>
+    <button class="tab-btn" data-tab="kubernetes">Kubernetes</button>
+    <button class="tab-btn" data-tab="iot">IoT Devices</button>
+    <button class="tab-btn" data-tab="llm">LLM Providers</button>
+    <button class="tab-btn" data-tab="governance">Governance / HITL</button>
+    <button class="tab-btn" data-tab="attacks">Attack Simulation</button>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: Overview
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel active" id="tab-overview">
+    <div class="stat-grid" id="overviewStats"></div>
+    <div class="pipeline-grid" id="pipelineOverview"></div>
+    <div class="card">
+      <div class="card-header"><h3>Alert Fatigue (Last Window)</h3></div>
+      <div class="card-body" id="alertFatigue"></div>
+    </div>
+    <div class="row">
       <div class="card">
-        <div class="card-header"><h3>LLM Provider Status</h3></div>
-        <div class="card-body" id="llmOverview"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>System Health</h3></div>
-        <div class="card-body" id="systemHealth"></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="tab-panel" id="tab-alerts">
-  <div class="card">
-    <div class="card-header">
-      <h3>Alert History</h3>
-      <div style="display:flex;gap:8px">
-        <select id="alertSourceFilter" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
-          <option value="">All Sources</option><option value="falco">Falco</option><option value="suricata">Suricata</option>
-        </select>
-        <button class="btn btn-outline btn-sm" onclick="loadAlerts()">Refresh</button>
-      </div>
-    </div>
-    <div class="card-body no-pad"><table><thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>Severity</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead><tbody id="alertsTable"></tbody></table></div>
-  </div>
-</div>
-
-<div class="tab-panel" id="tab-kubernetes">
-  <div class="stat-grid" id="k8sStats"></div>
-  <div style="padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--text3);background:rgba(0,212,255,.04);border-radius:6px;border:1px solid var(--border)" id="k8sExplain"></div>
-  <div class="row">
-    <div class="card">
-      <div class="card-header"><h3>Pods</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Running container instances</span><button class="btn btn-outline btn-sm" onclick="loadK8s()">Refresh</button></div>
-      <div class="card-body no-pad"><table><thead><tr><th>Pod</th><th>Status</th><th>Restarts</th><th>Namespace</th></tr></thead><tbody id="podsTable"></tbody></table></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Services</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Stable network endpoints that route to pods</span></div>
-      <div class="card-body no-pad"><table><thead><tr><th>Service</th><th>Type</th><th>Port(s)</th><th>Namespace</th></tr></thead><tbody id="servicesTable"></tbody></table></div>
-    </div>
-  </div>
-</div>
-
-<div class="tab-panel" id="tab-iot">
-  <div class="stat-grid" id="iotStats"></div>
-
-  <!-- Protocol Emulator Service Cards -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px" id="iotServiceCards">
-    <!-- Traffic Camera ONVIF -->
-    <div class="card" id="svc-traffic-camera">
-      <div class="card-header" style="border-left:3px solid var(--accent)">
-        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4F7;</span> Traffic Camera</h3>
-        <span class="badge badge-info" id="tc-status">Loading...</span>
-      </div>
-      <div class="card-body" style="font-size:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>ONVIF Profile S</strong></div>
-        <div id="tc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-      </div>
-    </div>
-    <!-- Parking System MQTT/CoAP -->
-    <div class="card" id="svc-parking-system">
-      <div class="card-header" style="border-left:3px solid var(--green)">
-        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F17F;&#xFE0F;</span> Parking System</h3>
-        <span class="badge badge-info" id="pk-status">Loading...</span>
-      </div>
-      <div class="card-body" style="font-size:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>MQTT / CoAP / SenML</strong></div>
-        <div id="pk-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-      </div>
-    </div>
-    <!-- Healthcare FHIR R4 -->
-    <div class="card" id="svc-healthcare-api">
-      <div class="card-header" style="border-left:3px solid var(--red)">
-        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F3E5;</span> Healthcare API</h3>
-        <span class="badge badge-info" id="hc-status">Loading...</span>
-      </div>
-      <div class="card-body" style="font-size:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>HL7 FHIR R4</strong></div>
-        <div id="hc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-      </div>
-    </div>
-    <!-- Environmental Sensor Modbus/OPC UA -->
-    <div class="card" id="svc-env-sensor">
-      <div class="card-header" style="border-left:3px solid var(--yellow)">
-        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F32C;&#xFE0F;</span> Env Sensor</h3>
-        <span class="badge badge-info" id="ev-status">Loading...</span>
-      </div>
-      <div class="card-body" style="font-size:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>Modbus TCP + OPC UA</strong></div>
-        <div id="ev-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-      </div>
-    </div>
-    <!-- Street Lighting DALI-2 / TALQ -->
-    <div class="card" id="svc-street-lighting">
-      <div class="card-header" style="border-left:3px solid var(--orange)">
-        <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4A1;</span> Street Lighting</h3>
-        <span class="badge badge-info" id="sl-status">Loading...</span>
-      </div>
-      <div class="card-body" style="font-size:12px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>DALI-2 + TALQ v2.4</strong></div>
-        <div id="sl-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Live Telemetry Data tables -->
-  <div class="row" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-header"><h3>&#x1F4F9; ANPR &amp; Camera Telemetry</h3><span style="font-size:11px;color:var(--text3)">ONVIF real-time feed</span></div>
-      <div class="card-body" id="tc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>&#x1F3E5; Medical Device Telemetry</h3><span style="font-size:11px;color:var(--text3)">IEEE 11073 devices</span></div>
-      <div class="card-body" id="hc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-    </div>
-  </div>
-
-  <div class="row" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-header"><h3>&#x1F32C;&#xFE0F; Air Quality Index (AQI)</h3><span style="font-size:11px;color:var(--text3)">EPA standard, 5 monitoring stations</span></div>
-      <div class="card-body" id="ev-aqi" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>&#x1F4A1; Lighting Zones</h3><span style="font-size:11px;color:var(--text3)">DALI-2 dimming by zone</span></div>
-      <div class="card-body" id="sl-zones" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-header"><h3>&#x1F17F;&#xFE0F; Parking Lot Occupancy</h3><span style="font-size:11px;color:var(--text3)">Magnetometer + Ultrasonic Sensor Fusion</span></div>
-    <div class="card-body" id="pk-lots" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-  </div>
-
-  <!-- Fleet device table -->
-  <div class="card">
-    <div class="card-header"><h3>IoT Device Fleet</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">All K8s IoT pods</span><button class="btn btn-outline btn-sm" onclick="loadIoT()">Refresh</button></div>
-    <div class="card-body no-pad"><table><thead><tr><th>Device / Pod</th><th>Type</th><th>Status</th><th>Namespace</th><th>IP</th></tr></thead><tbody id="iotTable"></tbody></table></div>
-  </div>
-</div>
-
-<div class="tab-panel" id="tab-llm">
-  <div class="stat-grid" id="llmStats"></div>
-  <div class="row">
-    <div class="card">
-      <div class="card-header"><h3>Latency by Engine</h3><span style="font-size:11px;color:var(--text3)">p50 / p95 / avg (seconds)</span></div>
-      <div class="card-body" id="llmLatencyChart"></div>
-    </div>
-    </div>
-  <div class="card">
-    <div class="card-header"><h3>Tokens per Request</h3></div>
-    <div class="card-body no-pad"><table><thead><tr><th>Engine</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Avg Tokens/Req</th></tr></thead><tbody id="llmTokenTable"></tbody></table></div>
-  </div>
-  <div class="row">
-    <div class="card">
-      <div class="card-header"><h3>Provider Details</h3></div>
-      <div class="card-body" id="llmProviderCards"></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Circuit Breaker Status</h3><button class="btn btn-outline btn-sm" onclick="resetCircuitBreakers()">Reset All</button></div>
-      <div class="card-body" id="circuitBreakerDetail"></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-header"><h3>Deduplication Statistics</h3></div>
-    <div class="card-body" id="dedupDetail"></div>
-  </div>
-</div>
-
-<div class="tab-panel" id="tab-governance">
-  <div class="stat-grid" id="govStats"></div>
-  <div class="row">
-    <div class="card">
-      <div class="card-header"><h3>Automation Mode</h3></div>
-      <div class="card-body" id="govModeControl"></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Pending Approvals</h3><span class="badge badge-purple" id="pendingBadge">0</span></div>
-      <div class="card-body no-pad" id="pendingActions"><div style="padding:20px;color:var(--text3);text-align:center">No actions pending</div></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-header"><h3>Action History</h3></div>
-    <div class="card-body no-pad"><table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Decision</th><th>Analyst</th></tr></thead><tbody id="govHistory"></tbody></table></div>
-  </div>
-</div>
-
-<div class="tab-panel" id="tab-attacks">
-  <!-- Attack Stats Row -->
-  <div class="stat-grid" id="attackStats">
-    <div class="stat-card red"><div class="stat-label">Attack Scenarios</div><div class="stat-value" id="atkScenarioCount">--</div><div class="stat-sub">Predefined + Custom</div></div>
-    <div class="stat-card orange"><div class="stat-label">MITRE Techniques</div><div class="stat-value" id="atkMitreCount">--</div><div class="stat-sub">ATT&CK for ICS mapped</div></div>
-    <div class="stat-card purple"><div class="stat-label">Target Services</div><div class="stat-value" id="atkTargetCount">--</div><div class="stat-sub">IoT protocol emulators</div></div>
-    <div class="stat-card blue"><div class="stat-label">Simulations Run</div><div class="stat-value" id="atkRunCount">0</div><div class="stat-sub">This session</div></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the real IDS pipeline</span></div>
-    <div class="card-body">
-      <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;color:var(--text2);line-height:1.7">
-        <strong style="color:var(--text);font-size:13px">How Attack Simulation Works</strong><br>
-        Each scenario injects a Falco/Suricata-format alert into <code style="color:var(--accent)">/api/alerts/internal</code>.
-        The alert flows through the full IDS pipeline: <strong>Ingestion &#x2192; Dedup &#x2192; LLM Analysis &#x2192; Governance &#x2192; K8s Automation</strong>.
-        Watch the Live Pipeline Feed below to see real-time processing. Scenarios are grouped by <strong>MITRE ATT&amp;CK for ICS</strong> technique categories.
-      </div>
-
-      <!-- Status + Progress Bar -->
-      <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
-        <div id="attackStatus" class="pill pill-ok" style="min-width:140px;text-align:center">Idle</div>
-        <div id="attackProgress" class="progress" style="flex:1;height:8px">
-          <div id="attackProgressFill" class="progress-fill" style="width:0%;background:var(--red)"></div>
+        <div class="card-header"><h3>Live Alert Feed</h3><span class="badge badge-info" id="alertCountBadge">0</span></div>
+        <div class="card-body no-pad">
+          <div class="feed" id="alertFeed"><div style="padding:20px;color:var(--text3);text-align:center">Waiting for alerts...</div></div>
         </div>
-        <span id="attackTimer" style="font-size:12px;color:var(--text3);font-family:monospace">00:00</span>
       </div>
+      <div>
+        <div class="card">
+          <div class="card-header"><h3>LLM Provider Status</h3></div>
+          <div class="card-body" id="llmOverview"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>System Health</h3></div>
+          <div class="card-body" id="systemHealth"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-      <!-- Category Filter Chips -->
-      <div id="attackCategoryFilter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: Live Alerts
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-alerts">
+    <div class="card">
+      <div class="card-header">
+        <h3>Alert History</h3>
+        <div style="display:flex;gap:8px">
+          <select id="alertSourceFilter" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
+            <option value="">All Sources</option>
+            <option value="falco">Falco</option>
+            <option value="suricata">Suricata</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="loadAlerts()">Refresh</button>
+        </div>
+      </div>
+      <div class="card-body no-pad">
+        <table>
+          <thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>Severity</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead>
+          <tbody id="alertsTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 
-      <!-- Attack Scenario Grid -->
-      <div class="attack-grid" id="attackGrid"></div>
-
-      <!-- Live Attack Flow Visualisation -->
-      <div class="card" style="margin-top:20px">
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: Kubernetes
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-kubernetes">
+    <div class="stat-grid" id="k8sStats"></div>
+    <div style="padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--text3);background:rgba(0,212,255,.04);border-radius:6px;border:1px solid var(--border)" id="k8sExplain"></div>
+    <div class="row">
+      <div class="card">
         <div class="card-header">
-          <h3>Live Attack Flow</h3>
-          <div style="display:flex;align-items:center;gap:12px">
-            <span id="attackFlowCount" style="font-size:12px;color:var(--text3)">0 events</span>
-            <div style="display:flex;gap:4px" id="attackFlowLegend"></div>
-          </div>
+          <h3>Pods</h3>
+          <span style="font-size:11px;color:var(--text3);margin-left:8px">Running container instances</span>
+          <button class="btn btn-outline btn-sm" onclick="loadK8s()">Refresh</button>
         </div>
         <div class="card-body no-pad">
-          <div id="attackFlowVis" style="height:200px;overflow:hidden;position:relative;background:var(--bg);border-radius:6px">
-            <div style="position:absolute;bottom:8px;left:12px;right:12px;display:flex;justify-content:space-between;font-size:10px;color:var(--text3);opacity:.5">
-              <span>&#x2190; Source</span><span>Ingest</span><span>Dedup</span><span>LLM</span><span>Action &#x2192;</span>
+          <table><thead><tr><th>Pod</th><th>Status</th><th>Restarts</th><th>Namespace</th></tr></thead><tbody id="podsTable"></tbody></table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>Services</h3>
+          <span style="font-size:11px;color:var(--text3);margin-left:8px">Stable network endpoints that route to pods</span>
+        </div>
+        <div class="card-body no-pad">
+          <table><thead><tr><th>Service</th><th>Type</th><th>Port(s)</th><th>Namespace</th></tr></thead><tbody id="servicesTable"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: IoT Devices
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-iot">
+    <div class="stat-grid" id="iotStats"></div>
+
+    <!-- Protocol Emulator Service Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px" id="iotServiceCards">
+      <!-- Traffic Camera ONVIF -->
+      <div class="card" id="svc-traffic-camera">
+        <div class="card-header" style="border-left:3px solid var(--accent)">
+          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4F7;</span> Traffic Camera</h3>
+          <span class="badge badge-info" id="tc-status">Loading...</span>
+        </div>
+        <div class="card-body" style="font-size:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>ONVIF Profile S</strong></div>
+          <div id="tc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+        </div>
+      </div>
+      <!-- Parking System MQTT/CoAP -->
+      <div class="card" id="svc-parking-system">
+        <div class="card-header" style="border-left:3px solid var(--green)">
+          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F17F;&#xFE0F;</span> Parking System</h3>
+          <span class="badge badge-info" id="pk-status">Loading...</span>
+        </div>
+        <div class="card-body" style="font-size:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>MQTT / CoAP / SenML</strong></div>
+          <div id="pk-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+        </div>
+      </div>
+      <!-- Healthcare FHIR R4 -->
+      <div class="card" id="svc-healthcare-api">
+        <div class="card-header" style="border-left:3px solid var(--red)">
+          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F3E5;</span> Healthcare API</h3>
+          <span class="badge badge-info" id="hc-status">Loading...</span>
+        </div>
+        <div class="card-body" style="font-size:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>HL7 FHIR R4</strong></div>
+          <div id="hc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+        </div>
+      </div>
+      <!-- Environmental Sensor Modbus/OPC UA -->
+      <div class="card" id="svc-env-sensor">
+        <div class="card-header" style="border-left:3px solid var(--yellow)">
+          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F32C;&#xFE0F;</span> Env Sensor</h3>
+          <span class="badge badge-info" id="ev-status">Loading...</span>
+        </div>
+        <div class="card-body" style="font-size:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>Modbus TCP + OPC UA</strong></div>
+          <div id="ev-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+        </div>
+      </div>
+      <!-- Street Lighting DALI-2 / TALQ -->
+      <div class="card" id="svc-street-lighting">
+        <div class="card-header" style="border-left:3px solid var(--orange)">
+          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4A1;</span> Street Lighting</h3>
+          <span class="badge badge-info" id="sl-status">Loading...</span>
+        </div>
+        <div class="card-body" style="font-size:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>DALI-2 + TALQ v2.4</strong></div>
+          <div id="sl-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Telemetry Data -->
+    <div class="row" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-header"><h3>&#x1F4F9; ANPR &amp; Camera Telemetry</h3><span style="font-size:11px;color:var(--text3)">ONVIF real-time feed</span></div>
+        <div class="card-body" id="tc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>&#x1F3E5; Medical Device Telemetry</h3><span style="font-size:11px;color:var(--text3)">IEEE 11073 devices</span></div>
+        <div class="card-body" id="hc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+      </div>
+    </div>
+    <div class="row" style="margin-bottom:16px">
+      <div class="card">
+        <div class="card-header"><h3>&#x1F32C;&#xFE0F; Air Quality Index (AQI)</h3><span style="font-size:11px;color:var(--text3)">EPA standard, 5 monitoring stations</span></div>
+        <div class="card-body" id="ev-aqi" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>&#x1F4A1; Lighting Zones</h3><span style="font-size:11px;color:var(--text3)">DALI-2 dimming by zone</span></div>
+        <div class="card-body" id="sl-zones" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h3>&#x1F17F;&#xFE0F; Parking Lot Occupancy</h3><span style="font-size:11px;color:var(--text3)">Magnetometer + Ultrasonic Sensor Fusion</span></div>
+      <div class="card-body" id="pk-lots" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
+    </div>
+
+    <!-- Fleet device table -->
+    <div class="card">
+      <div class="card-header"><h3>IoT Device Fleet</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">All K8s IoT pods</span><button class="btn btn-outline btn-sm" onclick="loadIoT()">Refresh</button></div>
+      <div class="card-body no-pad">
+        <table><thead><tr><th>Device / Pod</th><th>Type</th><th>Status</th><th>Namespace</th><th>IP</th></tr></thead><tbody id="iotTable"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: LLM Providers
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-llm">
+    <div class="stat-grid" id="llmStats"></div>
+    <div class="row">
+      <div class="card">
+        <div class="card-header"><h3>Latency by Engine</h3><span style="font-size:11px;color:var(--text3)">p50 / p95 / avg (seconds)</span></div>
+        <div class="card-body" id="llmLatencyChart"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Cost by Engine</h3><span style="font-size:11px;color:var(--text3)">Estimated USD per demo session</span></div>
+        <div class="card-body" id="llmCostChart"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Tokens &amp; Cost per Request</h3></div>
+      <div class="card-body no-pad">
+        <table><thead><tr><th>Engine</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Avg Tokens/Req</th><th>Avg Cost/Req</th></tr></thead><tbody id="llmTokenTable"></tbody></table>
+      </div>
+    </div>
+    <div class="row">
+      <div class="card">
+        <div class="card-header"><h3>Provider Details</h3></div>
+        <div class="card-body" id="llmProviderCards"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Circuit Breaker Status</h3><button class="btn btn-outline btn-sm" onclick="resetCircuitBreakers()">Reset All</button></div>
+        <div class="card-body" id="circuitBreakerDetail"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Deduplication &amp; Cost Savings</h3></div>
+      <div class="card-body" id="dedupDetail"></div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: Governance / HITL
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-governance">
+    <div class="stat-grid" id="govStats"></div>
+    <div class="row">
+      <div class="card">
+        <div class="card-header"><h3>Automation Mode</h3></div>
+        <div class="card-body" id="govModeControl"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Pending Approvals</h3><span class="badge badge-purple" id="pendingBadge">0</span></div>
+        <div class="card-body no-pad" id="pendingActions"><div style="padding:20px;color:var(--text3);text-align:center">No actions pending</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Action History</h3></div>
+      <div class="card-body no-pad">
+        <table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Decision</th><th>Analyst</th></tr></thead><tbody id="govHistory"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════════════
+       TAB: Attack Simulation
+       ═════════════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="tab-attacks">
+    <div class="stat-grid" id="attackStats">
+      <div class="stat-card red"><div class="stat-label">Attack Scenarios</div><div class="stat-value" id="atkScenarioCount">--</div><div class="stat-sub">Predefined + Custom</div></div>
+      <div class="stat-card orange"><div class="stat-label">MITRE Techniques</div><div class="stat-value" id="atkMitreCount">--</div><div class="stat-sub">ATT&amp;CK for ICS mapped</div></div>
+      <div class="stat-card purple"><div class="stat-label">Target Services</div><div class="stat-value" id="atkTargetCount">--</div><div class="stat-sub">IoT protocol emulators</div></div>
+      <div class="stat-card blue"><div class="stat-label">Simulations Run</div><div class="stat-value" id="atkRunCount">0</div><div class="stat-sub">This session</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the real IDS pipeline</span></div>
+      <div class="card-body">
+        <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;color:var(--text2);line-height:1.7">
+          <strong style="color:var(--text);font-size:13px">How Attack Simulation Works</strong><br>
+          Each scenario injects a Falco/Suricata-format alert into <code style="color:var(--accent)">/api/alerts/internal</code>.
+          The alert flows through the full IDS pipeline: <strong>Ingestion &#x2192; Dedup &#x2192; LLM Analysis &#x2192; Governance &#x2192; K8s Automation</strong>.
+          Watch the Live Pipeline Feed below to see real-time processing. Scenarios are grouped by <strong>MITRE ATT&amp;CK for ICS</strong> technique categories.
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
+          <div id="attackStatus" class="pill pill-ok" style="min-width:140px;text-align:center">Idle</div>
+          <div id="attackProgress" class="progress" style="flex:1;height:8px">
+            <div id="attackProgressFill" class="progress-fill" style="width:0%;background:var(--red)"></div>
+          </div>
+          <span id="attackTimer" style="font-size:12px;color:var(--text3);font-family:monospace">00:00</span>
+        </div>
+
+        <div id="attackCategoryFilter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
+        <div class="attack-grid" id="attackGrid"></div>
+
+        <div class="card" style="margin-top:20px">
+          <div class="card-header">
+            <h3>Live Attack Flow</h3>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span id="attackFlowCount" style="font-size:12px;color:var(--text3)">0 events</span>
+              <div style="display:flex;gap:4px" id="attackFlowLegend"></div>
+            </div>
+          </div>
+          <div class="card-body no-pad">
+            <div id="attackFlowVis" style="height:200px;overflow:hidden;position:relative;background:var(--bg);border-radius:6px">
+              <div style="position:absolute;bottom:8px;left:12px;right:12px;display:flex;justify-content:space-between;font-size:10px;color:var(--text3);opacity:.5">
+                <span>&#x2190; Source</span><span>Ingest</span><span>Dedup</span><span>LLM</span><span>Action &#x2192;</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- MITRE ATT&CK Reference Card -->
-  <div class="card" style="margin-top:16px">
-    <div class="card-header" style="cursor:pointer" onclick="document.getElementById('mitreBody').style.display=document.getElementById('mitreBody').style.display==='none'?'block':'none'">
-      <h3>MITRE ATT&amp;CK for ICS Mapping</h3><span style="font-size:11px;color:var(--text3)">Click to expand technique reference</span>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header" style="cursor:pointer" onclick="document.getElementById('mitreBody').style.display=document.getElementById('mitreBody').style.display==='none'?'block':'none'">
+        <h3>MITRE ATT&amp;CK for ICS Mapping</h3><span style="font-size:11px;color:var(--text3)">Click to expand technique reference</span>
+      </div>
+      <div class="card-body" id="mitreBody" style="display:none;font-size:12px">
+        <table><thead><tr><th>Technique ID</th><th>Name</th><th>Tactic</th><th>Scenario(s)</th></tr></thead><tbody id="mitreTable"></tbody></table>
+      </div>
     </div>
-    <div class="card-body" id="mitreBody" style="display:none;font-size:12px">
-      <table><thead><tr><th>Technique ID</th><th>Name</th><th>Tactic</th><th>Scenario(s)</th></tr></thead><tbody id="mitreTable"></tbody></table>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><h3>Simulation Log</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Live verbose output — full LLM analysis pipeline</span><button class="btn btn-outline btn-sm" onclick="clearAttackLog()" style="margin-left:auto">Clear</button></div>
+      <div class="card-body"><pre id="attackLog" style="font-size:11.5px;color:var(--text2);max-height:600px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre></div>
     </div>
   </div>
 
-  <!-- Simulation Log -->
-  <div class="card" style="margin-top:16px">
-    <div class="card-header"><h3>Simulation Log</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Live verbose output — full LLM analysis pipeline</span><button class="btn btn-outline btn-sm" onclick="clearAttackLog()" style="margin-left:auto">Clear</button></div>
-    <div class="card-body"><pre id="attackLog" style="font-size:11.5px;color:var(--text2);max-height:600px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre></div>
-  </div>
-</div>
-
-</div>
+</div><!-- /dashboard -->
 
 <!-- Live Pipeline Feed — SSE real-time, visible from ALL tabs -->
 <div class="card" id="liveFeedCard" style="margin:0 24px 16px;border:1px solid var(--accent);border-radius:8px">
@@ -427,7 +398,7 @@ tr:hover td{background:rgba(0,212,255,.03)}
     <span class="badge badge-info" id="liveFeedCount" style="margin-left:8px">0</span>
     <div style="margin-left:auto;display:flex;gap:6px">
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearLiveFeed()">Clear</button>
-      <button class="btn btn-outline btn-sm" id="liveFeedToggleBtn" onclick="event.stopPropagation();toggleLiveFeed()">▼</button>
+      <button class="btn btn-outline btn-sm" id="liveFeedToggleBtn" onclick="event.stopPropagation();toggleLiveFeed()">&#x25BC;</button>
     </div>
   </div>
   <div class="card-body" id="liveFeedBody" style="display:block">
@@ -443,7 +414,7 @@ tr:hover td{background:rgba(0,212,255,.03)}
     <span class="badge badge-purple" id="iotStreamCount" style="margin-left:8px">0</span>
     <div style="margin-left:auto;display:flex;gap:6px">
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearIoTStream()">Clear</button>
-      <button class="btn btn-outline btn-sm" id="iotStreamToggleBtn" onclick="event.stopPropagation();toggleIoTStream()">▼</button>
+      <button class="btn btn-outline btn-sm" id="iotStreamToggleBtn" onclick="event.stopPropagation();toggleIoTStream()">&#x25BC;</button>
     </div>
   </div>
   <div class="card-body" id="iotStreamBody" style="display:block">
@@ -451,1257 +422,16 @@ tr:hover td{background:rgba(0,212,255,.03)}
   </div>
 </div>
 
-<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+<!-- Modal overlay for custom alert injection -->
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)window._closeModal()">
   <div class="modal" id="modalContent"></div>
 </div>
 
-<script>
-var API='';
-var TOKEN=localStorage.getItem('ids_token')||'';
-var refreshTimer=null;
+<!-- ═══════════════════════════════════════════════════════════════════════
+     ES6 Module Entry Point
+     All JS logic loaded as modules — no inline <script> blocks.
+     ═══════════════════════════════════════════════════════════════════════ -->
+<script type="module" src="/ui/static/js/app.js"></script>
 
-// All LLM providers defined in the system (config.py / llm_manager.py)
-var ALL_PROVIDERS=[
-  {id:'xai',   name:'xAI Grok-4',       model:'grok-4-latest',            icon:'X', color:'#00d4ff'},
-  {id:'anthropic',name:'Anthropic Claude',model:'claude-3-5-sonnet-20241022',icon:'A', color:'#d97706'},
-  {id:'openai',name:'OpenAI GPT-4',      model:'gpt-4-turbo-preview',      icon:'O', color:'#22c55e'},
-  {id:'gemini',name:'Google Gemini',      model:'gemini-2.0-flash',         icon:'G', color:'#8b5cf6'},
-  {id:'kimi',  name:'Moonshot Kimi',      model:'moonshot-v1-128k',         icon:'K', color:'#f97316'},
-  {id:'local', name:'Local Fallback',     model:'rule-based',               icon:'L', color:'#94a3b8'}
-];
-var CLOUD_PROVIDERS=ALL_PROVIDERS.slice(0,5); // first 5 are cloud
-
-function doLogin(){
-  var u=document.getElementById('loginUser').value;
-  var p=document.getElementById('loginPass').value;
-  fetch(API+'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    if(d.access_token){TOKEN=d.access_token;localStorage.setItem('ids_token',TOKEN);showDashboard()}
-    else{document.getElementById('loginError').textContent=d.detail||'Login failed';document.getElementById('loginError').style.display='block'}
-  }).catch(function(){document.getElementById('loginError').textContent='Connection error';document.getElementById('loginError').style.display='block'});
-}
-function doLogout(){
-  TOKEN='';
-  localStorage.removeItem('ids_token');
-  clearInterval(refreshTimer);
-  if(_sse){try{_sse.close()}catch(e){} _sse=null;}
-  if(iotWS){try{iotWS.close()}catch(e){} iotWS=null;}
-  document.getElementById('dashboard').style.display='none';
-  document.getElementById('loginScreen').style.display='flex';
-}
-
-function apiFetch(path,opts){
-  opts=opts||{};
-  var h=Object.assign({'Authorization':'Bearer '+TOKEN},opts.headers||{});
-  return fetch(API+path,Object.assign({},opts,{headers:h})).then(function(r){if(r.status===401){return null}return r.json()}).catch(function(){return null});
-}
-function apiNoAuth(path){return fetch(API+path).then(function(r){return r.json()}).catch(function(){return null})}
-
-function showDashboard(){
-  document.getElementById('loginScreen').style.display='none';
-  document.getElementById('dashboard').style.display='block';
-  refreshAll();
-  refreshTimer=setInterval(refreshAll,10000);
-  connectLiveFeed();
-  setTimeout(connectIoTStream, 1000);
-}
-
-/* ─── SSE Live Pipeline Feed ─── */
-var _sse=null;
-var _sseFeedCount=0;
-var _sseFeedOpen=true;
-
-function connectLiveFeed(){
-  if(_sse){try{_sse.close()}catch(e){}}
-  var dot=document.getElementById('liveFeedDot');
-  var status=document.getElementById('liveFeedStatus');
-  dot.className='dot dot-yellow'; status.textContent='Connecting...';
-
-  _sse=new EventSource(API+'/api/alerts/live');
-
-  _sse.onopen=function(){
-    dot.className='dot dot-green'; status.textContent='Connected — streaming all alert processing';
-  };
-
-  _sse.addEventListener('connected',function(ev){
-    // Clear the 'Connecting...' placeholder when SSE confirms connection
-    var log=document.getElementById('liveFeedLog');
-    if(log.innerHTML==='Connecting to live event stream...'){
-      log.innerHTML='<span style="color:var(--green)">\u2713 Connected to live pipeline stream. Alerts from ALL sources (CLI, Falco, Suricata, dashboard) will appear here in real-time.</span>';
-    }
-  });
-
-  _sse.addEventListener('alert',function(ev){
-    try{
-      var d=JSON.parse(ev.data);
-      _sseFeedCount++;
-      document.getElementById('liveFeedCount').textContent=_sseFeedCount;
-
-      var log=document.getElementById('liveFeedLog');
-      var ts=new Date().toLocaleTimeString();
-      var sev=d.severity||'?';
-      var sevColor=sev>=8?'#ef4444':sev>=5?'#f59e0b':'#22c55e';
-      var engine=d.llm_engine||d.engine||'unknown';
-      var threat=d.threat_type||'Unknown';
-      var summary=d.summary||'';
-      var source=d.source||'api';
-      var traceId=d.trace_id||('alert-'+(d.alert_id||'unknown'));
-      var rule=d.rule||'';
-      var container=d.container_name||'';
-      var procTime=d.processing_time_ms?d.processing_time_ms+'ms':'';
-
-      // Extract analysis details if present
-      var a=d.analysis||{};
-      var reasoning=a.reasoning||a.detailed_analysis||'';
-      var confidence=a.confidence_score||a.confidence||'';
-      var impact=a.business_impact||a.potential_impact||'';
-      var indicators=(a.key_indicators||a.indicators||a.ioc||[]);
-      var mitigating=(a.mitigating_factors||[]);
-      var recs=(a.recommendations||[]);
-      var actions=(a.automated_actions||d.automated_actions||[]);
-      var mitre=a.mitre_technique||'';
-
-      var line='';
-      line+='┌─────────────────────────────────────────────────────────────\n';
-      line+='│  ['+ts+']  LIVE ALERT — Source: '+source.toUpperCase()+'\n';
-      line+='│  Trace: '+traceId+'\n';
-      if(rule) line+='│  Rule: '+rule+'\n';
-      if(container) line+='│  Container: '+container+'\n';
-      line+='├── LLM Analysis ──────────────────────────────────────────────\n';
-      line+='│  Engine:      '+engine+'\n';
-      line+='│  Severity:    <span style="color:'+sevColor+';font-weight:bold">'+sev+'/10</span>\n';
-      line+='│  Threat Type: '+threat+'\n';
-      if(mitre) line+='│  MITRE:       '+mitre+'\n';
-      if(confidence) line+='│  Confidence:  '+confidence+'\n';
-      if(procTime) line+='│  Processed:   '+procTime+'\n';
-      if(summary) line+='│  Summary:     '+summary+'\n';
-      if(reasoning){
-        line+='├── Reasoning ─────────────────────────────────────────────────\n';
-        line+='│  '+reasoning.replace(/\n/g,'\n│  ')+'\n';
-      }
-      if(impact){
-        line+='├── Business Impact ───────────────────────────────────────────\n';
-        line+='│  '+impact.replace(/\n/g,'\n│  ')+'\n';
-      }
-      if(indicators.length){
-        line+='├── Key Indicators ───────────────────────────────────────────\n';
-        indicators.forEach(function(ind){line+='│  • '+ind+'\n'});
-      }
-      if(mitigating.length){
-        line+='├── Mitigating Factors ───────────────────────────────────────\n';
-        mitigating.forEach(function(m){line+='│  ◦ '+m+'\n'});
-      }
-      if(recs.length){
-        line+='├── Recommendations ──────────────────────────────────────────\n';
-        recs.forEach(function(r){line+='│  → '+r+'\n'});
-      }
-      if(actions.length){
-        var actSev=sev>=8?'<span style="color:#ef4444;font-weight:bold">EXECUTING</span>':sev>=6?'<span style="color:#f59e0b;font-weight:bold">EXECUTING</span>':'<span style="color:var(--text3)">Below threshold</span>';
-        line+='├── Automated Response ───────────────────────────────────────\n';
-        actions.forEach(function(act){line+='│  ⚡ '+act+'  '+actSev+'\n'});
-      }
-      line+='└─────────────────────────────────────────────────────────────\n';
-
-      // Prepend new events at top
-      var old=log.innerHTML;
-      if(old==='Connecting to live event stream...')old='';
-      log.innerHTML=line+'\n'+old;
-
-      // Flash the card border briefly
-      var card=document.getElementById('liveFeedCard');
-      card.style.borderColor=sevColor;
-      setTimeout(function(){card.style.borderColor='var(--accent)'},1500);
-
-      // Also refresh the overview alert counters after a short delay
-      setTimeout(refreshAll,2000);
-    }catch(e){console.warn('SSE parse error',e)}
-  });
-
-  _sse.onerror=function(){
-    dot.className='dot dot-red'; status.textContent='Disconnected — reconnecting...';
-    // EventSource auto-reconnects; update status when it does
-  };
-}
-
-function toggleLiveFeed(){
-  _sseFeedOpen=!_sseFeedOpen;
-  document.getElementById('liveFeedBody').style.display=_sseFeedOpen?'block':'none';
-  document.getElementById('liveFeedToggleBtn').textContent=_sseFeedOpen?'▼':'▲';
-}
-
-function clearLiveFeed(){
-  document.getElementById('liveFeedLog').innerHTML='Waiting for alerts...';
-  _sseFeedCount=0;
-  document.getElementById('liveFeedCount').textContent='0';
-}
-
-// IoT Live Stream WebSocket
-var iotWS=null;
-var iotStreamCount=0;
-var iotStreamOpen=true;
-
-function getIoTStreamUrls(){
-  var host=window.location.hostname||'localhost';
-  return [
-    'ws://'+host+':30810',          // NodePort
-    'ws://localhost:30810',         // local nodeport
-    'ws://localhost:8081',          // optional port-forward
-    'ws://127.0.0.1:8081'
-  ];
-}
-
-function connectIoTStream(){
-  if(iotWS){try{iotWS.close()}catch(e){}}
-  var dot=document.getElementById('iotStreamDot');
-  var status=document.getElementById('iotStreamStatus');
-  var log=document.getElementById('iotStreamLog');
-  dot.className='dot dot-yellow';
-  status.textContent='Connecting to MQTT bridge...';
-
-  var urls=getIoTStreamUrls();
-  var idx=0;
-
-  function tryNext(){
-    if(idx>=urls.length){
-      dot.className='dot dot-red';
-      status.textContent='Bridge unavailable (check iot-stream-bridge service)';
-      return;
-    }
-    var ws=new WebSocket(urls[idx]);
-    idx+=1;
-    ws.onopen=function(){
-      iotWS=ws;
-      dot.className='dot dot-green';
-      status.textContent='Live IoT MQTT traffic';
-      log.innerHTML='<span style="color:var(--green)">\\u2713 Connected to IoT stream bridge.</span>';
-    };
-    ws.onmessage=function(event){
-      try{
-        var data=JSON.parse(event.data);
-        if(data.type!=='iot_message')return;
-        iotStreamCount+=1;
-        document.getElementById('iotStreamCount').textContent=iotStreamCount;
-        var msg=data.data||{};
-        var ts=new Date().toLocaleTimeString();
-        var device=msg.device||msg.device_id||'unknown';
-        var ns=msg.namespace||'smart-city';
-        var sample=msg.vehicle_count||msg.temperature_c||msg.power_kw||msg.value||'data';
-        var rate=Math.round((data.total_rate||0)*60);
-        var line='['+ts+'] '+device+' ('+ns+') -> '+sample+' | '+rate+'/min\\n';
-        log.textContent=line+log.textContent.slice(0,8000);
-      }catch(e){
-        console.warn('IoT WS parse error',e);
-      }
-    };
-    ws.onerror=function(){try{ws.close()}catch(e){}};
-    ws.onclose=function(){
-      if(iotWS===ws){iotWS=null;}
-      if(dot.className.indexOf('dot-green')!==-1){
-        dot.className='dot dot-red';
-        status.textContent='Disconnected — reconnecting...';
-        setTimeout(connectIoTStream,2000);
-      }else{
-        tryNext();
-      }
-    };
-  }
-
-  tryNext();
-}
-
-function toggleIoTStream(){
-  iotStreamOpen=!iotStreamOpen;
-  document.getElementById('iotStreamBody').style.display=iotStreamOpen?'block':'none';
-  document.getElementById('iotStreamToggleBtn').textContent=iotStreamOpen?'▼':'▲';
-}
-
-function clearIoTStream(){
-  document.getElementById('iotStreamLog').textContent='IoT stream cleared.';
-  iotStreamCount=0;
-  document.getElementById('iotStreamCount').textContent='0';
-}
-
-document.querySelectorAll('.tab-btn').forEach(function(b){
-  b.addEventListener('click',function(){
-    document.querySelectorAll('.tab-btn').forEach(function(x){x.classList.remove('active')});
-    document.querySelectorAll('.tab-panel').forEach(function(x){x.classList.remove('active')});
-    b.classList.add('active');
-    document.getElementById('tab-'+b.dataset.tab).classList.add('active');
-  });
-});
-
-function refreshAll(){
-  Promise.all([
-    apiNoAuth('/health'),            // r[0] h
-    apiNoAuth('/api/metrics'),       // r[1] m
-    apiNoAuth('/api/circuit-breaker/status'), // r[2] cb
-    apiNoAuth('/api/safety'),        // r[3]
-    apiNoAuth('/api/production-status'), // r[4]
-    apiFetch('/api/governance/status'),  // r[5] gov
-    apiNoAuth('/api/deduplicator-stats'), // r[6] dedup
-    apiNoAuth('/api/alerts?limit=30'),   // r[7] alerts
-    apiFetch('/api/operator/dashboard'), // r[8] dashboard
-    apiNoAuth('/api/llm/diagnostics'),   // r[9] llmDiag
-    apiNoAuth('/api/pipeline-overview')  // r[10] pipeline
-  ]).then(function(r){
-    var h=r[0],m=r[1],cb=r[2],safety=r[3],prod=r[4],gov=r[5],dedup=r[6],alerts=r[7],dash=r[8],llmDiag=r[9],pipeline=r[10];
-    // Derive LLM info from /health (no auth needed)
-    var llmFromHealth=null;
-    if(h&&h.components&&h.components.llm_providers){
-      var provNames=Object.keys(h.components.llm_providers);
-      llmFromHealth={provider_count:h.llm_provider_count||provNames.length,providers:provNames};
-    }
-    renderOverview(m,h,cb,safety,prod,gov,llmFromHealth,llmDiag);
-    renderPipelineOverview(pipeline);
-    renderAlertFeed(alerts);
-    renderLLMOverview(llmFromHealth,cb,llmDiag);
-    renderSystemHealth(h,prod);
-    renderLLMTab(llmFromHealth,cb,dedup,llmDiag);
-    renderGovernanceTab(gov,dash);
-    renderAttackTab();
-    updateTopBar(h,gov,llmFromHealth,llmDiag);
-    loadK8s();
-    loadIoT();
-  });
-}
-
-function renderOverview(m,h,cb,safety,prod,gov,llmFromHealth,llmDiag){
-  if(!m)return;
-  var uptime=m.uptime_seconds?formatDuration(m.uptime_seconds):'--';
-  var smry=(llmDiag&&llmDiag.summary)?llmDiag.summary:{};
-  var llmSub='';
-  if(smry.operational||smry.error||smry.cooldown){
-    var parts=[];
-    if(smry.operational)parts.push(smry.operational+' healthy');
-    if(smry.error)parts.push(smry.error+' error');
-    if(smry.cooldown)parts.push(smry.cooldown+' cooldown');
-    llmSub=parts.join(', ');
-  }else{
-    llmSub=(llmFromHealth&&llmFromHealth.providers?llmFromHealth.providers.join(', '):'none configured');
-  }
-  document.getElementById('overviewStats').innerHTML=
-    '<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">'+(m.total_alerts||0)+'</div><div class="stat-sub">Processed by IDS pipeline</div></div>'+
-    '<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">'+(m.critical_alerts||0)+'</div><div class="stat-sub">Severity 8+</div></div>'+
-    '<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">'+(m.iot_devices_active||0)+'</div><div class="stat-sub">Active in cluster</div></div>'+
-    '<div class="stat-card '+(smry.error>0||smry.cooldown>0?'red':'purple')+'"><div class="stat-label">LLM Engines</div><div class="stat-value">'+(smry.operational||h&&h.llm_provider_count||countCB(cb))+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+llmSub+'</div></div>'+
-    '<div class="stat-card yellow"><div class="stat-label">Dedup Savings</div><div class="stat-value">'+(m.alert_reduction_percentage||0)+'%</div><div class="stat-sub">Duplicate alerts suppressed</div></div>'+
-    '<div class="stat-card orange"><div class="stat-label">Uptime</div><div class="stat-value">'+uptime+'</div><div class="stat-sub">System operational</div></div>';
-}
-
-function renderPipelineOverview(data){
-  var pipeEl=document.getElementById('pipelineOverview');
-  var fatigueEl=document.getElementById('alertFatigue');
-  if(!data||!data.stages){pipeEl.innerHTML='';fatigueEl.innerHTML='<span style="color:var(--text3)">Pipeline metrics unavailable</span>';return}
-  var html='';
-  data.stages.forEach(function(s){
-    var dot=s.status==='green'?'dot-green':s.status==='yellow'?'dot-yellow':'dot-red';
-    html+='<div class="pipeline-stage">'+
-      '<div class="name"><span class="dot '+dot+'"></span>'+esc(s.label)+'</div>'+
-      '<div class="rate">'+(s.rate_per_minute||0)+'/m</div>'+
-      '<div class="meta">p95: '+(s.p95_latency_ms||0)+' ms</div>'+
-      (s.dedup_hit_rate_percent!==undefined?'<div class="meta">Dedup: '+s.dedup_hit_rate_percent+'%</div>':'')+
-      '</div>';
-  });
-  pipeEl.innerHTML=html;
-  var f=data.alert_fatigue||{};
-  fatigueEl.innerHTML=
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:13px">'+
-    '<div><span style="color:var(--text3)">Raw Alerts</span><br><strong>'+(f.raw_total||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">After Dedup</span><br><strong>'+(f.after_dedup_total||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Human Review</span><br><strong>'+(f.human_review_required_total||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Auto-Handled</span><br><strong>'+(f.auto_handled_total||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Reduction</span><br><strong>'+(f.reduction_percent||0)+'%</strong></div>'+
-    '</div>';
-}
-
-function renderAlertFeed(data){
-  if(!data||!data.alerts)return;
-  var el=document.getElementById('alertFeed');
-  document.getElementById('alertCountBadge').textContent=data.total||0;
-  if(!data.alerts.length){el.innerHTML='<div style="padding:20px;color:var(--text3);text-align:center">No alerts yet - run an attack simulation!</div>';return}
-  var html='';
-  data.alerts.slice(0,20).forEach(function(a){
-    html+='<div class="feed-item">'+
-      '<span class="feed-time">'+shortTime(a.timestamp)+'</span>'+
-      '<span class="feed-source"><span class="badge '+(a.source==='falco'?'badge-info':'badge-purple')+'">'+esc(a.source||'unknown')+'</span></span>'+
-      '<span class="feed-msg"><strong>'+esc(a.rule||'')+'</strong> - '+esc(a.summary||a.output||'')+'</span>'+
-      (a.severity?'<span class="badge '+sevBadge(a.severity)+'">'+a.severity+'</span>':'')+
-      '</div>';
-  });
-  el.innerHTML=html;
-}
-
-function renderLLMOverview(llm,cb,llmDiag){
-  var el=document.getElementById('llmOverview');
-  var engines=(cb&&cb.engines)?cb.engines:{};
-  var configured=(llm&&llm.providers)?llm.providers:[];
-  var diags=(llmDiag&&llmDiag.providers)?llmDiag.providers:{};
-  var html='';
-  ALL_PROVIDERS.forEach(function(p){
-    var info=engines[p.id];
-    var d=diags[p.id]||{};
-    var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
-    var ds=d.status||'unknown';
-    var stateText=ds==='operational'?(d.successes>0?'Healthy':'Ready'):
-      ds==='not_configured'?'No API Key':
-      ds==='cooldown'?'Cooldown':
-      ds==='error'?'Error':
-      ds==='circuit_open'?'Circuit Open':
-      !isConfigured?'Not Configured':'Ready';
-    var dotClass=ds==='operational'?'dot-green':
-      ds==='not_configured'?'dot-yellow':
-      (ds==='cooldown'||ds==='recovering')?'dot-yellow':
-      (ds==='error'||ds==='circuit_open')?'dot-red':
-      !isConfigured?'dot-yellow':'dot-green';
-    var stats=info?' | '+(info.successes||0)+' ok / '+(info.failures||0)+' fail':'';
-    var reason=(d.reason&&ds!=='operational'&&ds!=='not_configured')?' <span style="font-size:10px;color:var(--text3);display:block;margin-top:1px">'+esc(d.reason.substring(0,60))+'</span>':'';
-    html+='<div class="provider-card" style="margin-bottom:8px;'+(isConfigured?'':'opacity:.55')+'">'+
-      '<div class="provider-icon" style="'+(isConfigured?'color:'+p.color:'color:var(--text3)')+'">'+p.icon+'</div>'+
-      '<div class="provider-info">'+
-      '<div class="provider-name">'+p.name+'</div>'+
-      '<div class="provider-detail"><span class="dot '+dotClass+'"></span>'+stateText+stats+'</div>'+
-      reason+
-      '</div></div>';
-  });
-  el.innerHTML=html;
-}
-
-function renderSystemHealth(h,prod){
-  var el=document.getElementById('systemHealth');
-  if(!h){el.innerHTML='<div style="color:var(--text3)">Connecting...</div>';return}
-  var c=h.components||{};
-  var rl=(prod&&prod.rate_limiter)?prod.rate_limiter:{};
-  el.innerHTML=
-    '<div style="display:grid;gap:8px;font-size:13px">'+
-    '<div><span class="dot '+(c.kubernetes==='connected'?'dot-green':'dot-red')+'"></span>Kubernetes: '+(c.kubernetes||'unknown')+'</div>'+
-    '<div><span class="dot '+(c.database==='memory-fallback'?'dot-yellow':'dot-green')+'"'+'></span>Database: '+(c.database||'unknown')+(c.database==='memory-fallback'?' <span style="font-size:10px;color:var(--text3)">(PostgreSQL unavailable — using in-memory store, data lost on restart)</span>':' <span style="font-size:10px;color:var(--text3)">(persistent, 8 tables)</span>')+'</div>'+
-    '<div><span class="dot '+(c.falco==='enabled'?'dot-green':'dot-red')+'"></span>Falco: '+(c.falco||'unknown')+'</div>'+
-    '<div><span class="dot '+(c.suricata==='enabled'?'dot-green':'dot-red')+'"></span>Suricata: '+(c.suricata||'unknown')+'</div>'+
-    '<div style="margin-top:4px;color:var(--text3);font-size:11px">Rate limit: '+(rl.total_requests||0)+' req ('+(rl.rejected_requests||0)+' rejected)</div>'+
-    '</div>';
-}
-
-function loadAlerts(){
-  var src=document.getElementById('alertSourceFilter').value;
-  apiNoAuth('/api/alerts?limit=50'+(src?'&source='+src:'')).then(function(data){
-    if(!data||!data.alerts)return;
-    var html='';
-    data.alerts.forEach(function(a,idx){
-      var recs=a.recommendations||[];
-      var an=a.analysis||{};
-      var hasDetail=recs.length||an.reasoning||an.business_impact;
-      var traceId=a.trace_id||('alert-'+(a.id||idx));
-      html+='<tr>'+
-        '<td>'+shortTime(a.timestamp)+'</td>'+
-        '<td><code style="font-size:11px">'+esc(traceId)+'</code></td>'+
-        '<td><span class="badge '+(a.source==='falco'?'badge-info':'badge-purple')+'">'+esc(a.source||'-')+'</span></td>'+
-        '<td>'+esc(a.rule||'')+'</td>'+
-        '<td><span class="badge '+sevBadge(a.severity)+'">'+(a.severity||'-')+'</span></td>'+
-        '<td>'+esc(a.threat_type||'-')+'</td>'+
-        '<td style="white-space:normal;max-width:400px;line-height:1.4">'+esc(a.summary||'')+'</td>'+
-        '<td>'+(hasDetail?'<button class="btn btn-outline btn-sm" onclick="toggleDetail('+idx+')">Detail</button>':'—')+'</td>'+
-        '</tr>';
-      if(hasDetail){
-        html+='<tr id="detail-'+idx+'" style="display:none"><td colspan="8" style="background:var(--bg3);padding:12px 16px;font-size:12px;line-height:1.6">';
-        html+='<div style="margin-bottom:8px"><strong style="color:var(--blue)">Trace ID:</strong> '+esc(traceId)+'</div>';
-        if(an.reasoning) html+='<div style="margin-bottom:8px"><strong style="color:var(--purple)">Reasoning:</strong> '+esc(an.reasoning)+'</div>';
-        if(an.business_impact) html+='<div style="margin-bottom:8px"><strong style="color:var(--yellow)">Business Impact:</strong> '+esc(an.business_impact)+'</div>';
-        if(an.mitre_technique) html+='<div style="margin-bottom:8px"><strong style="color:var(--blue)">MITRE ATT&amp;CK:</strong> '+esc(an.mitre_technique)+'</div>';
-        if(recs.length){
-          html+='<div><strong style="color:var(--green)">Recommendations:</strong><ol style="margin:4px 0 0 16px;padding:0">';
-          recs.forEach(function(r){html+='<li>'+esc(r)+'</li>'});
-          html+='</ol></div>';
-        }
-        if(an.mitigating_factors&&an.mitigating_factors.length){
-          html+='<div style="margin-top:8px"><strong style="color:var(--text3)">Mitigating Factors:</strong><ul style="margin:4px 0 0 16px;padding:0">';
-          an.mitigating_factors.forEach(function(f){html+='<li>'+esc(f)+'</li>'});
-          html+='</ul></div>';
-        }
-        html+='</td></tr>';
-      }
-    });
-    document.getElementById('alertsTable').innerHTML=html||'<tr><td colspan="8" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
-  });
-}
-function toggleDetail(idx){var r=document.getElementById('detail-'+idx);if(r)r.style.display=r.style.display==='none'?'table-row':'none'}
-
-function loadK8s(){
-  apiNoAuth('/health').then(function(h){
-    var c=(h&&h.components)?h.components:{};
-    document.getElementById('k8sStats').innerHTML=
-      '<div class="stat-card green"><div class="stat-label">Kubernetes</div><div class="stat-value">'+(c.kubernetes==='connected'?'Connected':'Offline')+'</div><div class="stat-sub">Cluster API</div></div>'+
-      '<div class="stat-card blue"><div class="stat-label">Database</div><div class="stat-value">'+(c.database==='memory-fallback'?'In-Memory':(c.database||'--'))+'</div><div class="stat-sub">'+(c.database==='memory-fallback'?'PostgreSQL offline — volatile storage':'PostgreSQL persistent storage')+'</div></div>'+
-      '<div class="stat-card purple"><div class="stat-label">Falco</div><div class="stat-value">'+(c.falco||'--')+'</div><div class="stat-sub">Runtime detection</div></div>'+
-      '<div class="stat-card orange"><div class="stat-label">Suricata</div><div class="stat-value">'+(c.suricata||'--')+'</div><div class="stat-sub">Network detection</div></div>';
-    renderK8sTables();
-  });
-}
-function renderK8sTables(){
-  // Real cluster pod roster (matches deployed k8s-manifests)
-  var pods=[
-    ['ids-api (x2)','Running','0','smart-city'],
-    ['postgres','Running','0','smart-city'],
-    ['traffic-camera (x2)','Running','0','smart-city'],
-    ['healthcare-api (x2)','Running','0','smart-city'],
-    ['parking-system (x2)','Running','0','smart-city'],
-    ['mqtt-broker','Running','0','smart-city'],
-    ['iot-devices-enhanced (x10)','Running','0','smart-city'],
-    ['iot-simulator-high (x4)','Running','0','smart-city'],
-    ['iot-simulator-medium (x5)','Running','0','smart-city'],
-    ['iot-simulator-burst','Running','0','smart-city'],
-    ['falco','Running','0','falco-system'],
-    ['falco-forwarder','Running','0','falco-system'],
-    ['falco-metacollector','Running','0','falco-system'],
-    ['prometheus','Running','0','monitoring'],
-    ['grafana','Running','0','monitoring'],
-    ['suricata','Running','0','monitoring'],
-    ['suricata-forwarder','Running','0','monitoring']
-  ];
-  var ph='';pods.forEach(function(p){ph+='<tr><td>'+p[0]+'</td><td><span class="dot dot-green"></span>'+p[1]+'</td><td>'+p[2]+'</td><td>'+p[3]+'</td></tr>'});
-  document.getElementById('podsTable').innerHTML=ph;
-  // Pods/Services explanation
-  var explEl=document.getElementById('k8sExplain');
-  if(explEl)explEl.innerHTML='<strong>Pods</strong> are running container instances (the actual processes). <strong>Services</strong> are stable network endpoints that route traffic to pods — pods restart/move, but the service name and port stay the same.';
-  // Real cluster services
-  var svcs=[
-    ['ids-api-service','NodePort','8000:30800','smart-city'],
-    ['postgres','ClusterIP','5432','smart-city'],
-    ['traffic-camera-service','ClusterIP','80','smart-city'],
-    ['healthcare-api-service','ClusterIP','80','smart-city'],
-    ['parking-system-service','ClusterIP','80','smart-city'],
-    ['mqtt-broker','ClusterIP','1883','smart-city'],
-    ['falco-forwarder','ClusterIP','8080','falco-system'],
-    ['prometheus','NodePort','9090:31106','monitoring'],
-    ['grafana','NodePort','3000:30300','monitoring'],
-    ['suricata','ClusterIP','514/UDP','monitoring'],
-    ['suricata-forwarder','ClusterIP','514/UDP, 8100','monitoring']
-  ];
-  var sh='';svcs.forEach(function(s){sh+='<tr><td>'+s[0]+'</td><td><span class="badge badge-info">'+s[1]+'</span></td><td>'+s[2]+'</td><td>'+s[3]+'</td></tr>'});
-  document.getElementById('servicesTable').innerHTML=sh;
-}
-
-function loadIoT(){
-  Promise.all([apiNoAuth('/api/metrics'),apiNoAuth('/api/iot/devices'),apiNoAuth('/api/iot/telemetry')]).then(function(r){
-    var m=r[0],deviceData=r[1],telem=r[2]||{};
-    var devices=(deviceData&&deviceData.devices)?deviceData.devices:[];
-    var totalPods=deviceData&&deviceData.total||devices.length||0;
-    var runningPods=devices.filter(function(d){return !!d.connected}).length;
-    var typeSet={};
-    devices.forEach(function(d){typeSet[d.device_type||'unknown']=1});
-    var types=Object.keys(typeSet).length;
-    var healthPct=totalPods>0?Math.round((runningPods/totalPods)*100):0;
-
-    // Count protocols online
-    var protos=0;
-    if(telem['traffic-camera']&&telem['traffic-camera'].online) protos++;
-    if(telem['parking-system']&&telem['parking-system'].online) protos++;
-    if(telem['healthcare-api']&&telem['healthcare-api'].online) protos++;
-    if(telem['env-sensor']&&telem['env-sensor'].online) protos++;
-    if(telem['street-lighting']&&telem['street-lighting'].online) protos++;
-
-    document.getElementById('iotStats').innerHTML=
-      '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">'+runningPods+'</div><div class="stat-sub">Running in cluster</div></div>'+
-      '<div class="stat-card blue"><div class="stat-label">Total Pods</div><div class="stat-value">'+totalPods+'</div><div class="stat-sub">IoT workloads deployed</div></div>'+
-      '<div class="stat-card purple"><div class="stat-label">Protocol Emulators</div><div class="stat-value">'+protos+'/5</div><div class="stat-sub">ONVIF, MQTT, FHIR, Modbus, DALI</div></div>'+
-      '<div class="stat-card '+(healthPct>=90?'green':healthPct>=50?'yellow':'red')+'"><div class="stat-label">Fleet Health</div><div class="stat-value">'+healthPct+'%</div><div class="stat-sub">'+runningPods+'/'+totalPods+' pods running</div></div>';
-
-    // ── Traffic Camera ONVIF Card ──
-    var tc=telem['traffic-camera']||{};
-    document.getElementById('tc-status').innerHTML=tc.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
-    document.getElementById('tc-status').className=tc.online?'badge badge-low':'badge badge-crit';
-    if(tc.online&&tc.telemetry){
-      var t=tc.telemetry,st=tc.stats||{};
-      document.getElementById('tc-detail').innerHTML=
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
-        '<div style="color:var(--text3)">Device ID</div><div><strong>'+esc(t.device_id||'-')+'</strong></div>'+
-        '<div style="color:var(--text3)">Resolution</div><div>'+esc(t.codec||'H.264')+' @ '+esc(t.current_fps||'-')+' fps</div>'+
-        '<div style="color:var(--text3)">Bitrate</div><div>'+(t.bitrate_kbps||0)+' kbps</div>'+
-        '<div style="color:var(--text3)">CMOS Temp</div><div>'+(t.cmos_temperature_c||'-')+'&deg;C</div>'+
-        '<div style="color:var(--text3)">Day/Night</div><div>'+esc(t.day_night_mode||'-')+'</div>'+
-        '<div style="color:var(--text3)">Frames</div><div>'+(st.frames_processed||t.frame_counter||0).toLocaleString()+'</div>'+
-        '<div style="color:var(--text3)">Plates Detected</div><div><strong style="color:var(--accent)">'+(st.plates_detected||0)+'</strong></div>'+
-        '<div style="color:var(--text3)">Vehicles</div><div>'+(st.vehicles_total||0).toLocaleString()+'</div>'+
-        '<div style="color:var(--text3)">Firmware</div><div style="font-family:monospace">'+esc(st.firmware||'-')+'</div>'+
-        '<div style="color:var(--text3)">ONVIF Ver</div><div>'+esc(st.protocol_version||'-')+'</div>'+
-        '</div>';
-      // ANPR telemetry panel
-      var lp=t.last_plate;
-      if(lp){
-        document.getElementById('tc-telemetry').innerHTML=
-          '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">'+
-          '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">'+
-          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Last Plate</div>'+
-          '<div style="font-size:22px;font-weight:700;font-family:monospace;color:var(--accent)">'+esc(lp.plate_number||'-')+'</div>'+
-          '<div style="font-size:11px;color:var(--text2);margin-top:4px">'+esc(lp.vehicle_class||'-')+' &bull; '+esc(lp.direction||'-')+' &bull; Lane '+esc(lp.lane||'-')+'</div>'+
-          '</div>'+
-          '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">'+
-          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Speed</div>'+
-          '<div style="font-size:22px;font-weight:700">'+(lp.speed_kmh||0).toFixed(1)+' <span style="font-size:12px;color:var(--text3)">km/h</span></div>'+
-          '<div style="font-size:11px;color:var(--text2);margin-top:4px">Confidence: '+(lp.confidence*100||0).toFixed(1)+'%</div>'+
-          '</div>'+
-          '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">'+
-          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Camera Feed</div>'+
-          '<div style="font-size:14px;font-weight:600">'+esc(t.codec||'H.264')+'</div>'+
-          '<div style="font-size:11px;color:var(--text2);margin-top:4px">Input: '+(t.input_voltage_v||0).toFixed(2)+'V &bull; IR: '+esc(t.ir_status||'-')+'</div>'+
-          '</div></div>';
-      }
-    }else{
-      document.getElementById('tc-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
-      document.getElementById('tc-telemetry').innerHTML='<div style="color:var(--text3);text-align:center">No ONVIF telemetry available</div>';
-    }
-
-    // ── Parking System MQTT/CoAP Card ──
-    var pk=telem['parking-system']||{};
-    document.getElementById('pk-status').innerHTML=pk.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
-    document.getElementById('pk-status').className=pk.online?'badge badge-low':'badge badge-crit';
-    if(pk.online&&pk.stats){
-      var ps=pk.stats,gw=pk.gateway||{};
-      document.getElementById('pk-detail').innerHTML=
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
-        '<div style="color:var(--text3)">Gateway ID</div><div><strong>'+esc(gw.gateway_id||'-')+'</strong></div>'+
-        '<div style="color:var(--text3)">Sensors</div><div>'+esc(gw.sensors_online||ps.sensors_total-ps.sensors_faulted||0)+' / '+esc(ps.sensors_total||0)+' online</div>'+
-        '<div style="color:var(--text3)">Occupancy</div><div><strong style="color:var(--yellow)">'+(ps.occupancy_rate||0).toFixed(1)+'%</strong></div>'+
-        '<div style="color:var(--text3)">Capacity</div><div>'+(ps.total_occupied||0)+' / '+(ps.total_capacity||0)+' spaces</div>'+
-        '<div style="color:var(--text3)">MQTT Broker</div><div style="font-family:monospace;font-size:11px">'+esc(gw.broker||'-')+'</div>'+
-        '<div style="color:var(--text3)">Uplink</div><div style="font-size:11px">'+esc(gw.uplink||'-')+'</div>'+
-        '<div style="color:var(--text3)">Battery Avg</div><div>'+(ps.avg_battery_pct||0).toFixed(1)+'%</div>'+
-        '<div style="color:var(--text3)">Faulted</div><div style="color:var(--red)">'+(ps.sensors_faulted||0)+' sensors</div>'+
-        '</div>';
-      // Parking lot detail
-      var lots=pk.lots;
-      if(lots&&lots.parking_lots){
-        var lh='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">';
-        Object.keys(lots.parking_lots).forEach(function(lid){
-          var lot=lots.parking_lots[lid];
-          var occPct=(lot.occupancy_pct||0);
-          var barColor=occPct>85?'var(--red)':occPct>60?'var(--yellow)':'var(--green)';
-          lh+='<div style="background:var(--bg);border-radius:6px;padding:14px;border:1px solid var(--border)">'+
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
-            '<strong>'+esc(lot.name||lid)+'</strong>'+
-            '<span class="badge" style="background:rgba(234,179,8,.12);color:var(--yellow)">'+esc(lot.zone||'-')+'</span></div>'+
-            '<div style="font-size:24px;font-weight:700;margin-bottom:4px">'+occPct.toFixed(0)+'% <span style="font-size:12px;color:var(--text3);font-weight:400">occupied</span></div>'+
-            '<div class="progress" style="margin-bottom:8px"><div class="progress-fill" style="width:'+occPct+'%;background:'+barColor+'"></div></div>'+
-            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:var(--text2)">'+
-            '<div>Occupied: <strong>'+(lot.occupied||0)+'</strong></div>'+
-            '<div>Vacant: <strong>'+(lot.vacant||0)+'</strong></div>'+
-            '<div>Capacity: '+(lot.capacity||0)+'</div>'+
-            '<div>Battery: '+(lot.avg_battery_pct||0).toFixed(0)+'%</div>'+
-            '<div>Type: '+esc(lot.sensor_type||'-')+'</div>'+
-            '<div>Faulted: <span style="color:var(--red)">'+(lot.faulted_sensors||0)+'</span></div>'+
-            '</div></div>';
-        });
-        lh+='</div>';
-        document.getElementById('pk-lots').innerHTML=lh;
-      }
-    }else{
-      document.getElementById('pk-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
-      document.getElementById('pk-lots').innerHTML='<div style="color:var(--text3);text-align:center">No parking data available</div>';
-    }
-
-    // ── Healthcare FHIR R4 Card ──
-    var hc=telem['healthcare-api']||{};
-    document.getElementById('hc-status').innerHTML=hc.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
-    document.getElementById('hc-status').className=hc.online?'badge badge-low':'badge badge-crit';
-    if(hc.online&&hc.stats){
-      var hs=hc.stats,al=hc.alarms||{};
-      document.getElementById('hc-detail').innerHTML=
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
-        '<div style="color:var(--text3)">FHIR Version</div><div><strong>'+esc(hs.fhir_version||'-')+'</strong></div>'+
-        '<div style="color:var(--text3)">Active Devices</div><div>'+(hs.active_devices||0)+'</div>'+
-        '<div style="color:var(--text3)">Patients</div><div>'+(hs.active_patients||0)+'</div>'+
-        '<div style="color:var(--text3)">Observations</div><div><strong style="color:var(--accent)">'+(hs.observations_total||0).toLocaleString()+'</strong></div>'+
-        '<div style="color:var(--text3)">Medications</div><div>'+(hs.medications_active||0)+' active</div>'+
-        '<div style="color:var(--text3)">Active Alarms</div><div style="color:'+(hs.active_alarms>0?'var(--red)':'var(--green)')+'">'+(hs.active_alarms||0)+'</div>'+
-        '<div style="color:var(--text3)">Protocol</div><div style="font-size:11px">'+esc(hs.protocol||'-')+'</div>'+
-        '</div>';
-      // Medical devices telemetry
-      var devs=(hc.telemetry&&hc.telemetry.devices)?hc.telemetry.devices:[];
-      if(devs.length>0){
-        var dh='<table style="width:100%;font-size:12px"><thead><tr><th>Device</th><th>Type</th><th>Patient</th><th>Location</th><th>Readings</th><th>Battery</th><th>Alarm</th></tr></thead><tbody>';
-        devs.forEach(function(d){
-          var readingStr='';
-          if(d.readings){
-            var rkeys=Object.keys(d.readings);
-            readingStr=rkeys.map(function(k){return '<span style="color:var(--text2)">'+esc(k)+':</span> <strong>'+esc(String(d.readings[k]))+'</strong>'}).join(' &bull; ');
-          }
-          var alarmBadge=d.alarm_active?'<span class="badge badge-crit">'+esc(d.alarm_type||'ALARM')+'</span>':'<span class="badge badge-low">OK</span>';
-          var battColor=d.battery_pct>50?'var(--green)':d.battery_pct>20?'var(--yellow)':'var(--red)';
-          dh+='<tr><td style="font-family:monospace">'+esc(d.device_id||'-')+'</td>'+
-            '<td><span class="badge badge-purple" style="font-size:10px">'+esc(d.type||'-')+'</span><br><span style="font-size:10px;color:var(--text3)">'+esc(d.ieee_standard||'')+'</span></td>'+
-            '<td>'+esc(d.patient||'-')+'</td>'+
-            '<td>'+esc(d.location||'-')+'</td>'+
-            '<td>'+readingStr+'</td>'+
-            '<td><span style="color:'+battColor+'">'+(d.battery_pct||0).toFixed(0)+'%</span></td>'+
-            '<td>'+alarmBadge+'</td></tr>';
-        });
-        dh+='</tbody></table>';
-        document.getElementById('hc-telemetry').innerHTML=dh;
-      }
-    }else{
-      document.getElementById('hc-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
-      document.getElementById('hc-telemetry').innerHTML='<div style="color:var(--text3);text-align:center">No FHIR telemetry available</div>';
-    }
-
-    // ── Environmental Sensor Modbus/OPC UA Card ──
-    var ev=telem['env-sensor']||{};
-    document.getElementById('ev-status').innerHTML=ev.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
-    document.getElementById('ev-status').className=ev.online?'badge badge-low':'badge badge-crit';
-    if(ev.online&&ev.stats){
-      var es=ev.stats;
-      document.getElementById('ev-detail').innerHTML=
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
-        '<div style="color:var(--text3)">Stations</div><div><strong>'+(es.stations_online||0)+' / '+(es.stations_total||0)+'</strong> online</div>'+
-        '<div style="color:var(--text3)">Sensor Channels</div><div>'+(es.total_sensor_channels||0)+'</div>'+
-        '<div style="color:var(--text3)">City AQI</div><div><strong style="color:'+(es.avg_aqi<=50?'var(--green)':es.avg_aqi<=100?'var(--yellow)':'var(--red)')+'">'+
-        (es.avg_aqi||0)+'</strong> '+esc(es.aqi_category||'')+'</div>'+
-        '<div style="color:var(--text3)">Faulted</div><div style="color:'+(es.stations_faulted>0?'var(--red)':'var(--green)')+'">'+
-        (es.stations_faulted||0)+' stations</div>'+
-        '<div style="color:var(--text3)">Registers/Stn</div><div>'+(es.sensors_per_station||0)+'</div>'+
-        '<div style="color:var(--text3)">Protocol</div><div style="font-size:11px">'+esc(es.protocol||'-')+'</div>'+
-        '</div>';
-      // AQI station cards
-      var aqi=ev.aqi;
-      if(aqi&&aqi.stations){
-        var ah='<div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">'+
-          '<div style="background:var(--bg);border-radius:8px;padding:16px 24px;border:1px solid var(--border);text-align:center">'+
-          '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px">City AQI</div>'+
-          '<div style="font-size:36px;font-weight:700;color:'+(aqi.city_aqi<=50?'var(--green)':aqi.city_aqi<=100?'var(--yellow)':'var(--red)')+'">'+
-          (aqi.city_aqi||0)+'</div>'+
-          '<div style="font-size:11px;color:var(--text2)">'+esc(aqi.category||'')+'</div></div>'+
-          '<div style="flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">';
-        Object.keys(aqi.stations).forEach(function(sid){
-          var s=aqi.stations[sid];
-          var col=s.aqi<=50?'var(--green)':s.aqi<=100?'var(--yellow)':s.aqi<=150?'var(--orange)':'var(--red)';
-          ah+='<div style="background:var(--bg);border-radius:6px;padding:8px 12px;border:1px solid var(--border)">'+
-            '<div style="font-size:10px;color:var(--text3)">'+esc(sid)+'</div>'+
-            '<div style="font-size:20px;font-weight:700;color:'+col+'">'+s.aqi+'</div>'+
-            '<div style="font-size:10px;color:var(--text2)">'+esc(s.category||'')+'</div></div>';
-        });
-        ah+='</div></div>';
-        document.getElementById('ev-aqi').innerHTML=ah;
-      }
-    }else{
-      document.getElementById('ev-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
-      document.getElementById('ev-aqi').innerHTML='<div style="color:var(--text3);text-align:center">No environmental data</div>';
-    }
-
-    // ── Street Lighting DALI-2/TALQ Card ──
-    var sl=telem['street-lighting']||{};
-    document.getElementById('sl-status').innerHTML=sl.online?'<span class="dot dot-green"></span>Online':'<span class="dot dot-red"></span>Offline';
-    document.getElementById('sl-status').className=sl.online?'badge badge-low':'badge badge-crit';
-    if(sl.online&&sl.stats){
-      var ss=sl.stats;
-      document.getElementById('sl-detail').innerHTML=
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">'+
-        '<div style="color:var(--text3)">Luminaires</div><div><strong>'+(ss.luminaires_on||0)+' / '+(ss.luminaires_total||0)+'</strong> on</div>'+
-        '<div style="color:var(--text3)">Total Power</div><div>'+(ss.total_power_w||0).toFixed(0)+' W</div>'+
-        '<div style="color:var(--text3)">Avg Dimming</div><div>'+(ss.avg_dim_pct||0).toFixed(0)+'%</div>'+
-        '<div style="color:var(--text3)">Faults</div><div style="color:'+(ss.luminaires_fault>0?'var(--red)':'var(--green)')+'">'+
-        (ss.luminaires_fault||0)+'</div>'+
-        '<div style="color:var(--text3)">Energy</div><div>'+(ss.energy_total_kwh||0).toFixed(2)+' kWh</div>'+
-        '<div style="color:var(--text3)">Pro Protocol</div><div style="font-size:11px">'+esc(ss.protocol||'-')+'</div>'+
-        '</div>';
-      // Zone breakdown
-      if(ss.zones){
-        var zh='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">';
-        Object.keys(ss.zones).forEach(function(zn){
-          var z=ss.zones[zn];
-          var dimColor=z.avg_dim_pct>70?'var(--yellow)':z.avg_dim_pct>30?'var(--accent)':'var(--text3)';
-          zh+='<div style="background:var(--bg);border-radius:6px;padding:10px 12px;border:1px solid var(--border)">'+
-            '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px">'+esc(zn)+'</div>'+
-            '<div style="font-size:18px;font-weight:700;color:'+dimColor+'">'+(z.avg_dim_pct||0).toFixed(0)+'%</div>'+
-            '<div style="font-size:10px;color:var(--text2)">'+(z.on||0)+'/'+z.count+' on &bull; '+(z.power_w||0).toFixed(0)+'W</div></div>';
-        });
-        zh+='</div>';
-        document.getElementById('sl-zones').innerHTML=zh;
-      }
-    }else{
-      document.getElementById('sl-detail').innerHTML='<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
-      document.getElementById('sl-zones').innerHTML='<div style="color:var(--text3);text-align:center">No lighting data</div>';
-    }
-
-    // ── Fleet table (existing) ──
-    var ih='';
-    if(devices.length>0){
-      devices.forEach(function(d){
-        var dotCls=d.connected?'dot-green':'dot-red';
-        var rate=(typeof d.current_rate==='number')?d.current_rate.toFixed(1):'0.0';
-        ih+='<tr><td>'+esc(d.device||d.device_id||'-')+'</td><td><span class="badge badge-info">'+esc(d.device_type||'-')+'</span></td><td><span class="dot '+dotCls+'"></span>'+esc(d.status||'-')+' <span style="font-size:11px;color:var(--text3)">('+rate+'/min)</span></td><td>'+esc(d.namespace||'smart-city')+'</td><td>'+esc(d.ip||'-')+'</td></tr>';
-      });
-    }else{
-      ih='<tr><td colspan="5" style="text-align:center;color:var(--text3)">No IoT devices found</td></tr>';
-    }
-    document.getElementById('iotTable').innerHTML=ih;
-  });
-}
-
-function renderLLMTab(llm,cb,dedup,llmDiag){
-  var configCount=(llm&&llm.provider_count)?llm.provider_count:0;
-  var configured=(llm&&llm.providers)?llm.providers:[];
-  var engines=(cb&&cb.engines)?cb.engines:{};
-  var diags=(llmDiag&&llmDiag.providers)?llmDiag.providers:{};
-  var smry=(llmDiag&&llmDiag.summary)?llmDiag.summary:{};
-  document.getElementById('llmStats').innerHTML=
-    '<div class="stat-card purple"><div class="stat-label">Total Providers</div><div class="stat-value">'+ALL_PROVIDERS.length+'</div><div class="stat-sub">'+ALL_PROVIDERS.map(function(p){return p.id}).join(', ')+'</div></div>'+
-    '<div class="stat-card green"><div class="stat-label">Operational</div><div class="stat-value">'+(smry.operational||0)+'/'+ALL_PROVIDERS.length+'</div><div class="stat-sub">Configured: '+configCount+'</div></div>'+
-    '<div class="stat-card red"><div class="stat-label">Errors / Cooldown</div><div class="stat-value">'+((smry.error||0)+(smry.cooldown||0))+'</div><div class="stat-sub">'+(smry.error||0)+' errors, '+(smry.cooldown||0)+' in cooldown</div></div>'+
-    '<div class="stat-card blue"><div class="stat-label">Dedup Hit Rate</div><div class="stat-value">'+(dedup&&dedup.hit_rate_percent?dedup.hit_rate_percent.toFixed(1):'0')+'%</div><div class="stat-sub">'+(dedup&&dedup.hits||0)+' hits / '+(dedup&&dedup.total_alerts||0)+' total</div></div>';
-
-  // Fetch per-engine stats for latency/cost charts
-  apiNoAuth('/api/llm-stats/export').then(function(stats){
-    if(!stats||!stats.engines) return;
-    var eng=stats.engines;
-    var names=Object.keys(eng);
-    // ── Latency bar chart (CSS bars) ──
-    var maxLat=0;
-    names.forEach(function(n){var p=eng[n].p95_latency_s||0;if(p>maxLat)maxLat=p});
-    if(maxLat<0.01) maxLat=0.1;
-    var latHtml='<table style="width:100%;border-collapse:collapse;font-size:13px">';
-    latHtml+='<tr style="color:var(--text3);font-size:11px"><td style="width:80px">Engine</td><td>p50</td><td>p95</td><td>Avg</td><td style="width:50%">Distribution</td></tr>';
-    var barColors={xai:'#a78bfa',openai:'#34d399',anthropic:'#f97316',gemini:'#60a5fa',kimi:'#f472b6',local:'#94a3b8'};
-    names.forEach(function(n){
-      var e=eng[n];
-      if(!e.total_requests) return;
-      var p50=e.p50_latency_s||0,p95=e.p95_latency_s||0,avg=e.avg_latency_s||0;
-      var barW=Math.max(2,Math.round((p95/maxLat)*100));
-      var barW50=Math.max(1,Math.round((p50/maxLat)*100));
-      var col=barColors[n]||'#94a3b8';
-      latHtml+='<tr style="border-top:1px solid var(--bg3)">'+
-        '<td><strong>'+n+'</strong></td>'+
-        '<td>'+p50.toFixed(3)+'s</td>'+
-        '<td>'+p95.toFixed(3)+'s</td>'+
-        '<td>'+avg.toFixed(3)+'s</td>'+
-        '<td><div style="position:relative;height:22px;background:var(--bg3);border-radius:4px;overflow:hidden">'+
-          '<div style="position:absolute;left:0;top:0;height:100%;width:'+barW+'%;background:'+col+';opacity:.3;border-radius:4px" title="p95"></div>'+
-          '<div style="position:absolute;left:0;top:0;height:100%;width:'+barW50+'%;background:'+col+';border-radius:4px" title="p50"></div>'+
-          '<span style="position:absolute;left:4px;top:2px;font-size:10px;color:var(--text1)">'+n+'</span>'+
-        '</div></td></tr>';
-    });
-    latHtml+='</table>';
-    document.getElementById('llmLatencyChart').innerHTML=latHtml||'<div style="color:var(--text3);padding:12px">No data yet — run attacks to generate stats</div>';
-
-    var tokenRows='';
-    names.forEach(function(n){
-      var e=eng[n];
-      if(!e.total_requests) return;
-      tokenRows+='<tr>'+
-        '<td><strong>'+n+'</strong></td>'+
-        '<td>'+(e.prompt_tokens_total||0)+'</td>'+
-        '<td>'+(e.completion_tokens_total||0)+'</td>'+
-        '<td>'+(e.tokens_total||0)+'</td>'+
-        '<td>'+(e.avg_tokens_per_request||0)+'</td>'+
-      '</tr>';
-    });
-    document.getElementById('llmTokenTable').innerHTML=tokenRows||'<tr><td colspan="5" style="text-align:center;color:var(--text3)">No token data yet</td></tr>';
-  });
-
-  var pc=document.getElementById('llmProviderCards');
-  var html='';
-  ALL_PROVIDERS.forEach(function(p){
-    var info=engines[p.id];
-    var d=diags[p.id]||{};
-    var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
-    var ds=d.status||'unknown';
-    var color=ds==='operational'?'var(--green)':ds==='not_configured'?'var(--text3)':ds==='cooldown'?'var(--yellow)':'var(--red)';
-    var statusLabel=ds==='operational'?(d.successes>0?'Healthy':'Ready'):
-      ds==='not_configured'?'No API Key':
-      ds==='cooldown'?'Cooldown ('+d.cooldown_remaining_seconds+'s)':
-      ds==='error'?'Error':
-      ds==='circuit_open'?'Circuit Open':
-      ds==='recovering'?'Recovering':'Unknown';
-    var pct=(d.successes&&(d.successes+d.failures)>0)?Math.min(100,d.successes/(d.successes+d.failures)*100):0;
-    var reason=d.reason||'';
-    var lastErr=d.last_error||'';
-    var latency=d.last_latency_ms?d.last_latency_ms+'ms':'-';
-    html+='<div class="provider-card" style="margin-bottom:12px;border-left:3px solid '+color+';'+(isConfigured?'':'opacity:.6')+'">'+
-      '<div class="provider-icon" style="color:'+p.color+'">'+p.icon+'</div>'+
-      '<div class="provider-info" style="flex:1">'+
-      '<div class="provider-name">'+p.name+' <span style="font-size:11px;color:var(--text3);font-weight:400">'+(d.model||p.model)+'</span></div>'+
-      '<div class="provider-detail" style="margin:2px 0">Status: <strong style="color:'+color+'">'+statusLabel+'</strong>'+(d.attempts>0?' | '+d.successes+' ok / '+d.failures+' fail | Latency: '+latency:'')+'</div>'+
-      '<div style="font-size:11px;margin:4px 0;padding:6px 8px;border-radius:4px;background:'+(ds==='operational'?'rgba(34,197,94,.08)':ds==='not_configured'?'rgba(148,163,184,.08)':'rgba(239,68,68,.08)')+';color:'+(ds==='operational'?'var(--green)':ds==='not_configured'?'var(--text3)':'#ef4444')+';line-height:1.4">'+
-        '<strong>Why:</strong> '+esc(reason)+
-        (lastErr&&ds!=='operational'&&ds!=='not_configured'?'<br><strong>Raw error:</strong> <span style="opacity:.7">'+esc(lastErr)+'</span>':'')+
-        (!d.key_format_valid&&ds==='not_configured'&&p.id!=='local'?'<br><strong>Fix:</strong> Set <code style="background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px">'+p.id.toUpperCase()+'_API_KEY</code> environment variable':'')+
-      '</div>'+
-      '<div class="progress"><div class="progress-fill" style="width:'+(isConfigured?Math.max(pct,5):0)+'%;background:'+color+'"></div></div>'+
-      '</div></div>';
-  });
-  pc.innerHTML=html;
-  // Circuit breaker detail
-  var cbHtml='<div style="font-size:13px;color:var(--text2)"><div>Failure threshold: <strong>'+(cb&&cb.failure_threshold||5)+'</strong></div><div>Recovery timeout: <strong>'+(cb&&cb.recovery_timeout_seconds||30)+'s</strong></div><div style="margin-top:8px">';
-  ALL_PROVIDERS.forEach(function(p){
-    var info=engines[p.id];
-    var d=diags[p.id]||{};
-    var isConfigured=configured.indexOf(p.id)!==-1||!!info||d.configured;
-    var ds=d.status||'unknown';
-    var badgeClass=ds==='operational'?'badge-low':ds==='cooldown'?'badge-med':(ds==='error'||ds==='circuit_open')?'badge-crit':isConfigured?'badge-info':'badge-purple';
-    var label=ds==='operational'?(d.successes>0?'OK':'READY'):ds==='cooldown'?'COOLDOWN':ds==='error'?'ERROR':ds==='circuit_open'?'CB OPEN':isConfigured?'READY':'N/A';
-    var opacity=isConfigured||ds==='operational'?'1':'.5';
-    cbHtml+='<span class="badge '+badgeClass+'" style="margin-right:4px;margin-bottom:4px;display:inline-block;opacity:'+opacity+'">'+p.id+': '+label+'</span>';
-  });
-  cbHtml+='</div></div>';
-  document.getElementById('circuitBreakerDetail').innerHTML=cbHtml;
-  document.getElementById('dedupDetail').innerHTML=
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;font-size:13px">'+
-    '<div><span style="color:var(--text3)">Total Alerts:</span><br><strong>'+(dedup&&dedup.total_alerts||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Cache Hits:</span><br><strong>'+(dedup&&dedup.hits||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">Cache Misses:</span><br><strong>'+(dedup&&dedup.misses||0)+'</strong></div>'+
-    '<div><span style="color:var(--text3)">TTL:</span><br><strong>'+(dedup&&dedup.ttl_seconds||60)+'s</strong></div>'+
-    '<div><span style="color:var(--text3)">Evictions:</span><br><strong>'+(dedup&&dedup.evictions||0)+'</strong></div>'+
-    '</div>';
-}
-function resetCircuitBreakers(){apiNoAuth('/api/circuit-breaker/reset').then(function(){addLog('Circuit breakers reset');refreshAll()})}
-
-/* ═══════════════════════════════════════════════════════════════
-  GOVERNANCE / HITL INTERFACE
-  Purpose: keep analyst accountability explicit for stakeholder demos.
-  Endpoints: /api/governance/status, /pending, /history, /approve, /reject
-  ═══════════════════════════════════════════════════════════════ */
-function renderGovernanceTab(gov,dashboard){
-  if(!gov)return;
-  var gm=gov.metrics||{};
-  document.getElementById('govStats').innerHTML=
-    '<div class="stat-card purple"><div class="stat-label">Mode</div><div class="stat-value" style="font-size:20px">'+(gov.mode==='assisted'?'Assisted':gov.mode==='autopilot'?'Autopilot':'Manual')+'</div><div class="stat-sub">Threshold: severity &gt;= '+(gov.assisted_threshold||8)+' requires approval</div></div>'+
-    '<div class="stat-card yellow"><div class="stat-label">Pending</div><div class="stat-value">'+(gov.pending_count||0)+'</div><div class="stat-sub">Actions awaiting decision</div></div>'+
-    '<div class="stat-card green"><div class="stat-label">Approved</div><div class="stat-value">'+(gm.approved||0)+'</div><div class="stat-sub">of '+(gm.total_actions_requested||0)+' total</div></div>'+
-    '<div class="stat-card red"><div class="stat-label">Rejected</div><div class="stat-value">'+(gm.rejected||0)+'</div><div class="stat-sub">Actions blocked by analyst</div></div>';
-  document.getElementById('pendingBadge').textContent=gov.pending_count||0;
-  var modes=['manual','assisted','autopilot'];
-  var labels=['Manual','Assisted','Autopilot'];
-  var mHtml='<div style="display:flex;gap:8px;margin-bottom:12px">';
-  modes.forEach(function(m,idx){mHtml+='<button class="btn '+(gov.mode===m?'btn-primary':'btn-outline')+'" onclick="setGovMode(\''+m+'\')">'+labels[idx]+'</button>'});
-  mHtml+='</div><div style="font-size:12px;color:var(--text3)"><strong>Manual:</strong> All actions require analyst approval<br><strong>Assisted:</strong> Low-severity auto-executes; critical requires approval<br><strong>Autopilot:</strong> All actions auto-execute (demo mode)</div>';
-  document.getElementById('govModeControl').innerHTML=mHtml;
-  loadPending();
-  loadHistory();
-}
-function setGovMode(mode){apiFetch('/api/governance/mode?mode='+mode,{method:'POST'}).then(function(){refreshAll()})}
-
-// Pending queue renderer: analyst approve/reject workflow for critical actions.
-function loadPending(){
-  apiFetch('/api/governance/pending').then(function(data){
-    var el=document.getElementById('pendingActions');
-    if(!data||!data.pending||!data.pending.length){el.innerHTML='<div style="padding:20px;color:var(--text3);text-align:center">No actions pending approval</div>';return}
-    var html='<table><thead><tr><th>Action</th><th>Target</th><th>Severity</th><th>Reason</th><th>Actions</th></tr></thead><tbody>';
-    data.pending.forEach(function(a){
-      html+='<tr><td>'+(a.action_type||a.action||'-')+'</td><td>'+(a.target||'-')+'</td><td><span class="badge '+sevBadge(a.severity)+'">'+(a.severity||'-')+'</span></td><td style="max-width:200px">'+esc(((a.rationale||a.reason||'')).substring(0,100))+'</td><td><button class="btn btn-success btn-sm" onclick="approveAction(\''+a.id+'\')">Approve</button> <button class="btn btn-danger btn-sm" onclick="rejectAction(\''+a.id+'\')">Reject</button></td></tr>';
-    });
-    el.innerHTML=html+'</tbody></table>';
-  });
-}
-function approveAction(id){apiFetch('/api/governance/approve/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({analyst_comment:'Approved via dashboard'})}).then(function(){addLog('Action '+id+' approved');refreshAll()})}
-function rejectAction(id){apiFetch('/api/governance/reject/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({analyst_comment:'Rejected via dashboard'})}).then(function(){addLog('Action '+id+' rejected');refreshAll()})}
-
-// Governance history table: audit visibility for demos and post-incident review.
-function loadHistory(){
-  apiFetch('/api/governance/history?limit=20').then(function(data){
-    var el=document.getElementById('govHistory');
-    if(!data||!data.history||!data.history.length){el.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text3)">No action history</td></tr>';return}
-    var html='';
-    data.history.forEach(function(h){html+='<tr><td>'+shortTime(h.timestamp)+'</td><td>'+(h.action_type||h.action||'-')+'</td><td>'+(h.target||'-')+'</td><td><span class="badge '+(h.status==='approved'||h.status==='executed'?'badge-low':h.status==='rejected'?'badge-crit':'badge-med')+'">'+(h.status||'-')+'</span></td><td>'+(h.operator||'-')+'</td></tr>'});
-    el.innerHTML=html;
-  });
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   ATTACK SIMULATION ENGINE — 12 scenarios, MITRE ATT&CK for ICS
-   ═══════════════════════════════════════════════════════════════ */
-const ATTACK_SCENARIOS=[
-  // ── Initial Access ──
-  {id:0,name:'DDoS Traffic Cameras',cat:'Denial of Service',source:'suricata',threat:'DDoS / Volumetric Flood',pod:'traffic-camera',sev:9,color:'#ef4444',duration:15000,icon:'\uD83C\uDF10',particles:50,
-   mitre:'T0866',mitreName:'Exploitation of Remote Services',description:'SYN flood targeting ONVIF Profile S camera endpoints. Saturates RTSP/HTTP ports to blind surveillance.'},
-  {id:1,name:'Shell Healthcare Pod',cat:'Execution',source:'falco',threat:'Privilege Escalation',pod:'healthcare-api',sev:8,color:'#f97316',duration:12000,icon:'\uD83D\uDC1A',particles:30,
-   mitre:'T0807',mitreName:'Command-Line Interface',description:'Reverse shell spawned inside HL7 FHIR R4 container. Attacker gains CLI access to patient data endpoints.'},
-  {id:2,name:'Port Scan Parking',cat:'Discovery',source:'suricata',threat:'Reconnaissance',pod:'parking-system',sev:6,color:'#eab308',duration:10000,icon:'\uD83D\uDD0D',particles:20,
-   mitre:'T0846',mitreName:'Remote System Discovery',description:'Sequential SYN scan of MQTT broker (1883) and CoAP (5683) ports on parking sensor network.'},
-  {id:3,name:'Exfil Smart Lights',cat:'Exfiltration',source:'falco',threat:'Data Exfiltration',pod:'street-lighting',sev:7,color:'#00d4ff',duration:18000,icon:'\uD83D\uDCE4',particles:40,
-   mitre:'T0882',mitreName:'Theft of Operational Information',description:'DALI-2 luminaire schedule data exfiltrated via DNS tunneling. Contains zone dimming profiles and energy usage.'},
-  // ── New scenarios for 5 emulators ──
-  {id:4,name:'Modbus Register Overwrite',cat:'Impair Process',source:'falco',threat:'Sensor Manipulation',pod:'env-sensor',sev:9,color:'#a855f7',duration:14000,icon:'\u2699\uFE0F',particles:45,
-   mitre:'T0836',mitreName:'Modify Parameter',description:'Unauthorized write to Modbus holding registers 40001-40016 (PM2.5/O3 values). Falsifies EPA AQI readings to hide pollution event.'},
-  {id:5,name:'OPC UA Node Injection',cat:'Impair Process',source:'falco',threat:'Protocol Abuse',pod:'env-sensor',sev:8,color:'#ec4899',duration:13000,icon:'\uD83C\uDFED',particles:35,
-   mitre:'T0855',mitreName:'Unauthorized Command Message',description:'Rogue OPC UA client injects fabricated temperature nodes into environmental monitoring namespace.'},
-  {id:6,name:'ONVIF Camera Hijack',cat:'Lateral Movement',source:'falco',threat:'Device Takeover',pod:'traffic-camera',sev:9,color:'#dc2626',duration:16000,icon:'\uD83C\uDFA5',particles:50,
-   mitre:'T0867',mitreName:'Lateral Tool Transfer',description:'Attacker exploits WS-Discovery to pivot between ONVIF cameras. PTZ controls seized, ANPR feed redirected.'},
-  {id:7,name:'FHIR Patient Data Tamper',cat:'Impact',source:'falco',threat:'Data Integrity',pod:'healthcare-api',sev:10,color:'#b91c1c',duration:20000,icon:'\u2620\uFE0F',particles:55,
-   mitre:'T0831',mitreName:'Manipulation of Control',description:'Medication dosage modified in FHIR MedicationRequest resources. LOINC vitals observations altered to hide critical patient state.'},
-  {id:8,name:'MQTT Broker Poisoning',cat:'Impact',source:'suricata',threat:'Message Injection',pod:'parking-system',sev:8,color:'#059669',duration:12000,icon:'\uD83D\uDC8A',particles:35,
-   mitre:'T0830',mitreName:'Man in the Middle',description:'Rogue MQTT messages published to parking/+/status topics. SenML payloads report all bays as vacant causing traffic chaos.'},
-  {id:9,name:'TALQ Gateway Spoof',cat:'Evasion',source:'suricata',threat:'Identity Spoofing',pod:'street-lighting',sev:7,color:'#6366f1',duration:11000,icon:'\uD83D\uDCA1',particles:25,
-   mitre:'T0856',mitreName:'Spoof Reporting Message',description:'Fake TALQ v2.4 gateway sends spoofed outdoor-light-point state reports. Hides luminaire failures across 3 zones.'},
-  {id:10,name:'Ransomware IoT Fleet',cat:'Impact',source:'falco',threat:'Ransomware',pod:'traffic-camera',sev:10,color:'#991b1b',duration:22000,icon:'\uD83D\uDD12',particles:60,
-   mitre:'T0828',mitreName:'Loss of Productivity and Revenue',description:'Simulated ransomware encrypts ONVIF config, Modbus maps, and DALI scene files across the entire IoT fleet.'},
-  {id:11,name:'Credential Harvest RPi',cat:'Collection',source:'falco',threat:'Credential Theft',pod:'traffic-camera',sev:7,color:'#d97706',duration:10000,icon:'\uD83D\uDD11',particles:20,
-   mitre:'T0859',mitreName:'Valid Accounts',description:'Attacker harvests API keys from Raspberry Pi motion sensor config. Uses stolen creds to inject false alerts via /api/iot/sensor.'}
-];
-var currentAttack=null;
-var attackTimerMs=0;
-var attackFlowEvents=0;
-var attackRunCount=0;
-var activeCategory='all';
-
-function attackSeverityClass(sev){
-  return sev>=8?'badge-crit':sev>=6?'badge-high':'badge-med';
-}
-
-function renderAttackTab(){
-  // Update stats
-  var categories=[...new Set(ATTACK_SCENARIOS.map(function(a){return a.cat}))];
-  var targets=[...new Set(ATTACK_SCENARIOS.map(function(a){return a.pod}))];
-  var mitres=[...new Set(ATTACK_SCENARIOS.map(function(a){return a.mitre}))];
-  document.getElementById('atkScenarioCount').textContent=ATTACK_SCENARIOS.length+' + Custom';
-  document.getElementById('atkMitreCount').textContent=mitres.length;
-  document.getElementById('atkTargetCount').textContent=targets.length+'/5';
-  document.getElementById('atkRunCount').textContent=attackRunCount;
-
-  // Render category filter chips
-  var filterEl=document.getElementById('attackCategoryFilter');
-  var chips='<button class="btn btn-sm '+(activeCategory==='all'?'btn-primary':'btn-outline')+'" onclick="filterAttacks(\'all\')">All ('+ATTACK_SCENARIOS.length+')</button>';
-  categories.forEach(function(cat){
-    var count=ATTACK_SCENARIOS.filter(function(a){return a.cat===cat}).length;
-    chips+='<button class="btn btn-sm '+(activeCategory===cat?'btn-primary':'btn-outline')+'" onclick="filterAttacks(\''+cat+'\')">'+cat+' ('+count+')</button>';
-  });
-  filterEl.innerHTML=chips;
-
-  // Render scenario cards
-  var grid=document.getElementById('attackGrid');
-  var html='';
-  var filtered=activeCategory==='all'?ATTACK_SCENARIOS:ATTACK_SCENARIOS.filter(function(a){return a.cat===activeCategory});
-  filtered.forEach(function(attack){
-    html+='<div class="attack-card" onclick="launchAttack('+attack.id+')" style="border-left:3px solid '+attack.color+'">'+
-      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'+
-      '<span style="font-size:18px">'+attack.icon+'</span>'+
-      '<div><h4 style="margin:0;color:'+attack.color+';font-size:13px">'+attack.name+'</h4>'+
-      '<span style="font-size:10px;color:var(--text3);font-family:monospace">'+attack.mitre+'</span></div>'+
-      '</div>'+
-      '<p style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5">'+attack.description+'</p>'+
-      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px">'+
-      '<span class="badge '+attackSeverityClass(attack.sev)+'">'+attack.sev+'/10</span>'+
-      '<span class="badge badge-info">'+attack.source.toUpperCase()+'</span>'+
-      '<span style="color:var(--text3)">'+attack.pod+'</span>'+
-      '</div></div>';
-  });
-  html+='<div class="attack-card" onclick="showCustomModal()" style="border-left:3px solid var(--accent2)">'+
-    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:18px">\u2699\uFE0F</span><h4 style="margin:0;font-size:13px">Custom Alert</h4></div>'+
-    '<p style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5">Create a custom Falco/Suricata payload and inject into the real IDS analysis pipeline.</p>'+
-    '<div style="font-size:11px"><span class="badge badge-purple">Custom</span></div></div>';
-  grid.innerHTML=html;
-
-  // Render MITRE table
-  var mitreMap={};
-  ATTACK_SCENARIOS.forEach(function(a){
-    if(!mitreMap[a.mitre]) mitreMap[a.mitre]={id:a.mitre,name:a.mitreName,tactic:a.cat,scenarios:[]};
-    mitreMap[a.mitre].scenarios.push(a.name);
-  });
-  var mitreHtml='';
-  Object.values(mitreMap).forEach(function(m){
-    mitreHtml+='<tr><td style="font-family:monospace;color:var(--accent)">'+m.id+'</td><td>'+m.name+'</td><td><span class="badge badge-info">'+m.tactic+'</span></td><td style="font-size:11px">'+m.scenarios.join(', ')+'</td></tr>';
-  });
-  document.getElementById('mitreTable').innerHTML=mitreHtml;
-}
-
-function filterAttacks(cat){
-  activeCategory=cat;
-  renderAttackTab();
-}
-
-function launchAttack(attackId){
-  if(currentAttack)return;
-  var attack=ATTACK_SCENARIOS.find(function(a){return a.id===attackId});
-  if(!attack)return;
-  currentAttack=attack;
-  attackTimerMs=0;
-  attackRunCount++;
-  document.getElementById('atkRunCount').textContent=attackRunCount;
-
-  document.getElementById('attackStatus').textContent='Attacking: '+attack.name;
-  document.getElementById('attackStatus').className='pill pill-err';
-  document.getElementById('attackProgressFill').style.background='var(--red)';
-  document.getElementById('attackProgressFill').style.width='0%';
-  document.getElementById('attackTimer').textContent='00:00';
-
-  addLog('['+new Date().toLocaleTimeString()+'] \u2501\u2501\u2501 ATTACK START: '+attack.name+' ('+attack.mitre+' | '+attack.source.toUpperCase()+' | Sev '+attack.sev+'/10) \u2501\u2501\u2501');
-  addLog('['+new Date().toLocaleTimeString()+'] Target: '+attack.pod+' | Threat: '+attack.threat);
-  addLog('['+new Date().toLocaleTimeString()+'] '+attack.description);
-  triggerRealAttack(attack);
-
-  var attackInterval=setInterval(function(){
-    attackTimerMs+=100;
-    var progress=Math.min(100,(attackTimerMs/attack.duration)*100);
-    document.getElementById('attackProgressFill').style.width=progress+'%';
-    document.getElementById('attackTimer').textContent=new Date(attackTimerMs).toISOString().substr(14,5);
-    if(Math.random()<0.3){createAttackParticle(attack);}
-    if(attackTimerMs>=attack.duration){
-      clearInterval(attackInterval);
-      attackComplete();
-    }
-  },100);
-}
-
-function severityToPriority(sev){
-  if(sev>=8)return 'Critical';
-  if(sev>=6)return 'Warning';
-  return 'Notice';
-}
-
-function triggerRealAttack(attack){
-  var ts=new Date().toISOString();
-  var traceId='attack-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
-  var payload={
-    output:attack.source.toUpperCase()+' Attack: '+attack.name+' on '+attack.pod+' ['+attack.mitre+']',
-    priority:severityToPriority(attack.sev),
-    rule:attack.name,
-    time:ts,
-    output_fields:{
-      'container.name':attack.pod,
-      'alert.signature':attack.name,
-      'threat.type':attack.threat,
-      'mitre.technique':attack.mitre,
-      'mitre.name':attack.mitreName,
-      'attack.category':attack.cat,
-      'trace.id':traceId
-    }
-  };
-  fetch(API+'/api/alerts/internal',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(payload)
-  })
-  .then(function(r){return r.json()})
-  .then(function(data){
-    addLog('['+new Date().toLocaleTimeString()+'] \u2705 Attack injected \u2192 Trace: '+(data.trace_id||traceId)+' \u2192 Severity '+(data.severity||'-'));
-    if(data.actions_taken&&data.actions_taken.length){
-      addLog('['+new Date().toLocaleTimeString()+'] \u26A1 Automated Actions: '+data.actions_taken.join(', '));
-    }
-    setTimeout(refreshAll,1500);
-  })
-  .catch(function(e){
-    addLog('['+new Date().toLocaleTimeString()+'] \u274C Attack API error: '+e.message);
-  });
-}
-
-function createAttackParticle(attack){
-  var vis=document.getElementById('attackFlowVis');
-  if(!vis)return;
-  var particle=document.createElement('div');
-  particle.style.cssText='position:absolute;left:0;top:'+(Math.random()*180)+'px;width:4px;height:4px;background:'+attack.color+';border-radius:50%;opacity:.8;animation:attackFlow 2s linear forwards;font-size:10px';
-  particle.textContent=attack.icon;
-  vis.appendChild(particle);
-  attackFlowEvents+=1;
-  document.getElementById('attackFlowCount').textContent=attackFlowEvents+' events';
-  setTimeout(function(){particle.remove();},2000);
-}
-
-function attackComplete(){
-  document.getElementById('attackStatus').textContent='Complete';
-  document.getElementById('attackStatus').className='pill pill-success';
-  document.getElementById('attackProgressFill').style.background='var(--green)';
-  addLog('['+new Date().toLocaleTimeString()+'] \u2705 Attack simulation complete — '+currentAttack.name+' ('+currentAttack.mitre+')');
-  setTimeout(function(){
-    document.getElementById('attackStatus').textContent='Idle';
-    document.getElementById('attackStatus').className='pill pill-ok';
-    document.getElementById('attackProgressFill').style.width='0%';
-    document.getElementById('attackProgressFill').style.background='var(--red)';
-    document.getElementById('attackTimer').textContent='00:00';
-    currentAttack=null;
-  },3000);
-}
-function showCustomModal(){
-  var pods=['traffic-camera','parking-system','healthcare-api','env-sensor','street-lighting'];
-  var podOpts=pods.map(function(p){return '<option value="'+p+'">'+p+'</option>'}).join('');
-  document.getElementById('modalContent').innerHTML=
-    '<h2>Custom Alert Injection</h2>'+
-    '<label style="font-size:12px;color:var(--text2)">Rule Name</label>'+
-    '<input id="customRule" value="Custom Security Rule" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px">'+
-    '<label style="font-size:12px;color:var(--text2)">Alert Output</label>'+
-    '<textarea id="customOutput" style="width:100%;min-height:60px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px;margin-bottom:12px">Custom security event detected in smart-city service</textarea>'+
-    '<label style="font-size:12px;color:var(--text2)">Priority</label>'+
-    '<select id="customPriority" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px"><option value="Critical">Critical</option><option value="Warning" selected>Warning</option><option value="Notice">Notice</option></select>'+
-    '<label style="font-size:12px;color:var(--text2)">Target Pod</label>'+
-    '<select id="customContainer" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px">'+podOpts+'</select>'+
-    '<label style="font-size:12px;color:var(--text2)">MITRE Technique (optional)</label>'+
-    '<input id="customMitre" placeholder="e.g. T0836" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:16px">'+
-    '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="sendCustom()">Inject Alert</button></div>';
-  document.getElementById('modalOverlay').classList.add('open');
-}
-function sendCustom(){
-  var ts=new Date().toISOString();
-  var mitre=document.getElementById('customMitre').value||'';
-  var payload={output:document.getElementById('customOutput').value,priority:document.getElementById('customPriority').value,rule:document.getElementById('customRule').value,time:ts,output_fields:{'container.name':document.getElementById('customContainer').value,'proc.cmdline':'custom-injection','mitre.technique':mitre}};
-  closeModal();
-  attackRunCount++;
-  document.getElementById('atkRunCount').textContent=attackRunCount;
-  addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
-  addLog('  CUSTOM ALERT INJECTION'+(mitre?' ['+mitre+']':''));
-  addLog('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
-  addLog('');
-  addLog('  ► STEP 1: Custom payload');
-  addLog('  │ Rule:      '+payload.rule);
-  addLog('  │ Priority:  '+payload.priority);
-  addLog('  │ Output:    '+payload.output);
-  addLog('  │ Container: '+(payload.output_fields['container.name']||'-'));
-  addLog('');
-  addLog('  ► STEP 2: Sending to IDS API → LLM analysis...');
-  var sendTime=performance.now();
-  fetch(API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    var elapsed=Math.round(performance.now()-sendTime);
-    var a=d.analysis||{};
-    var sev=d.severity||a.severity||'-';
-    var eng=d.llm_engine||a.llm_engine||'unknown';
-    addLog('');
-    addLog('  ► STEP 3: LLM Analysis Complete ('+elapsed+'ms)');
-    addLog('  ┌─ LLM Response ────────────────────────────────────────────');
-    addLog('  │ Engine:      '+eng);
-    addLog('  │ Severity:    '+sev+'/10  │  Threat: '+(d.threat_type||a.threat_type||'-'));
-    addLog('  │ Confidence:  '+(typeof a.confidence==='number'?Math.round(a.confidence*100)+'%':(a.confidence||'-')));
-    addLog('  │ Summary:     '+(d.summary||a.summary||'-'));
-    if(a.reasoning) addLog('  │ Reasoning:   '+a.reasoning);
-    if(a.business_impact) addLog('  │ Impact:      '+a.business_impact);
-    if(a.recommendations&&a.recommendations.length){
-      addLog('  │ Recommendations:');
-      a.recommendations.forEach(function(r,i){addLog('  │   '+(i+1)+'. '+r)});
-    }
-    addLog('  └──────────────────────────────────────────────────────────');
-    addLog('');
-    addLog('  ► STEP 4: Actions: '+((d.actions_taken&&d.actions_taken.length)?d.actions_taken.join(', '):'none'));
-    addLog('');
-    addLog('  ✅ Pipeline complete');
-    addLog('');
-  })
-  .catch(function(e){addLog('  ❌ ERROR: '+e.message+'\n')});
-  setTimeout(refreshAll,2000);
-  setTimeout(refreshAll,5000);
-}
-function closeModal(){document.getElementById('modalOverlay').classList.remove('open')}
-function clearAttackLog(){document.getElementById('attackLog').textContent=''}
-function addLog(msg){var el=document.getElementById('attackLog');var t=new Date().toLocaleTimeString();var isIndent=msg.startsWith('  ')||msg.startsWith('━')||msg===''||msg.startsWith('\n');var prefix=isIndent?'           ':'['+t+'] ';el.textContent+=prefix+msg+'\n';el.scrollTop=el.scrollHeight}
-
-function updateTopBar(h,gov,llm,llmDiag){
-  var cp=document.getElementById('clusterPill');
-  if(h&&h.components&&h.components.kubernetes==='connected'){cp.className='pill pill-ok';cp.textContent='K8s Connected'}else{cp.className='pill pill-err';cp.textContent='K8s Disconnected'}
-  var lp=document.getElementById('llmPill');
-  var pc=(h&&h.llm_provider_count)?h.llm_provider_count:((llm&&llm.provider_count)?llm.provider_count:0);
-  var smry=(llmDiag&&llmDiag.summary)?llmDiag.summary:{};
-  var errCount=(smry.error||0)+(smry.cooldown||0);
-  if(pc>0&&errCount===0){lp.className='pill pill-ok';lp.textContent=pc+'/'+ALL_PROVIDERS.length+' LLM OK'}
-  else if(pc>0){lp.className='pill pill-warn';lp.textContent=(smry.operational||pc)+'/'+ALL_PROVIDERS.length+' LLM ('+errCount+' issue'+(errCount>1?'s':'')+')'}
-  else{lp.className='pill pill-err';lp.textContent='No LLM'}
-  var gp=document.getElementById('govPill');
-  if(gov){var m=gov.mode||'assisted';gp.textContent=m.charAt(0).toUpperCase()+m.slice(1);gp.className='pill '+(m==='autopilot'?'pill-warn':'pill-ok')}
-  if(h&&h.uptime_seconds){document.getElementById('uptimeLabel').textContent='Uptime: '+formatDuration(h.uptime_seconds)}
-}
-
-function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML}
-function shortTime(ts){if(!ts)return'--';try{var d=new Date(ts);return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}catch(e){return'--'}}
-function formatDuration(s){if(s<60)return Math.floor(s)+'s';if(s<3600)return Math.floor(s/60)+'m '+Math.floor(s%60)+'s';var h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h+'h '+m+'m'}
-function sevBadge(sev){sev=parseInt(sev)||0;if(sev>=8)return'badge-crit';if(sev>=6)return'badge-high';if(sev>=4)return'badge-med';return'badge-low'}
-function countCB(cb){return cb&&cb.engines?Object.keys(cb.engines).length:0}
-function getCBNames(cb){return cb&&cb.engines?Object.keys(cb.engines).join(', '):'none'}
-
-if(TOKEN){showDashboard()}else{document.getElementById('loginScreen').style.display='flex'}
-</script>
 </body>
 </html>
