@@ -1,4 +1,31 @@
-"""LLM diagnostics & circuit-breaker API router."""
+"""LLM diagnostics, circuit-breaker management, and stats export API router.
+
+This module provides deep observability into the multi-provider LLM subsystem.
+The Smart City IDS supports up to six LLM providers simultaneously
+(xAI Grok, OpenAI, Anthropic, Google Gemini, Kimi, and a local rule-based
+engine).  Each provider can be in one of several states:
+
+    operational     – healthy, accepting requests
+    not_configured  – no API key set for this provider
+    cooldown        – temporarily paused after an error (auto-recovers)
+    error           – last call failed (check diagnostics for cause)
+    circuit_open    – circuit breaker tripped after repeated failures
+    recovering      – circuit breaker half-open, testing with probe requests
+
+The circuit-breaker pattern prevents cascade failures: when a provider fails
+``failure_threshold`` times consecutively, the breaker opens and no further
+requests are sent until ``recovery_timeout`` seconds elapse, at which point
+a few probe requests test recovery (half-open state).
+
+Endpoints:
+    GET  /api/llm/diagnostics       – verbose per-provider health (no auth)
+    GET  /api/llm/status            – compact provider list (auth required)
+    POST /api/circuit-breaker/reset – manually reset breakers
+    GET  /api/circuit-breaker/status – breaker state summary
+    GET  /api/rate-limiter/status   – alert-level rate limiter stats
+    POST /api/rate-limiter/reset    – reset rate limiter counters
+    GET  /api/llm-stats/export      – per-engine latency, cost, token stats
+"""
 
 import time
 
@@ -7,21 +34,54 @@ from fastapi import APIRouter, Depends
 from config import Config
 from infrastructure.auth import verify_token
 from api._state import (
-    classify_llm_error,
-    update_circuit_breaker_metrics,
+    classify_llm_error,              # Map raw error strings to human-readable messages
+    update_circuit_breaker_metrics,  # Sync breaker state → Prometheus gauges
 )
 
 router = APIRouter(tags=["llm"])
 
 
 def _deps():
+    """Retrieve LLM manager, circuit breaker, and rate limiter from shared state."""
     from api._state import llm_manager, circuit_breaker, alert_rate_limiter
     return llm_manager, circuit_breaker, alert_rate_limiter
 
 
-# ─── Health helper (reused by diagnostics) ───────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# SHARED DIAGNOSTIC BUILDER
+# ══════════════════════════════════════════════════════════════════════════════
+
 async def _build_llm_diagnostics():
-    """Collect verbose LLM provider diagnostics."""
+    """Collect verbose per-provider diagnostics for the LLM subsystem.
+
+    This function is reused by both ``GET /api/llm/diagnostics`` and the
+    ``GET /health`` endpoint (in ``api/metrics_routes.py``).
+
+    For each of the six known providers, it builds a diagnostic dict with:
+        - **status**: one of ``operational``, ``not_configured``, ``cooldown``,
+          ``error``, ``circuit_open``, ``recovering``.
+        - **reason**: human-readable explanation (powered by
+          ``classify_llm_error()`` for error messages).
+        - **configured**: whether an API key is present.
+        - **key_format_valid**: whether the key passes basic format checks.
+        - **model**: the model name configured for this provider.
+        - **attempts / successes / failures**: request counters.
+        - **last_error**: raw error message from the most recent failure.
+        - **cooldown_remaining_seconds**: seconds until cooldown expires.
+        - **circuit_breaker_state**: closed / open / half_open.
+
+    The diagnostic state-machine priority:
+        1. ``local`` engine → always operational (no API key needed).
+        2. Not configured → ``not_configured``.
+        3. In cooldown → ``cooldown``.
+        4. All requests failed → ``error``.
+        5. Circuit breaker open → ``circuit_open``.
+        6. Circuit breaker half-open → ``recovering``.
+        7. Otherwise → ``operational``.
+
+    Returns:
+        Dict[str, dict] keyed by provider name.
+    """
     llm_manager, circuit_breaker, _ = _deps()
     all_known = ["xai", "anthropic", "openai", "gemini", "kimi", "local"]
     key_validation = Config.get_valid_engines() if hasattr(Config, "get_valid_engines") else {}
@@ -42,6 +102,7 @@ async def _build_llm_diagnostics():
             successes_count = details.get("successes", 0)
             failures_count = details.get("failures", 0)
 
+            # ── Determine diagnostic status (state machine) ──────────────
             if prov_name == "local":
                 diag_status = "operational"
                 reason = "Rule-based engine, always available (no API key needed)"
@@ -86,7 +147,7 @@ async def _build_llm_diagnostics():
                 "circuit_breaker_state": cb_state,
             }
 
-    # Fill any missing providers
+    # Fill any missing providers with "not_configured" defaults.
     for name in all_known:
         if name not in diags:
             diags[name] = {
@@ -106,9 +167,22 @@ async def _build_llm_diagnostics():
     return diags
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/api/llm/diagnostics")
 async def llm_diagnostics_endpoint():
-    """Verbose LLM provider diagnostics. No auth required."""
+    """Verbose LLM provider diagnostics — no authentication required.
+
+    Designed for quick troubleshooting: operators can curl this endpoint
+    to see why alerts aren't being analysed.  The ``summary`` section gives
+    at-a-glance counts of operational / error / cooldown / unconfigured
+    providers.
+
+    Returns:
+        {"summary": {…}, "providers": {…}, "circuit_breaker_states": {…}}
+    """
     diags = await _build_llm_diagnostics()
     _, circuit_breaker, _ = _deps()
     cb_states = {k: v.get("state", "unknown") for k, v in circuit_breaker.engine_stats.items()}
@@ -123,7 +197,15 @@ async def llm_diagnostics_endpoint():
 
 @router.get("/api/llm/status")
 async def get_llm_status(user: str = Depends(verify_token)):
-    """Get LLM provider status."""
+    """Get LLM provider status (authenticated).
+
+    Returns the same data as ``llm_manager.get_status()`` — provider count,
+    list of configured provider names, priority order, and per-provider
+    details (model, attempts, successes, failures, cooldown).
+
+    Returns:
+        {"provider_count": int, "providers": [...], "details": {…}}
+    """
     llm_manager, _, _ = _deps()
     if not llm_manager:
         return {
@@ -138,7 +220,22 @@ async def get_llm_status(user: str = Depends(verify_token)):
 
 @router.post("/api/circuit-breaker/reset")
 async def reset_circuit_breakers(engine: str = None):
-    """Reset circuit breakers to allow LLM engines to retry."""
+    """Reset circuit breakers to allow LLM engines to retry.
+
+    If ``engine`` is provided, only that engine's breaker is reset.
+    Otherwise, all breakers are reset to ``closed`` state with zero
+    failure counts.
+
+    This is an administrative action — use after fixing the root cause
+    (e.g. adding billing credits, fixing API key) to immediately re-enable
+    a provider without waiting for the recovery timeout.
+
+    Args:
+        engine: Optional engine name (e.g. "xai", "openai").
+
+    Returns:
+        {"status": "success", "results": {engine: "old_state → closed"}, …}
+    """
     _, circuit_breaker, _ = _deps()
     engines_to_reset = [engine] if engine else list(circuit_breaker.engine_stats.keys())
     reset_results = {}
@@ -149,6 +246,7 @@ async def reset_circuit_breakers(engine: str = None):
             reset_results[eng] = f"{old_state} → closed"
         else:
             reset_results[eng] = "not found"
+    # Sync Prometheus gauges with the new state.
     update_circuit_breaker_metrics()
     return {
         "status": "success",
@@ -160,7 +258,15 @@ async def reset_circuit_breakers(engine: str = None):
 
 @router.get("/api/circuit-breaker/status")
 async def get_circuit_breaker_status():
-    """Get detailed circuit breaker status for all LLM engines."""
+    """Get detailed circuit breaker status for all LLM engines.
+
+    Returns per-engine failure/success counts, current state, and global
+    thresholds.  The ``summary`` section counts how many engines are in
+    each state (open/closed/half_open).
+
+    Returns:
+        {"engines": {…}, "failure_threshold": int, "recovery_timeout_seconds": int, "summary": {…}}
+    """
     _, circuit_breaker, _ = _deps()
     return {
         "engines": circuit_breaker.engine_stats,
@@ -177,7 +283,15 @@ async def get_circuit_breaker_status():
 
 @router.get("/api/rate-limiter/status")
 async def get_rate_limiter_status():
-    """Get alert rate limiter status and statistics."""
+    """Get alert-level rate limiter status and statistics.
+
+    The alert rate limiter is separate from the HTTP rate limiter — it
+    throttles alerts per-rule and per-source to prevent a flood of identical
+    alerts from consuming LLM API credits.
+
+    Returns:
+        {"config": {…}, "stats": {…}, "status": "healthy" | "high_throttle_rate"}
+    """
     _, _, alert_rate_limiter = _deps()
     if not alert_rate_limiter:
         return {"error": "Rate limiter not initialized"}
@@ -196,13 +310,21 @@ async def get_rate_limiter_status():
             "throttle_rate_percent": round(stats.throttle_rate * 100, 2),
             "throttle_reasons": dict(stats.throttle_reasons),
         },
+        # Flag unhealthy if more than half of alerts are being throttled.
         "status": "healthy" if stats.throttle_rate < 0.5 else "high_throttle_rate",
     }
 
 
 @router.post("/api/rate-limiter/reset")
 async def reset_rate_limiter():
-    """Reset rate limiter counters (admin use only)."""
+    """Reset alert rate limiter counters (administrative action).
+
+    Clears all per-rule and per-source counters.  Use this after fixing
+    the source of an alert flood.
+
+    Returns:
+        {"status": "success", "message": "Rate limiter counters reset"}
+    """
     _, _, alert_rate_limiter = _deps()
     if not alert_rate_limiter:
         return {"error": "Rate limiter not initialized"}
@@ -212,7 +334,20 @@ async def reset_rate_limiter():
 
 @router.get("/api/llm-stats/export")
 async def export_llm_stats():
-    """Export per-engine LLM performance stats for paper figures."""
+    """Export per-engine LLM performance stats for academic paper figures.
+
+    Returns detailed latency percentiles (p50, p95, p99), cost estimates,
+    token counts, and success rates for each LLM provider.  Designed to
+    be consumed by matplotlib/seaborn for generating performance comparison
+    charts in the dissertation.
+
+    Cost estimation uses a fixed per-call cost model defined in
+    ``api._state.LLM_COST_PER_CALL`` — these are approximate averages
+    based on token usage patterns observed during development.
+
+    Returns:
+        {"engines": {…}, "manager_runtime_stats": {…}, "cost_model": {…}}
+    """
     import statistics
     from api._state import llm_provider_stats, LLM_COST_PER_CALL, llm_manager
 
@@ -231,12 +366,15 @@ async def export_llm_stats():
             "successes": succ,
             "failures": fail,
             "success_rate": round(succ / n, 4) if n else 0,
+            # Latency percentiles (seconds).
             "avg_latency_s": round(statistics.mean(lats), 4) if lats else 0,
             "p50_latency_s": round(statistics.median(lats), 4) if lats else 0,
             "p95_latency_s": round(sorted(lats)[int(len(lats) * 0.95)] if len(lats) >= 2 else (lats[0] if lats else 0), 4),
             "p99_latency_s": round(sorted(lats)[int(len(lats) * 0.99)] if len(lats) >= 2 else (lats[0] if lats else 0), 4),
+            # Cost estimates (USD).
             "total_estimated_cost_usd": total_cost,
             "cost_per_call_usd": LLM_COST_PER_CALL.get(engine, 0.005),
+            # Token estimates.
             "prompt_tokens_total": prompt_tokens,
             "completion_tokens_total": completion_tokens,
             "tokens_total": total_tokens,
@@ -244,6 +382,7 @@ async def export_llm_stats():
             "avg_cost_per_request_usd": round(total_cost / n, 6) if n else 0,
         }
 
+    # Include raw manager runtime stats for additional context.
     mgr_stats = llm_manager.runtime_stats if llm_manager else {}
     return {
         "engines": engines_out,

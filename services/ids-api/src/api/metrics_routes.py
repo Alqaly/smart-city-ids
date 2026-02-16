@@ -1,4 +1,31 @@
-"""Metrics, safety, and system status API router."""
+"""Metrics, safety, production status, and Prometheus exposition API router.
+
+This module provides the observability layer of the Smart City IDS.
+It aggregates data from every subsystem — database, LLM providers,
+circuit breakers, deduplication cache, rate limiters, request queue,
+and governance engine — and exposes it through REST and Prometheus
+endpoints.
+
+Endpoint overview:
+    GET  /health                   – deep component health check
+    GET  /api/safety               – automation-mode, thresholds, cache
+    GET  /api/production-status    – rate-limiter/cb/queue health booleans
+    GET  /api/pipeline-overview    – 5-stage pipeline strip for dashboard
+    GET  /api/metrics              – aggregate JSON metrics blob
+    GET  /api/db/stats             – database storage statistics
+    GET  /api/deduplicator-stats   – dedup cache hit-rate and cost savings
+    POST /api/deduplicator/clear   – flush dedup cache (auth required)
+    GET  /metrics                  – Prometheus text exposition format
+
+Design notes:
+    * ``_deps()`` lazily imports all shared-state objects and returns them
+      in a dict to avoid circular imports at module load time.
+    * ``/health`` reuses ``_build_llm_diagnostics()`` from ``api.llm``
+      to give a single-call view of the entire system.
+    * ``/api/pipeline-overview`` computes per-stage throughput in
+      alerts/minute — intended for the React dashboard's horizontal
+      pipeline strip.
+"""
 
 from datetime import datetime
 from typing import Optional
@@ -14,7 +41,20 @@ from infrastructure.metrics import PROM_UPTIME_SECONDS
 router = APIRouter(tags=["metrics"])
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# LAZY DEPENDENCY INJECTION
+# ══════════════════════════════════════════════════════════════════════════════
+
 def _deps():
+    """Lazily import all shared-state objects to avoid circular imports.
+
+    Returns a dict with short keys mapped to the singleton instances
+    initialised in ``main.py`` and stored in ``api._state``.
+
+    Returns:
+        dict with keys: cache, fatigue, db, dedup, metrics, rate_limiter,
+        rq, cb, refresh_iot, update_cb.
+    """
     from api._state import (
         alert_cache,
         alert_fatigue_stats,
@@ -28,30 +68,57 @@ def _deps():
         update_circuit_breaker_metrics,
     )
     return {
-        "cache": alert_cache,
-        "fatigue": alert_fatigue_stats,
-        "db": db,
-        "dedup": deduplicator,
-        "metrics": metrics_dict,
-        "rate_limiter": rate_limiter,
-        "rq": request_queue,
-        "cb": circuit_breaker,
-        "refresh_iot": refresh_iot_active_metric,
-        "update_cb": update_circuit_breaker_metrics,
+        "cache": alert_cache,            # AlertCache — LRU + TTL dedup for SSE
+        "fatigue": alert_fatigue_stats,  # dict — alert fatigue reduction counters
+        "db": db,                        # DatabaseManager — async DB wrapper
+        "dedup": deduplicator,           # AlertDeduplicator — fingerprint-based dedup
+        "metrics": metrics_dict,         # dict — in-memory aggregate metrics
+        "rate_limiter": rate_limiter,    # RateLimiter — HTTP-level token bucket
+        "rq": request_queue,            # RequestQueue — bounded async queue
+        "cb": circuit_breaker,          # CircuitBreaker — per-engine LLM breakers
+        "refresh_iot": refresh_iot_active_metric,      # callable → int (active device count)
+        "update_cb": update_circuit_breaker_metrics,   # callable — sync breaker state → Prometheus
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# HEALTH CHECK
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/health")
 async def health():
-    """Health check with component status."""
+    """Deep component health check — used by Kubernetes liveness/readiness probes.
+
+    Checks every subsystem (LLM providers, K8s connection, database,
+    Falco, Suricata) and returns a unified status object.  The response
+    includes the full LLM diagnostics from ``api.llm._build_llm_diagnostics``
+    so that a single GET can reveal the operational state of all six
+    LLM providers.
+
+    Returns:
+        {
+            "status": "healthy",
+            "components": { … per-subsystem status strings … },
+            "llm_diagnostics": { … per-provider diagnostic dicts … },
+            "uptime_seconds": float,
+            "total_alerts_processed": int,
+            …
+        }
+    """
     d = _deps()
+
+    # ── Compute uptime and update Prometheus gauge ────────────────────────
     uptime = (datetime.now() - datetime.fromisoformat(d["metrics"]["started_at"])).total_seconds()
     PROM_UPTIME_SECONDS.set(uptime)
 
+    # ── LLM provider diagnostics (reused from api.llm) ───────────────────
     from api.llm import _build_llm_diagnostics
     from api._state import llm_manager, k8s_automation
 
     llm_diagnostics = await _build_llm_diagnostics()
+
+    # Build a compact one-line status string per provider for the
+    # ``components`` section (full diagnostics are in ``llm_diagnostics``).
     llm_status = {}
     for prov_name, diag in llm_diagnostics.items():
         from api._state import circuit_breaker
@@ -65,6 +132,7 @@ async def health():
             else "not configured"
         )
 
+    # ── Database and optional subsystem status ────────────────────────────
     db_status = "postgresql" if not d["db"].use_memory else "memory-fallback"
     suricata_status = "enabled" if Config.SURICATA_ENABLED else "disabled"
 
@@ -86,9 +154,24 @@ async def health():
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# SAFETY & PRODUCTION STATUS
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/api/safety")
 async def get_safety_status():
-    """Get safety controls status — for demo verification."""
+    """Get safety controls status — used for demo pre-flight verification.
+
+    Returns the current automation mode (``autopilot`` | ``assisted`` |
+    ``manual`` | ``dry-run``), the list of protected services, alert
+    cache statistics, and severity thresholds.
+
+    Operators should check this before a live demo: if ``automation_mode``
+    is not ``dry-run``, Kubernetes actions may actually execute.
+
+    Returns:
+        {"automation_mode": str, "protected_services": list, "cache_stats": dict, …}
+    """
     d = _deps()
     return {
         "automation_mode": Config.AUTOMATION_MODE,
@@ -104,7 +187,17 @@ async def get_safety_status():
 
 @router.get("/api/production-status")
 async def get_production_status():
-    """Get production controls status — for monitoring and Grafana."""
+    """Get production health indicators — consumed by Grafana dashboards.
+
+    Aggregates rate-limiter, circuit-breaker, request-queue, and cache
+    stats with boolean health flags:
+        - ``rate_limit_healthy``: fewer than 10% of requests rejected.
+        - ``circuit_breakers_healthy``: no engine in ``open`` state.
+        - ``queue_healthy``: queue fill level below 80%.
+
+    Returns:
+        {"rate_limiter": {…}, "circuit_breaker": {…}, "health": {…}, …}
+    """
     d = _deps()
     return {
         "rate_limiter": d["rate_limiter"].stats(),
@@ -114,38 +207,72 @@ async def get_production_status():
         "protected_services": Config.PROTECTED_SERVICES,
         "automation_mode": Config.AUTOMATION_MODE,
         "health": {
+            # Rate-limiter healthy if rejection rate < 10%.
             "rate_limit_healthy": (
                 d["rate_limiter"].rejected_requests < d["rate_limiter"].total_requests * 0.1
                 if d["rate_limiter"].total_requests > 0
                 else True
             ),
+            # All circuit breakers must be closed or half-open.
             "circuit_breakers_healthy": all(
                 s["state"] != "open" for s in d["cb"].engine_stats.values()
             ),
+            # Queue healthy if below 80% capacity.
             "queue_healthy": d["rq"].queue_size < d["rq"].max_queue_size * 0.8,
         },
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PIPELINE OVERVIEW  (5-stage dashboard strip)
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/api/pipeline-overview")
 async def pipeline_overview():
-    """Compact stage-by-stage operational view for dashboard pipeline strip."""
+    """Compact stage-by-stage operational view for the React dashboard pipeline strip.
+
+    Computes real-time throughput (alerts/minute) and latency for each of
+    the five processing stages:
+
+        1. **Falco Alerts** — runtime security alerts from Falco.
+        2. **Suricata Alerts** — network IDS alerts from Suricata.
+        3. **IDS Ingest + Dedup** — combined ingest with dedup hit-rate.
+        4. **LLM / Local Analysis** — analysis engine throughput and p95.
+        5. **Governance + K8s Actions** — human-review vs auto-handled count.
+
+    Also includes an ``alert_fatigue`` section showing how many raw alerts
+    were reduced to human-review items (the core metric for the dissertation's
+    alert-fatigue-reduction claim).
+
+    Returns:
+        {"stages": [{…}, …], "alert_fatigue": {…}}
+    """
     from governance import get_governance_status
     from api.llm import export_llm_stats
 
     d = _deps()
+
+    # ── Gather raw counts from the database ───────────────────────────────
     db_stats = d["db"].get_stats()
     total_alerts = db_stats.get("total_alerts", 0)
     by_source = db_stats.get("alerts_by_source", {})
+
+    # Total runtime in minutes (min 1.0 to avoid division by zero).
     total_minutes = max(
         1.0,
         (datetime.now() - datetime.fromisoformat(d["metrics"]["started_at"])).total_seconds() / 60.0,
     )
+
+    # ── LLM engine stats for Stage 4 ─────────────────────────────────────
     llm_stats = await export_llm_stats()
     engine_stats = llm_stats.get("engines", {})
     llm_requests = sum(v.get("total_requests", 0) for v in engine_stats.values())
     llm_p95 = max((v.get("p95_latency_s", 0.0) for v in engine_stats.values()), default=0.0)
+
+    # ── Deduplication stats for Stage 3 ───────────────────────────────────
     dedup_stats = d["dedup"].get_stats() if d["dedup"] else {"hit_rate_percent": 0}
+
+    # ── Governance stats for Stage 5 ──────────────────────────────────────
     gov = get_governance_status()
     human_review = d["fatigue"]["human_review_required_total"]
     auto_handled = d["fatigue"]["auto_handled_total"]
@@ -153,39 +280,65 @@ async def pipeline_overview():
 
     return {
         "stages": [
+            # Stage 1: Falco runtime security alerts.
             {"id": "falco", "label": "Falco Alerts", "rate_per_minute": round(by_source.get("falco", 0) / total_minutes, 2), "p95_latency_ms": 0, "status": "green"},
+            # Stage 2: Suricata network IDS alerts.
             {"id": "suricata", "label": "Suricata Alerts", "rate_per_minute": round(by_source.get("suricata", 0) / total_minutes, 2), "p95_latency_ms": 0, "status": "green" if by_source.get("suricata", 0) > 0 else "yellow"},
+            # Stage 3: Ingest and fingerprint-based deduplication.
             {"id": "ingest", "label": "IDS Ingest + Dedup", "rate_per_minute": round(total_alerts / total_minutes, 2), "p95_latency_ms": 0, "status": "green", "dedup_hit_rate_percent": dedup_stats.get("hit_rate_percent", 0)},
+            # Stage 4: LLM or local rule-based analysis.
             {"id": "llm", "label": "LLM / Local Analysis", "rate_per_minute": round(llm_requests / total_minutes, 2), "p95_latency_ms": int(llm_p95 * 1000), "status": "green" if llm_requests > 0 else "yellow"},
+            # Stage 5: HITL governance decisions and K8s automated actions.
             {"id": "gov", "label": "Governance + K8s Actions", "rate_per_minute": round(actions_total / total_minutes, 2), "p95_latency_ms": 0, "status": "green", "human_review_required": human_review, "auto_handled": auto_handled},
         ],
+        # Alert fatigue reduction metrics — core dissertation contribution.
         "alert_fatigue": {
             "raw_total": d["fatigue"]["raw_total"],
             "after_dedup_total": d["fatigue"]["after_dedup_total"],
             "llm_triaged_total": d["fatigue"]["llm_triaged_total"],
             "human_review_required_total": human_review,
             "auto_handled_total": auto_handled,
+            # Reduction percentage: how many raw alerts were handled
+            # without human intervention.
             "reduction_percent": round((1 - (human_review / max(1, d["fatigue"]["raw_total"]))) * 100, 2),
         },
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# AGGREGATE METRICS & DATABASE STATS
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/api/metrics")
 async def get_metrics():
-    """Get aggregate metrics."""
+    """Get aggregate JSON metrics blob — consumed by the React dashboard.
+
+    Merges in-memory counters with database statistics and Prometheus
+    restore data (alerts-by-threat-type, alerts-by-severity histograms).
+    Also refreshes the ``iot_devices_active`` gauge.
+
+    Returns:
+        dict with keys: total_alerts, uptime_seconds, alerts_by_source,
+        alerts_by_threat_type, alerts_by_severity, iot_devices_active, …
+    """
     d = _deps()
     uptime = (datetime.now() - datetime.fromisoformat(d["metrics"]["started_at"])).total_seconds()
     d["metrics"]["uptime_seconds"] = uptime
+
+    # Merge latest database stats into the metrics dict.
     db_stats = d["db"].get_stats()
     d["metrics"]["total_alerts"] = db_stats["total_alerts"]
     d["metrics"]["alerts_by_source"] = db_stats["alerts_by_source"]
     d["metrics"]["storage_type"] = db_stats["storage_type"]
+
+    # Attempt to restore histogram data from persistent storage.
     try:
         restore_data = d["db"].get_prometheus_restore_data()
         d["metrics"]["alerts_by_threat_type"] = restore_data.get("alerts_by_threat_type", {})
         d["metrics"]["alerts_by_severity"] = restore_data.get("alerts_by_severity", {})
     except Exception:
-        pass
+        pass  # Non-critical — dashboard will show partial data.
+
     PROM_UPTIME_SECONDS.set(uptime)
     d["metrics"]["iot_devices_active"] = d["refresh_iot"]()
     return d["metrics"]
@@ -193,14 +346,34 @@ async def get_metrics():
 
 @router.get("/api/db/stats")
 async def get_db_stats():
-    """Get database statistics."""
+    """Get raw database storage statistics (table row counts, storage type).
+
+    Returns:
+        dict from ``DatabaseManager.get_stats()`` — includes total_alerts,
+        alerts_by_source, storage_type, and table-level counts.
+    """
     from api._state import db
     return db.get_stats()
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# DEDUPLICATION CACHE
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/api/deduplicator-stats")
 async def get_dedup_stats():
-    """Get alert deduplication cache statistics."""
+    """Get alert deduplication cache statistics with cost-savings estimates.
+
+    The deduplicator uses SHA-256 fingerprints of (rule + source + key fields)
+    to detect duplicate alerts.  Cache hits skip LLM analysis entirely,
+    saving API call costs.
+
+    Cost model: assumes $0.005 per LLM API call.  The ``cost_saved_usd``
+    field shows how much was saved by deduplication.
+
+    Returns:
+        {…cache stats…, "hit_rate_percent": float, "cost_saved_usd": float, …}
+    """
     d = _deps()
     if not d["dedup"]:
         return {"error": "Deduplicator not initialized"}
@@ -208,15 +381,19 @@ async def get_dedup_stats():
     total = stats.get("total_alerts", 0)
     hits = stats.get("hits", 0)
     misses = stats.get("misses", 0)
+
+    # Estimated cost per LLM API call (average across providers).
     cost_per_call = 0.005
+
     if total > 0:
-        cost_without = total * cost_per_call
-        cost_with = misses * cost_per_call
-        cost_saved = cost_without - cost_with
+        cost_without = total * cost_per_call      # Cost if every alert hit LLM.
+        cost_with = misses * cost_per_call         # Actual cost (only misses hit LLM).
+        cost_saved = cost_without - cost_with      # Savings from dedup cache hits.
         hit_rate = round((hits / total) * 100, 1)
     else:
         cost_without = cost_with = cost_saved = 0
         hit_rate = 0
+
     return {
         **stats,
         "hit_rate_percent": hit_rate,
@@ -228,7 +405,15 @@ async def get_dedup_stats():
 
 @router.post("/api/deduplicator/clear")
 async def clear_dedup_cache(token=Depends(verify_token)):
-    """Clear alert deduplication cache (administrative)."""
+    """Clear alert deduplication cache — requires authentication.
+
+    Removes all cached fingerprints so that previously-seen alerts will
+    be re-analysed by the LLM on next occurrence.  Use after changing
+    LLM prompts or analysis logic.
+
+    Returns:
+        {"status": "success", "cleared_fingerprints": int, "previous_hit_rate": str}
+    """
     d = _deps()
     if not d["dedup"]:
         return {"error": "Deduplicator not initialized"}
@@ -241,12 +426,27 @@ async def clear_dedup_cache(token=Depends(verify_token)):
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PROMETHEUS EXPOSITION
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/metrics")
 async def prometheus_metrics():
-    """Prometheus exposition endpoint."""
+    """Prometheus text exposition endpoint — scraped by Prometheus every 15s.
+
+    Before generating the text output, this endpoint refreshes three sets
+    of gauges to ensure Prometheus sees current values:
+        1. ``PROM_UPTIME_SECONDS`` — application uptime.
+        2. Circuit-breaker state gauges (via ``update_cb``).
+        3. IoT active-device count (via ``refresh_iot``).
+
+    Returns:
+        HTTP 200 with ``text/plain; version=0.0.4`` content type
+        (Prometheus exposition format).
+    """
     d = _deps()
     uptime = (datetime.now() - datetime.fromisoformat(d["metrics"]["started_at"])).total_seconds()
     PROM_UPTIME_SECONDS.set(uptime)
-    d["update_cb"]()
-    d["refresh_iot"]()
+    d["update_cb"]()    # Sync circuit-breaker states → Prometheus gauges.
+    d["refresh_iot"]()  # Update active IoT device count gauge.
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
