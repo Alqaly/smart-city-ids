@@ -139,5 +139,13 @@ async def serve_ui():
     if static:
         ui_file = os.path.join(static, "index.html")
         if os.path.exists(ui_file):
-            return FileResponse(ui_file, media_type="text/html")
+            return FileResponse(
+                ui_file,
+                media_type="text/html",
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                },
+            )
     return {"message": "UI not found"}
