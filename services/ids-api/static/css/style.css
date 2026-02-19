@@ -491,3 +491,31 @@ tr:hover td { background: rgba(0, 212, 255, .03); }
 @media (max-width: 900px) {
   .row { grid-template-columns: 1fr; }
 }
+
+/* ── MITRE ATT&CK Badge ──────────────────────────────────────────────────── */
+.mitre-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(30, 58, 95, .8);
+  color: #00d4ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.82em;
+  font-weight: 600;
+  border: 1px solid rgba(0, 212, 255, .2);
+  white-space: nowrap;
+}
+html.light .mitre-badge {
+  background: rgba(30, 58, 95, .1);
+  color: #0d6efd;
+  border-color: rgba(13, 110, 253, .2);
+}
+
+/* ── Audio Alert Pulse ────────────────────────────────────────────────────── */
+@keyframes alertPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .4); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+}
+.alert-pulse { animation: alertPulse 1s ease-in-out 3; }

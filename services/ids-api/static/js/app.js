@@ -154,6 +154,7 @@ function refreshAll() {
         break;
       case 'iot':
         loadIoT();
+        loadIoTScale();
         break;
       case 'llm':
         renderLLMTab(llmFromHealth, cb, dedup, llmDiag);
@@ -207,7 +208,7 @@ function initTabSwitching() {
       switch (tabId) {
         case 'alerts':     loadAlerts(); break;
         case 'kubernetes': loadK8s(); break;
-        case 'iot':        loadIoT(); break;
+        case 'iot':        loadIoT(); loadIoTScale(); break;
         case 'llm':
         case 'governance':
         case 'threats':
@@ -283,6 +284,161 @@ window.clearAttackLog = clearAttackLog;
 window.loadAlerts = loadAlerts;
 window.loadK8s = loadK8s;
 window.loadIoT = loadIoT;
+
+// ══════════════════════════════════════════════════════════════════════════
+// Audio Alerts — plays beep + speech synthesis for critical (sev >= 8)
+// ══════════════════════════════════════════════════════════════════════════
+
+let audioAlertsEnabled = localStorage.getItem('ids_audio') === 'true';
+
+function updateAudioBtn() {
+  const btn = document.getElementById('audioToggleBtn');
+  if (btn) btn.innerHTML = audioAlertsEnabled ? '&#x1F50A;' : '&#x1F507;';
+}
+
+function toggleAudioAlerts() {
+  audioAlertsEnabled = !audioAlertsEnabled;
+  localStorage.setItem('ids_audio', audioAlertsEnabled);
+  updateAudioBtn();
+}
+window.toggleAudioAlerts = toggleAudioAlerts;
+updateAudioBtn();
+
+/**
+ * Play a short alert beep using the Web Audio API.
+ */
+function playAlertBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'square';
+    gain.gain.value = 0.15;
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+    setTimeout(() => {
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.frequency.value = 1200;
+      osc2.type = 'square';
+      gain2.gain.value = 0.15;
+      osc2.start();
+      osc2.stop(ctx.currentTime + 0.2);
+    }, 200);
+  } catch { /* Audio not available */ }
+}
+
+/**
+ * Speak an alert using the Web Speech API.
+ */
+function speakAlert(severity, threatType, container) {
+  try {
+    if (!window.speechSynthesis) return;
+    const msg = new SpeechSynthesisUtterance();
+    msg.text = `Critical alert. Severity ${severity}. ${threatType || 'Unknown threat'} detected on ${container || 'IoT device'}.`;
+    msg.rate = 1.1;
+    msg.volume = 0.8;
+    window.speechSynthesis.speak(msg);
+  } catch { /* Speech not available */ }
+}
+
+/**
+ * Called by the SSE handler when a new alert arrives.
+ * Plays audio if the alert is critical and audio is enabled.
+ */
+function handleAudioAlert(alertData) {
+  if (!audioAlertsEnabled) return;
+  const sev = alertData.severity || 0;
+  if (sev >= 8) {
+    playAlertBeep();
+    speakAlert(sev, alertData.threat_type, alertData.container_name);
+    // Pulse the topbar
+    const topbar = document.querySelector('.topbar');
+    if (topbar) {
+      topbar.classList.add('alert-pulse');
+      setTimeout(() => topbar.classList.remove('alert-pulse'), 3000);
+    }
+  }
+}
+
+// Expose for SSE handler in alerts.js
+window._handleAudioAlert = handleAudioAlert;
+
+// ══════════════════════════════════════════════════════════════════════════
+// IoT Fleet Scaling (UI control)
+// ══════════════════════════════════════════════════════════════════════════
+
+function scaleAllIoT() {
+  const slider = document.getElementById('iotScaleSlider');
+  const statusEl = document.getElementById('iotScaleStatus');
+  const replicas = parseInt(slider?.value || '3', 10);
+  statusEl.innerHTML = '<span style="color:var(--yellow)">Scaling to ' + replicas + ' replicas...</span>';
+
+  api.setIoTScale(replicas).then(res => {
+    if (!res || res.error) {
+      statusEl.innerHTML = '<span style="color:var(--red)">Error: ' + (res?.error || 'Failed') + '</span>';
+      return;
+    }
+    statusEl.innerHTML = '<span style="color:var(--green)">All services scaled to ' + replicas + ' replicas</span>';
+    setTimeout(loadIoTScale, 2000);
+    setTimeout(loadIoT, 3000);
+  }).catch(() => {
+    statusEl.innerHTML = '<span style="color:var(--red)">Network error</span>';
+  });
+}
+window._scaleAllIoT = scaleAllIoT;
+
+function loadIoTScale() {
+  api.getIoTScale().then(res => {
+    if (!res || !res.services) return;
+    const el = document.getElementById('iotScaleDetail');
+    if (!el) return;
+    let html = '';
+    const services = res.services;
+    for (const [svc, info] of Object.entries(services)) {
+      const ready = info.ready || 0;
+      const total = info.replicas || 0;
+      const color = ready === total ? 'var(--green)' : ready > 0 ? 'var(--yellow)' : 'var(--red)';
+      html += '<div style="background:var(--bg);border-radius:6px;padding:8px 12px;border:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">' +
+        '<span style="font-size:12px;color:var(--text2)">' + svc + '</span>' +
+        '<span style="font-weight:700;color:' + color + '">' + ready + '/' + total + '</span></div>';
+    }
+    el.innerHTML = html;
+    // Update slider to match
+    const slider = document.getElementById('iotScaleSlider');
+    const valEl = document.getElementById('iotScaleValue');
+    const firstSvc = Object.values(services)[0];
+    if (firstSvc && slider) {
+      slider.value = firstSvc.replicas;
+      if (valEl) valEl.textContent = firstSvc.replicas;
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Chaos Mode (trigger attack pipeline from dashboard)
+// ══════════════════════════════════════════════════════════════════════════
+
+function startChaos(mode) {
+  const log = document.getElementById('attackLog');
+  if (log) log.textContent += '\n[' + new Date().toLocaleTimeString() + '] \uD83D\uDD25 CHAOS MODE (' + mode + ') — triggering attack-iot-pipeline.sh...\n';
+
+  api.startChaos(mode).then(res => {
+    if (!res) { if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u274C Network error\n'; return; }
+    if (res.error) { if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u274C ' + res.error + '\n'; return; }
+    if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u2705 Chaos started — run_id: ' + res.run_id + ' (pid ' + res.pid + ')\n';
+    if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] Watch the Live Pipeline Feed for real-time alert processing\n\n';
+    if (log) log.scrollTop = log.scrollHeight;
+  }).catch(e => {
+    if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u274C ' + e.message + '\n';
+  });
+}
+window._startChaos = startChaos;
 
 /**
  * Dark/Light theme toggle.

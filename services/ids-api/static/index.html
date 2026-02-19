@@ -61,6 +61,7 @@
       <span id="govPill" class="pill pill-ok">Assisted Mode</span>
       <span style="color:var(--text3);font-size:12px" id="uptimeLabel">Uptime: --</span>
       <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light theme" id="themeToggleBtn">&#x1F319;</button>
+      <button class="theme-toggle" onclick="toggleAudioAlerts()" title="Toggle Audio Alerts" id="audioToggleBtn" style="font-size:12px">&#x1F507;</button>
       <button onclick="doLogout()">Sign Out</button>
     </div>
   </div>
@@ -175,7 +176,7 @@
       </div>
       <div class="card-body no-pad">
         <table>
-          <thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>Severity</th><th>Confidence</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>MITRE</th><th></th>Severity</th><th>Confidence</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead>
           <tbody id="alertsTable"></tbody>
         </table>
       </div>
@@ -271,6 +272,26 @@
        ═════════════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="tab-iot">
     <div class="stat-grid" id="iotStats"></div>
+
+    <!-- IoT Fleet Scaling Controls -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h3>&#x2699;&#xFE0F; Fleet Scaling</h3>
+        <span style="font-size:11px;color:var(--text3);margin-left:8px">Scale IoT emulator replicas up/down</span>
+      </div>
+      <div class="card-body">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="font-size:12px;color:var(--text2)">Replicas per service:</label>
+            <input type="range" id="iotScaleSlider" min="1" max="10" value="3" style="width:140px;accent-color:var(--accent)" oninput="document.getElementById('iotScaleValue').textContent=this.value">
+            <span id="iotScaleValue" style="font-weight:700;font-size:16px;color:var(--accent);min-width:20px">3</span>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="window._scaleAllIoT()">Scale All</button>
+          <span id="iotScaleStatus" style="font-size:12px;color:var(--text3)"></span>
+        </div>
+        <div id="iotScaleDetail" style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px"></div>
+      </div>
+    </div>
 
     <!-- Protocol Emulator Service Cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px" id="iotServiceCards">
@@ -457,6 +478,8 @@
             <div id="attackProgressFill" class="progress-fill" style="width:0%;background:var(--red)"></div>
           </div>
           <span id="attackTimer" style="font-size:12px;color:var(--text3);font-family:monospace">00:00</span>
+          <button class="btn btn-sm" style="background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;border:none;padding:6px 16px;white-space:nowrap" onclick="window._startChaos('quick')" title="Run 5 fast MITRE ATT&CK scenarios through the full pipeline">&#x1F525; Chaos Mode</button>
+          <button class="btn btn-outline btn-sm" onclick="window._startChaos('full')" title="Run all 13 scenarios (takes ~60s)">Full (13)</button>
         </div>
 
         <div id="attackCategoryFilter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>

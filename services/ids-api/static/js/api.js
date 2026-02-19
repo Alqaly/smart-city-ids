@@ -155,7 +155,17 @@ export const api = {
       }),
     }),
   getFeedbackStats: () => requestNoAuth('/api/llm/feedback/stats'),
-};
+  // ── IoT Fleet Scaling ──────────────────────────────────────────────
+  getIoTScale:  () => requestNoAuth('/api/iot/scale'),
+  setIoTScale:  (replicas, service) => {
+    let url = `/api/iot/scale?replicas=${replicas}`;
+    if (service) url += `&service=${service}`;
+    return requestNoAuth(url, { method: 'POST' });
+  },
+
+  // ── Chaos Mode ─────────────────────────────────────────────────────
+  startChaos:   (mode = 'quick') => requestNoAuth(`/api/demo/chaos?mode=${mode}`, { method: 'POST' }),
+  getChaosStatus: () => requestNoAuth('/api/demo/chaos/status'),};
 
 /**
  * Fetch all overview data in parallel — used by refreshAll().

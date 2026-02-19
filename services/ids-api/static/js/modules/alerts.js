@@ -90,8 +90,16 @@ export function loadAlerts() {
         `<td>${shortTime(a.timestamp)}</td>` +
         `<td><code style="font-size:11px">${esc(traceId)}</code></td>` +
         `<td><span class="badge ${a.source === 'falco' ? 'badge-info' : 'badge-purple'}">${esc(a.source || '-')}</span></td>` +
-        `<td>${esc(a.rule || '')}</td>` +
-        `<td><span class="badge ${sevBadge(a.severity)}">${a.severity || '-'}</span></td>`;
+        `<td>${esc(a.rule || '')}</td>`;
+
+      // MITRE ATT&CK technique column
+      const mitreId = an.mitre_technique || (a.output_fields && a.output_fields['mitre.technique']) || '';
+      const mitreName = (a.output_fields && a.output_fields['mitre.name']) || '';
+      html += mitreId
+        ? `<td><span class="mitre-badge" title="${esc(mitreName)}">${esc(mitreId)}</span></td>`
+        : `<td style="color:var(--text3);font-size:11px">\u2014</td>`;
+
+      html += `<td><span class="badge ${sevBadge(a.severity)}">${a.severity || '-'}</span></td>`;
 
       // Confidence column with badge
       const rowConf = an.confidence || an.confidence_score || 0;
@@ -123,7 +131,7 @@ export function loadAlerts() {
       const mitreStr = an.mitre_technique || '';
       const autoActs = an.automated_actions || [];
 
-      html += `<tr id="detail-${idx}" style="display:none"><td colspan="9" style="background:var(--bg);padding:0;font-size:12px;line-height:1.6">`;
+      html += `<tr id="detail-${idx}" style="display:none"><td colspan="10" style="background:var(--bg);padding:0;font-size:12px;line-height:1.6">`;
 
       // ── Header bar with confidence badge + engine + MITRE ──
       html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:rgba(0,212,255,.04);border-bottom:1px solid var(--border);flex-wrap:wrap">`;
@@ -197,7 +205,7 @@ export function loadAlerts() {
       html += `</td></tr>`;
 
       // Re-analyze row (hidden until user clicks Re-analyze)
-      html += `<tr id="reanalyze-${idx}" style="display:none"><td colspan="9" style="background:var(--bg2);padding:12px 16px;border:1px solid var(--accent)">`;
+      html += `<tr id="reanalyze-${idx}" style="display:none"><td colspan="10" style="background:var(--bg2);padding:12px 16px;border:1px solid var(--accent)">`;
       html += `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">`;
       html += `<strong style="color:var(--accent);font-size:13px">Re-analyze Alert #${alertId}</strong>`;
       html += `<select id="reanalyze-engine-${idx}" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px">`;
@@ -208,7 +216,7 @@ export function loadAlerts() {
       html += `<pre id="reanalyze-result-${idx}" style="display:none;margin-top:10px;font-size:11.5px;color:var(--text2);background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>`;
       html += `</td></tr>`;
     });
-    document.getElementById('alertsTable').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
+    document.getElementById('alertsTable').innerHTML = html || '<tr><td colspan="10" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
     const info = document.getElementById('incidentPageInfo');
     if (info) info.textContent = `Page ${_incidentPage}/${totalPages} • ${rows.length} incidents`;
   });
@@ -507,6 +515,11 @@ export function connectLiveFeed(onNewAlert) {
       let old = log.innerHTML;
       if (old === 'Connecting to live event stream...') old = '';
       log.innerHTML = line + '\n' + old;
+
+      // Audio alert for critical severity
+      if (typeof window._handleAudioAlert === 'function') {
+        window._handleAudioAlert(d);
+      }
 
       // Flash card border
       const card = document.getElementById('liveFeedCard');

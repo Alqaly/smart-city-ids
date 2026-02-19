@@ -289,6 +289,7 @@ from api.llm import router as llm_router  # noqa: E402             — /api/llm/
 from api.iot import router as iot_router  # noqa: E402             — /api/iot/*          (telemetry, sensors)
 from api.metrics_routes import router as metrics_router  # noqa: E402 — /health, /metrics, /api/metrics
 from api.health import router as health_router  # noqa: E402       — /, /ui
+from api.demo import router as demo_router  # noqa: E402           — /api/iot/scale, /api/demo/chaos
 
 app.include_router(auth_router)
 app.include_router(alerts_router)
@@ -298,6 +299,7 @@ app.include_router(llm_router)
 app.include_router(iot_router)
 app.include_router(metrics_router)
 app.include_router(health_router)
+app.include_router(demo_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
