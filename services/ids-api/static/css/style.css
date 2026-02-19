@@ -38,6 +38,24 @@
   --text3: #64748b;
   --radius: 8px;
   --shadow: 0 4px 24px rgba(0, 0, 0, .3);
+  --glass: rgba(26, 39, 54, .8);
+  --glow: 0 0 20px rgba(0, 212, 255, .08);
+  color-scheme: dark;
+}
+
+/* Light theme — activated by adding class="light" to <html> */
+html.light {
+  --bg: #f0f4f8;
+  --surface: #ffffff;
+  --surface2: #e8ecf0;
+  --border: #d1d5db;
+  --text: #1e293b;
+  --text2: #475569;
+  --text3: #94a3b8;
+  --shadow: 0 4px 24px rgba(0, 0, 0, .08);
+  --glass: rgba(255, 255, 255, .9);
+  --glow: 0 0 20px rgba(0, 212, 255, .06);
+  color-scheme: light;
 }
 
 /* ── Reset & Base ─────────────────────────────────────────────────────────── */
@@ -56,8 +74,9 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #0f1923 0%, #1a1040 50%, #0f1923 100%);
+  background: linear-gradient(135deg, var(--bg) 0%, #1a1040 50%, var(--bg) 100%);
 }
+html.light #loginScreen { background: linear-gradient(135deg, #e0e7ef 0%, #c7d2fe 50%, #e0e7ef 100%); }
 .login-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -122,9 +141,11 @@ body {
   justify-content: space-between;
   padding: 0 24px;
   height: 56px;
-  background: var(--surface);
+  background: var(--glass);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--glow);
 }
 .topbar .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
@@ -207,6 +228,11 @@ body {
   padding: 20px;
   position: relative;
   overflow: hidden;
+  transition: transform .2s, box-shadow .2s;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--glow);
 }
 .stat-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
 .stat-card.blue::before   { background: var(--accent); }
@@ -233,7 +259,9 @@ body {
   border-radius: var(--radius);
   margin-bottom: 16px;
   overflow: hidden;
+  transition: box-shadow .2s;
 }
+.card:hover { box-shadow: var(--glow); }
 .card-header {
   display: flex;
   align-items: center;
@@ -407,6 +435,53 @@ tr:hover td { background: rgba(0, 212, 255, .03); }
 ::-webkit-scrollbar       { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Theme Toggle Button ──────────────────────────────────────────────────── */
+.theme-toggle {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); transform: rotate(15deg); }
+
+/* ── AI Badge (shown next to LLM-analyzed items) ──────────────────────────── */
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+  background: linear-gradient(135deg, rgba(0,212,255,.12), rgba(124,92,252,.12));
+  color: var(--accent);
+  border: 1px solid rgba(0,212,255,.2);
+}
+
+/* ── Confidence Badge ─────────────────────────────────────────────────────── */
+.conf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.conf-high   { background: rgba(34,197,94,.12); color: var(--green);  border: 1px solid rgba(34,197,94,.25); }
+.conf-medium { background: rgba(234,179,8,.12); color: var(--yellow); border: 1px solid rgba(234,179,8,.25); }
+.conf-low    { background: rgba(239,68,68,.12); color: var(--red);    border: 1px solid rgba(239,68,68,.25); }
 
 /* ── Responsive Breakpoints ───────────────────────────────────────────────── */
 @media (max-width: 1200px) {

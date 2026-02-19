@@ -36,14 +36,12 @@ export function loadAlerts() {
 
     // Build LLM engine options for the re-analyze dropdown
     const engineOpts = ALL_PROVIDERS
-      .filter(p => p.id !== 'local')
-      .map(p => `<option value="${p.id}">${p.label}</option>`)
-      .join('') + '<option value="local">Local Fallback</option>';
+      .map(p => `<option value="${p.id}">${p.name}</option>`)
+      .join('');
 
     data.alerts.forEach((a, idx) => {
       const recs = a.recommendations || [];
       const an = a.analysis || {};
-      const hasDetail = recs.length || an.reasoning || an.business_impact;
       const traceId = a.trace_id || ('alert-' + (a.id || idx));
       const alertId = a.id || 0;
       const engineLabel = an.analysis_engine || an.engine || '';
@@ -53,45 +51,113 @@ export function loadAlerts() {
         `<td><code style="font-size:11px">${esc(traceId)}</code></td>` +
         `<td><span class="badge ${a.source === 'falco' ? 'badge-info' : 'badge-purple'}">${esc(a.source || '-')}</span></td>` +
         `<td>${esc(a.rule || '')}</td>` +
-        `<td><span class="badge ${sevBadge(a.severity)}">${a.severity || '-'}</span></td>` +
-        `<td>${esc(a.threat_type || '-')}</td>` +
+        `<td><span class="badge ${sevBadge(a.severity)}">${a.severity || '-'}</span></td>`;
+
+      // Confidence column with badge
+      const rowConf = an.confidence || an.confidence_score || 0;
+      const rowConfPct = typeof rowConf === 'number' ? (rowConf <= 1 ? Math.round(rowConf * 100) : Math.round(rowConf)) : 0;
+      const rowConfClass = rowConfPct >= 80 ? 'conf-high' : rowConfPct >= 50 ? 'conf-medium' : 'conf-low';
+      html += rowConfPct > 0
+        ? `<td><span class="conf-badge ${rowConfClass}">${rowConfPct}%</span></td>`
+        : `<td style="color:var(--text3);font-size:11px">—</td>`;
+
+      html += `<td>${esc(a.threat_type || '-')}</td>` +
         `<td style="white-space:normal;max-width:400px;line-height:1.4">${esc(a.summary || '')}` +
-          (engineLabel ? `<div style="font-size:10px;color:var(--text3);margin-top:2px">Analyzed by: ${esc(engineLabel)}</div>` : '') +
+          (engineLabel ? `<div style="font-size:10px;color:var(--text3);margin-top:2px"><span class="ai-badge">&#x1F916; ${esc(engineLabel)}</span></div>` : '') +
         `</td>` +
         `<td>` +
-          (hasDetail ? `<button class="btn btn-outline btn-sm" onclick="window._toggleDetail(${idx})" style="margin-right:4px">Detail</button>` : '') +
+          `<button class="btn btn-outline btn-sm" onclick="window._toggleDetail(${idx})" style="margin-right:4px">Detail</button>` +
           `<button class="btn btn-outline btn-sm" onclick="window._showReanalyze(${alertId}, ${idx})" title="Re-analyze with a different LLM">Re-analyze</button>` +
         `</td>` +
         `</tr>`;
 
-      // Detail row (expanded analysis)
-      if (hasDetail) {
-        html += `<tr id="detail-${idx}" style="display:none"><td colspan="8" style="background:var(--bg);padding:12px 16px;font-size:12px;line-height:1.6">`;
-        html += `<div style="margin-bottom:8px"><strong style="color:var(--accent)">Trace ID:</strong> ${esc(traceId)}</div>`;
-        if (an.reasoning) html += `<div style="margin-bottom:8px"><strong style="color:var(--accent2)">Reasoning:</strong> ${esc(an.reasoning)}</div>`;
-        if (an.confidence) html += `<div style="margin-bottom:8px"><strong style="color:var(--text2)">Confidence:</strong> ${(an.confidence * 100).toFixed(0)}%</div>`;
-        if (an.business_impact) html += `<div style="margin-bottom:8px"><strong style="color:var(--yellow)">Business Impact:</strong> ${esc(an.business_impact)}</div>`;
-        if (an.mitre_technique) html += `<div style="margin-bottom:8px"><strong style="color:var(--accent)">MITRE ATT&CK:</strong> ${esc(an.mitre_technique)}</div>`;
-        if (an.key_indicators && an.key_indicators.length) {
-          html += `<div style="margin-bottom:8px"><strong style="color:var(--orange)">Key Indicators:</strong><ul style="margin:4px 0 0 16px;padding:0">`;
-          an.key_indicators.forEach(k => { html += `<li>${esc(k)}</li>`; });
-          html += `</ul></div>`;
-        }
-        if (recs.length) {
-          html += `<div><strong style="color:var(--green)">Recommendations:</strong><ol style="margin:4px 0 0 16px;padding:0">`;
-          recs.forEach(r => { html += `<li>${esc(r)}</li>`; });
-          html += `</ol></div>`;
-        }
-        if (an.mitigating_factors && an.mitigating_factors.length) {
-          html += `<div style="margin-top:8px"><strong style="color:var(--text3)">Mitigating Factors:</strong><ul style="margin:4px 0 0 16px;padding:0">`;
-          an.mitigating_factors.forEach(f => { html += `<li>${esc(f)}</li>`; });
-          html += `</ul></div>`;
-        }
-        html += `</td></tr>`;
+      // ── LLM Transparency Detail Row ─────────────────────────────────
+      // Always show the detail row (even without reasoning) — it now holds
+      // the full transparency panel: evidence, confidence badge, MITRE,
+      // reasoning chain, and operator feedback buttons.
+      const conf = an.confidence || an.confidence_score || 0;
+      const confPct = typeof conf === 'number' ? (conf <= 1 ? (conf * 100).toFixed(0) : conf.toFixed(0)) : '?';
+      const confColor = confPct >= 80 ? 'var(--green)' : confPct >= 50 ? 'var(--yellow)' : 'var(--red)';
+      const confLabel = confPct >= 80 ? 'HIGH' : confPct >= 50 ? 'MEDIUM' : 'LOW';
+      const evidence = an.evidence || an.key_indicators || [];
+      const mitreStr = an.mitre_technique || '';
+      const autoActs = an.automated_actions || [];
+
+      html += `<tr id="detail-${idx}" style="display:none"><td colspan="9" style="background:var(--bg);padding:0;font-size:12px;line-height:1.6">`;
+
+      // ── Header bar with confidence badge + engine + MITRE ──
+      html += `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;background:rgba(0,212,255,.04);border-bottom:1px solid var(--border);flex-wrap:wrap">`;
+      html += `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${confColor}20;color:${confColor};border:1px solid ${confColor}40">`;
+      html += `<span style="font-size:14px">${confPct >= 80 ? '&#x2705;' : confPct >= 50 ? '&#x26A0;' : '&#x274C;'}</span> ${confPct}% ${confLabel}</span>`;
+      if (engineLabel) html += `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(124,92,252,.12);color:var(--accent2);border:1px solid rgba(124,92,252,.3)">&#x1F916; ${esc(engineLabel)}</span>`;
+      if (mitreStr) html += `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(239,68,68,.1);color:var(--red);border:1px solid rgba(239,68,68,.3)">&#x1F3AF; ${esc(mitreStr)}</span>`;
+      html += `<span style="font-size:10px;color:var(--text3);margin-left:auto">Trace: ${esc(traceId)}</span>`;
+      html += `</div>`;
+
+      // ── Two-column layout: left = evidence & reasoning, right = actions & feedback ──
+      html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:100px">`;
+
+      // LEFT column
+      html += `<div style="padding:12px 16px;border-right:1px solid var(--border)">`;
+      // Evidence/Indicators
+      if (evidence.length) {
+        html += `<div style="margin-bottom:10px"><strong style="color:var(--orange);font-size:11px;text-transform:uppercase;letter-spacing:.5px">&#128270; Evidence / Key Indicators</strong>`;
+        html += `<ul style="margin:4px 0 0 12px;padding:0;list-style:none">`;
+        evidence.forEach(e => { html += `<li style="padding:2px 0;color:var(--text2)"><span style="color:var(--orange);margin-right:4px">&#x25B8;</span>${esc(typeof e === 'string' ? e : JSON.stringify(e))}</li>`; });
+        html += `</ul></div>`;
       }
+      // Reasoning chain
+      if (an.reasoning || an.detailed_analysis) {
+        html += `<div style="margin-bottom:10px"><strong style="color:var(--accent2);font-size:11px;text-transform:uppercase;letter-spacing:.5px">&#x1F9E0; Reasoning Chain</strong>`;
+        html += `<div style="margin-top:4px;padding:8px 10px;background:rgba(124,92,252,.06);border-radius:6px;border-left:3px solid var(--accent2);color:var(--text2);font-size:11.5px;line-height:1.5">${esc(an.reasoning || an.detailed_analysis)}</div></div>`;
+      }
+      // Business impact
+      if (an.business_impact) {
+        html += `<div style="margin-bottom:10px"><strong style="color:var(--yellow);font-size:11px;text-transform:uppercase;letter-spacing:.5px">&#x26A1; Business Impact</strong>`;
+        html += `<div style="margin-top:4px;color:var(--text2)">${esc(an.business_impact)}</div></div>`;
+      }
+      // Mitigating factors
+      if (an.mitigating_factors && an.mitigating_factors.length) {
+        html += `<div><strong style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">&#x1F6E1; Mitigating Factors</strong>`;
+        html += `<ul style="margin:4px 0 0 12px;padding:0;list-style:none">`;
+        an.mitigating_factors.forEach(f => { html += `<li style="padding:2px 0;color:var(--text3)"><span style="margin-right:4px">&#x25CB;</span>${esc(f)}</li>`; });
+        html += `</ul></div>`;
+      }
+      html += `</div>`;
+
+      // RIGHT column
+      html += `<div style="padding:12px 16px">`;
+      // Recommendations
+      if (recs.length) {
+        html += `<div style="margin-bottom:10px"><strong style="color:var(--green);font-size:11px;text-transform:uppercase;letter-spacing:.5px">&#x2705; Recommendations</strong>`;
+        html += `<ol style="margin:4px 0 0 16px;padding:0;color:var(--text2)">`;
+        recs.forEach(r => { html += `<li style="padding:2px 0">${esc(r)}</li>`; });
+        html += `</ol></div>`;
+      }
+      // Automated actions taken
+      if (autoActs.length) {
+        html += `<div style="margin-bottom:10px"><strong style="color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.5px">&#x26A1; Automated Actions</strong>`;
+        html += `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">`;
+        autoActs.forEach(act => {
+          html += `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(0,212,255,.1);color:var(--accent);border:1px solid rgba(0,212,255,.25)">${esc(act)}</span>`;
+        });
+        html += `</div></div>`;
+      }
+      // Operator feedback section
+      html += `<div style="margin-top:12px;padding:10px 12px;background:rgba(255,255,255,.03);border-radius:6px;border:1px solid var(--border)">`;
+      html += `<strong style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text3)">&#x1F4AC; Operator Feedback</strong>`;
+      html += `<div style="display:flex;align-items:center;gap:8px;margin-top:8px" id="feedback-btns-${idx}">`;
+      html += `<button class="btn btn-sm" style="background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.3);font-weight:600;padding:4px 14px" onclick="window._submitFeedback(${alertId},'${traceId}',true,${idx})">&#x2714; Accurate</button>`;
+      html += `<button class="btn btn-sm" style="background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3);font-weight:600;padding:4px 14px" onclick="window._submitFeedback(${alertId},'${traceId}',false,${idx})">&#x2718; Inaccurate</button>`;
+      html += `<span id="feedback-status-${idx}" style="font-size:11px;color:var(--text3)"></span>`;
+      html += `</div></div>`;
+      html += `</div>`;
+
+      html += `</div>`; // close grid
+      html += `</td></tr>`;
 
       // Re-analyze row (hidden until user clicks Re-analyze)
-      html += `<tr id="reanalyze-${idx}" style="display:none"><td colspan="8" style="background:var(--bg2);padding:12px 16px;border:1px solid var(--accent)">`;
+      html += `<tr id="reanalyze-${idx}" style="display:none"><td colspan="9" style="background:var(--bg2);padding:12px 16px;border:1px solid var(--accent)">`;
       html += `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">`;
       html += `<strong style="color:var(--accent);font-size:13px">Re-analyze Alert #${alertId}</strong>`;
       html += `<select id="reanalyze-engine-${idx}" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px">`;
@@ -102,7 +168,7 @@ export function loadAlerts() {
       html += `<pre id="reanalyze-result-${idx}" style="display:none;margin-top:10px;font-size:11.5px;color:var(--text2);background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>`;
       html += `</td></tr>`;
     });
-    document.getElementById('alertsTable').innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
+    document.getElementById('alertsTable').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
   });
 }
 
@@ -143,8 +209,15 @@ function doReanalyze(alertId, idx) {
     const elapsed = ((Date.now() - startMs) / 1000).toFixed(2);
 
     if (!res) {
-      statusEl.innerHTML = '<span style="color:var(--red)">Failed — no response</span>';
-      resultEl.textContent += `[${new Date().toLocaleTimeString()}] ERROR: No response from server (check auth token)\n`;
+      statusEl.innerHTML = '<span style="color:var(--red)">Failed — network error</span>';
+      resultEl.textContent += `[${new Date().toLocaleTimeString()}] ERROR: Network unreachable or server offline\n`;
+      return;
+    }
+
+    if (res._error) {
+      const msg = res.detail || `HTTP ${res._status}`;
+      statusEl.innerHTML = `<span style="color:var(--red)">${res._status === 401 ? 'Session expired — refresh page' : 'Error: ' + esc(msg)}</span>`;
+      resultEl.textContent += `[${new Date().toLocaleTimeString()}] ERROR (${res._status}): ${msg}\n`;
       return;
     }
 
@@ -195,6 +268,34 @@ function doReanalyze(alertId, idx) {
 window._toggleDetail = toggleDetail;
 window._showReanalyze = showReanalyze;
 window._doReanalyze = doReanalyze;
+
+/**
+ * Submit operator feedback on an LLM analysis (accurate/inaccurate).
+ * Connected to the transparency panel's feedback buttons.
+ */
+function submitFeedback(alertId, traceId, wasAccurate, idx) {
+  const statusEl = document.getElementById('feedback-status-' + idx);
+  const btnsEl = document.getElementById('feedback-btns-' + idx);
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--yellow)">Submitting...</span>';
+
+  api.submitFeedback(String(alertId || traceId), wasAccurate, '').then(res => {
+    if (!res || res._error) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Failed to submit</span>';
+      return;
+    }
+    // Replace buttons with confirmation
+    if (btnsEl) {
+      const icon = wasAccurate ? '&#x2714;' : '&#x2718;';
+      const color = wasAccurate ? 'var(--green)' : 'var(--red)';
+      const label = wasAccurate ? 'Marked Accurate' : 'Marked Inaccurate';
+      btnsEl.innerHTML = `<span style="color:${color};font-weight:600;font-size:12px">${icon} ${label}</span>` +
+        (res.accuracy_rate !== undefined ? `<span style="margin-left:8px;font-size:11px;color:var(--text3)">Overall accuracy: ${(res.accuracy_rate * 100).toFixed(0)}%</span>` : '');
+    }
+  }).catch(() => {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Network error</span>';
+  });
+}
+window._submitFeedback = submitFeedback;
 
 // ══════════════════════════════════════════════════════════════════════════
 // SSE Live Pipeline Feed
@@ -257,7 +358,16 @@ export function connectLiveFeed(onNewAlert) {
       const actions = a.automated_actions || d.automated_actions || [];
       const mitre = a.mitre_technique || '';
 
-      // Build structured box-art log entry
+      // Build structured box-art log entry with confidence badges
+      const confVal = typeof confidence === 'number' ? (confidence <= 1 ? confidence * 100 : confidence) : parseFloat(confidence) || 0;
+      const confBadge = confVal >= 80
+        ? '<span style="color:#22c55e;font-weight:bold">HIGH (' + confVal.toFixed(0) + '%)</span>'
+        : confVal >= 50
+          ? '<span style="color:#eab308;font-weight:bold">MEDIUM (' + confVal.toFixed(0) + '%)</span>'
+          : confVal > 0
+            ? '<span style="color:#ef4444;font-weight:bold">LOW (' + confVal.toFixed(0) + '%)</span>'
+            : '<span style="color:var(--text3)">N/A</span>';
+
       let line = '';
       line += '┌─────────────────────────────────────────────────────────────\n';
       line += `│  [${ts}]  LIVE ALERT — Source: ${source.toUpperCase()}\n`;
@@ -268,38 +378,46 @@ export function connectLiveFeed(onNewAlert) {
       line += `│  Engine:      ${engine}\n`;
       line += `│  Severity:    <span style="color:${sevColor};font-weight:bold">${sev}/10</span>\n`;
       line += `│  Threat Type: ${threat}\n`;
-      if (mitre)      line += `│  MITRE:       ${mitre}\n`;
-      if (confidence)  line += `│  Confidence:  ${confidence}\n`;
+      line += `│  Confidence:  ${confBadge}\n`;
+      if (mitre)      line += `│  MITRE:       <span style="color:#ef4444">${mitre}</span>\n`;
       if (procTime)    line += `│  Processed:   ${procTime}\n`;
       if (summary)     line += `│  Summary:     ${summary}\n`;
       if (reasoning) {
-        line += '├── Reasoning ─────────────────────────────────────────────────\n';
+        line += '├── 🧠 Reasoning Chain ────────────────────────────────────────\n';
         line += '│  ' + reasoning.replace(/\n/g, '\n│  ') + '\n';
       }
       if (impact) {
-        line += '├── Business Impact ───────────────────────────────────────────\n';
+        line += '├── ⚡ Business Impact ────────────────────────────────────────\n';
         line += '│  ' + impact.replace(/\n/g, '\n│  ') + '\n';
       }
       if (indicators.length) {
-        line += '├── Key Indicators ───────────────────────────────────────────\n';
-        indicators.forEach(ind => { line += `│  • ${ind}\n`; });
+        line += '├── 🔍 Evidence / Key Indicators ─────────────────────────────\n';
+        indicators.forEach(ind => { line += `│  ▸ ${ind}\n`; });
       }
       if (mitigating.length) {
-        line += '├── Mitigating Factors ───────────────────────────────────────\n';
+        line += '├── 🛡 Mitigating Factors ─────────────────────────────────────\n';
         mitigating.forEach(m => { line += `│  ◦ ${m}\n`; });
       }
       if (recs.length) {
-        line += '├── Recommendations ──────────────────────────────────────────\n';
-        recs.forEach(r => { line += `│  → ${r}\n`; });
+        line += '├── ✅ Recommendations ────────────────────────────────────────\n';
+        recs.forEach((r, i) => { line += `│  ${i + 1}. ${r}\n`; });
       }
       if (actions.length) {
-        const actSev = sev >= 8
-          ? '<span style="color:#ef4444;font-weight:bold">EXECUTING</span>'
-          : sev >= 6
-            ? '<span style="color:#f59e0b;font-weight:bold">EXECUTING</span>'
-            : '<span style="color:var(--text3)">Below threshold</span>';
-        line += '├── Automated Response ───────────────────────────────────────\n';
-        actions.forEach(act => { line += `│  ⚡ ${act}  ${actSev}\n`; });
+        line += '├── ⚡ Automated Response ─────────────────────────────────────\n';
+        actions.forEach(act => {
+          if (sev >= 8) {
+            line += `│  <span style="color:#ef4444;font-weight:bold">🚨 EXECUTING:</span> ${act} <span style="color:#ef4444">[CRITICAL — sev ${sev}/10]</span>\n`;
+          } else if (sev >= 6) {
+            line += `│  <span style="color:#f59e0b;font-weight:bold">⚠️ EXECUTING:</span> ${act} <span style="color:#f59e0b">[HIGH — sev ${sev}/10]</span>\n`;
+          } else if (sev >= 4) {
+            line += `│  <span style="color:var(--text2)">📋 QUEUED:</span> ${act} <span style="color:var(--text3)">[MEDIUM — requires approval]</span>\n`;
+          } else {
+            line += `│  <span style="color:var(--text3)">ℹ️ LOGGED:</span> ${act} <span style="color:var(--text3)">[LOW — informational only]</span>\n`;
+          }
+        });
+        if (sev >= 6 && container) {
+          line += `│  Target: ${container}\n`;
+        }
       }
       line += '└─────────────────────────────────────────────────────────────\n';
 

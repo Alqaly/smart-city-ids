@@ -390,3 +390,91 @@ async def export_llm_stats():
         "cost_model": LLM_COST_PER_CALL,
         "note": "Latencies are in seconds. Cost and tokens are estimated from IDS payload/response size.",
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Operator Feedback Endpoint
+# ══════════════════════════════════════════════════════════════════════════════
+
+import logging
+from pydantic import BaseModel
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# In-memory feedback store (persisted to DB when available)
+_feedback_store = []
+
+
+class FeedbackPayload(BaseModel):
+    """Operator feedback on an LLM analysis."""
+    analysis_id: str
+    was_accurate: bool
+    comment: Optional[str] = None
+    timestamp: Optional[str] = None
+
+
+@router.post("/api/llm/feedback")
+async def submit_feedback(payload: FeedbackPayload):
+    """Record operator feedback on an LLM analysis.
+
+    This creates a feedback loop for continuous improvement.  Operators
+    can mark analyses as accurate or inaccurate, and optionally add
+    comments explaining their assessment.
+
+    The feedback is stored and can be used for:
+    - Tracking LLM accuracy over time
+    - Identifying patterns in false positives/negatives
+    - Informing prompt engineering improvements
+    """
+    feedback = {
+        "analysis_id": payload.analysis_id,
+        "was_accurate": payload.was_accurate,
+        "comment": payload.comment,
+        "timestamp": payload.timestamp or str(time.time()),
+    }
+    _feedback_store.append(feedback)
+
+    # Try to persist to database
+    try:
+        from api._state import db
+        db.execute_raw(
+            "INSERT INTO operator_feedback (analysis_id, was_accurate, comment, created_at) "
+            "VALUES (%s, %s, %s, NOW())",
+            (payload.analysis_id, payload.was_accurate, payload.comment)
+        )
+    except Exception as e:
+        logger.debug(f"Feedback DB persist skipped (table may not exist): {e}")
+
+    logger.info(
+        f"Operator feedback: analysis={payload.analysis_id} "
+        f"accurate={payload.was_accurate} comment='{payload.comment or ''}'"
+    )
+
+    # Calculate running accuracy
+    total = len(_feedback_store)
+    accurate = sum(1 for f in _feedback_store if f["was_accurate"])
+    accuracy_rate = round(accurate / total * 100, 1) if total > 0 else 0
+
+    return {
+        "status": "recorded",
+        "total_feedback": total,
+        "accuracy_rate": accuracy_rate,
+        "message": "Thank you for improving the system."
+    }
+
+
+@router.get("/api/llm/feedback/stats")
+async def get_feedback_stats():
+    """Return operator feedback statistics."""
+    total = len(_feedback_store)
+    accurate = sum(1 for f in _feedback_store if f["was_accurate"])
+    inaccurate = total - accurate
+
+    return {
+        "total_feedback": total,
+        "accurate": accurate,
+        "inaccurate": inaccurate,
+        "accuracy_rate": round(accurate / total * 100, 1) if total > 0 else 0,
+        "recent": _feedback_store[-10:] if _feedback_store else [],
+    }

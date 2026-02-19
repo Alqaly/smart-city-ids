@@ -143,8 +143,20 @@ if [[ "${DESCRIBE:-false}" == "true" ]]; then
 fi
 
 # ── Ensure metrics CSV header ──
+METRICS_HEADER="run_id,scenario_id,scenario_name,severity,threat_type,engine,total_ms,llm_ms,status,confidence,timestamp"
 if [[ ! -f "$METRICS_CSV" ]]; then
-  echo "run_id,scenario_id,scenario_name,severity,threat_type,engine,total_ms,llm_ms,status,timestamp" > "$METRICS_CSV"
+  echo "$METRICS_HEADER" > "$METRICS_CSV"
+else
+  current_header="$(head -n1 "$METRICS_CSV" 2>/dev/null || true)"
+  if [[ "$current_header" != "$METRICS_HEADER" ]]; then
+    cp "$METRICS_CSV" "${METRICS_CSV}.bak.$(date -u +%Y%m%d-%H%M%S)"
+    {
+      echo "$METRICS_HEADER"
+      # Preserve historical rows; add default confidence if old format had 10 columns.
+      tail -n +2 "$METRICS_CSV" | awk -F, 'NF==10 {print $0 ",0.0"} NF!=10 {print $0}'
+    } > "${METRICS_CSV}.tmp"
+    mv "${METRICS_CSV}.tmp" "$METRICS_CSV"
+  fi
 fi
 
 # =============================================================================
@@ -157,7 +169,7 @@ pick_pod() {
     | grep Running | awk '{print $1}' | shuf -n1
 }
 
-# Send alert to IDS API with full ATT&CK metadata + latency capture
+# Send alert to IDS API with full ATT&CK metadata + latency capture + LLM insights
 # Args: output priority rule container extra_fields scenario_id
 send_alert() {
   local output="$1" priority="$2" rule="$3" container="$4"
@@ -188,8 +200,8 @@ send_alert() {
   TOTAL=$((TOTAL + 1))
 
   if [[ "$code" == "200" || "$code" == "201" || "$code" == "429" ]]; then
-    local sev eng status threat llm_ms
-    IFS=$'\t' read -r sev eng status threat llm_ms < <(python3 -c "
+    local sev eng status threat llm_ms confidence reasoning
+    IFS=$'\t' read -r sev eng status threat llm_ms confidence reasoning < <(python3 -c "
 import json
 try:
     d=json.load(open('/tmp/ids_resp.json'))
@@ -198,27 +210,41 @@ try:
     eng=d.get('llm_engine', d.get('engine','local'))
     st=d.get('status','?')
     tt=a.get('threat_type','?')
-    lm=d.get('processing_ms', d.get('llm_latency_ms', d.get('analysis_time_ms','?')))
-    print(f'{sev}\t{eng}\t{st}\t{tt}\t{lm}')
+    lm=d.get('processing_time_ms', d.get('processing_ms', d.get('llm_latency_ms', d.get('analysis_time_ms','?'))))
+    conf=a.get('confidence', a.get('confidence_score', '0.0'))
+    reas=str(a.get('reasoning', 'N/A')).replace('\\n', ' ')[:90]
+    print(f'{sev}\t{eng}\t{st}\t{tt}\t{lm}\t{conf}\t{reas}')
 except Exception:
-    print('?\t?\t?\t?\t?')
-" 2>/dev/null || echo -e "?\t?\t?\t?\t?")
+    print('?\t?\t?\t?\t?\t0.0\tError')
+" 2>/dev/null || echo -e "?\t?\t?\t?\t?\t0.0\tError")
 
     if [[ "$code" == "429" ]]; then
       echo -e "    ${YELLOW}⏳ Rate-limited (cooldown) — will retry later${RESET}"
     elif [[ "$status" == "deduplicated" ]]; then
       echo -e "    ${DIM}↩ Deduplicated (same alert already processed)${RESET}"
     else
-      echo -e "    ${GREEN}✓ IDS: sev=${sev}, threat=${threat}, engine=${eng}, status=${status}, ${total_ms}ms total${RESET}"
+      local conf_num conf_color
+      conf_num="$(echo "$confidence" | sed -E 's/[^0-9.]//g')"
+      conf_num="${conf_num:-0}"
+      conf_color="$(awk -v c="$conf_num" 'BEGIN{if(c>=0.85)print "GREEN"; else if(c>=0.65)print "YELLOW"; else print "RED"}')"
+      case "$conf_color" in
+        GREEN) conf_color="$GREEN" ;;
+        YELLOW) conf_color="$YELLOW" ;;
+        *) conf_color="$RED" ;;
+      esac
+      echo -e "    ${GREEN}✓ IDS Response (${total_ms}ms)${RESET}"
+      echo -e "      Severity: ${sev}/10  Threat: ${threat}"
+      echo -e "      Confidence: ${conf_color}${confidence}${RESET}  Engine: ${eng}  Status: ${status}"
+      echo -e "      ${DIM}Reasoning: ${reasoning}...${RESET}"
     fi
     SUCCESS=$((SUCCESS + 1))
 
     local scen_name="${SCENARIO_NAMES[$((scenario_id - 1))]:-unknown}"
-    echo "\"${RUN_ID}\",${scenario_id},\"${scen_name}\",${sev},\"${threat}\",${eng},${total_ms},${llm_ms},${status},$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$METRICS_CSV"
+    echo "\"${RUN_ID}\",${scenario_id},\"${scen_name}\",${sev},\"${threat}\",${eng},${total_ms},${llm_ms},${status},${confidence},$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$METRICS_CSV"
   else
     echo -e "    ${RED}✗ IDS returned HTTP ${code} (${total_ms}ms)${RESET}"
     FAILED=$((FAILED + 1))
-    echo "\"${RUN_ID}\",${scenario_id},error,?,?,?,${total_ms},?,http_${code},$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$METRICS_CSV"
+    echo "\"${RUN_ID}\",${scenario_id},error,?,?,?,${total_ms},?,http_${code},0.0,$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$METRICS_CSV"
   fi
 }
 

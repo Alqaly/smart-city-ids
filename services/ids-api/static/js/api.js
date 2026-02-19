@@ -35,7 +35,15 @@ async function request(path, opts = {}) {
   };
   try {
     const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
-    if (res.status === 401) return null;
+    if (res.status === 401) return { _error: true, _status: 401, detail: 'Session expired — please refresh' };
+    if (res.status === 502) {
+      const body = await res.json().catch(() => ({}));
+      return { _error: true, _status: 502, detail: body.detail || 'Engine unavailable' };
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { _error: true, _status: res.status, detail: body.detail || `HTTP ${res.status}` };
+    }
     return res.json();
   } catch {
     return null;
@@ -130,6 +138,19 @@ export const api = {
     if (engine) url += `?engine=${engine}`;
     return request(url, { method: 'POST' });
   },
+
+  // ── LLM Feedback (operator accuracy feedback) ──────────────────────
+  submitFeedback: (analysisId, wasAccurate, comment = '') =>
+    request('/api/llm/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        analysis_id: String(analysisId),
+        was_accurate: wasAccurate,
+        comment,
+      }),
+    }),
+  getFeedbackStats: () => requestNoAuth('/api/llm/feedback/stats'),
 };
 
 /**

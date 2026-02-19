@@ -35,11 +35,7 @@ export const ALL_PROVIDERS = [
   { id: 'openai',    name: 'OpenAI GPT-4',      model: 'gpt-4-turbo-preview',         icon: 'O', color: '#22c55e' },
   { id: 'gemini',    name: 'Google Gemini',      model: 'gemini-2.0-flash',            icon: 'G', color: '#8b5cf6' },
   { id: 'kimi',      name: 'Moonshot Kimi',      model: 'moonshot-v1-128k',            icon: 'K', color: '#f97316' },
-  { id: 'local',     name: 'Local Fallback',     model: 'rule-based',                  icon: 'L', color: '#94a3b8' },
 ];
-
-// First 5 are cloud-hosted; the last ('local') is the rule-based fallback
-export const CLOUD_PROVIDERS = ALL_PROVIDERS.slice(0, 5);
 
 /**
  * Initial application state — single source of truth.

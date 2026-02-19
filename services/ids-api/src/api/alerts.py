@@ -421,89 +421,172 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         PROM_CRITICAL_ALERTS_TOTAL.inc()
 
     # ===================================================================
-    # Stage 5: Automated Kubernetes actions (severity-driven)
+    # Stage 5: Automated Kubernetes actions (LLM-recommended + severity-driven)
     # ===================================================================
-    # The IDS applies a two-tier automated response policy:
-    #   • Severity >= 8 (Critical): Isolate the offending pod by applying a
-    #     deny-all NetworkPolicy and/or cordoning the node.  This is the
-    #     most aggressive response and is gated by governance checks.
-    #   • Severity >= 6 (High): Scale the targeted service up by adding
-    #     replicas, which can absorb DDoS-like load while operators
-    #     investigate.
-    # Each action is checked against ``can_execute_action()`` which
-    # enforces the current automation mode (autonomous / supervised /
-    # manual) and the protected-service allow-list.
+    # The IDS executes automated responses based on BOTH LLM recommendations
+    # and severity thresholds.  The LLM may recommend specific actions like
+    # isolate_pod, scale_up, block_ip, cordon_node, restart_pod, or alert_team.
+    # These are validated against governance rules before execution.
+    #
+    # Actions apply to ANY pod or service — not just predefined targets.
+    # The container name is extracted from the alert and used dynamically.
     actions_taken = []   # human-readable list of action strings for the response
     action_records = []  # structured dicts persisted to the database
 
-    # --- Critical severity (>= 8): attempt pod isolation ---
-    if d["k8s"] and severity >= 8:
-        # Extract the container name from Falco output_fields to identify
-        # which pod to isolate.  Falco populates this field for every
-        # container-scoped rule.
-        container_name = alert.output_fields.get("container.name", "")
-        if container_name:
-            # Governance gate: check automation mode + protected services
-            can_exec, reason = d["can_execute"]("isolate_pod", container_name)
-            if can_exec:
-                actions_taken.append("isolate_pod")
-                d["metrics"]["automated_actions"] += 1
-                PROM_ACTIONS_EXECUTED_TOTAL.labels(action="isolate_pod").inc()
-                PROM_AUTOMATED_DECISIONS.labels(action_type="isolate_pod").inc()
-                PROM_K8S_PODS_ISOLATED_TOTAL.inc()
-                PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
-                action_records.append({
-                    "action_type": "isolate_pod",
-                    "target_resource": container_name,
-                    "target_namespace": Config.K8S_NAMESPACE,
-                    "status": "executed",
-                    "execution_time_ms": int((time.perf_counter() - started) * 1000),
-                    "mode": d["get_mode"](),
-                    "triggered_by": llm_used,
-                })
-            else:
-                # Action blocked by governance policy (e.g., protected service
-                # or DRY-RUN mode) — record the block for audit purposes
-                actions_taken.append(f"BLOCKED: {reason}")
-                _record_blocked_action("isolate_pod", container_name, reason, d, llm_used, action_records)
+    # Extract target identifiers from alert (works for any pod/device)
+    container_name = alert.output_fields.get("container.name", "")
+    # Derive service name: strip hash suffix (e.g., "traffic-camera-abc123" → "traffic-camera")
+    service_name = "-".join(container_name.split("-")[:-2]) if container_name.count("-") >= 2 else container_name.split("-")[0] if container_name else ""
+    src_ip = alert.output_fields.get("fd.sip", alert.output_fields.get("src.ip", ""))
 
-    # --- High severity (>= 6 but < 8): attempt horizontal scale-up ---
-    elif d["k8s"] and severity >= 6:
-        # Derive the Kubernetes service name from the container name.
-        # Convention: container names follow "<service>-<hash>" format,
-        # so splitting on "-" and taking the first segment gives us the
-        # Deployment/Service name.
-        service_name = alert.output_fields.get("container.name", "").split("-")[0]
-        if service_name:
-            can_exec, reason = d["can_execute"]("scale_up", service_name)
-            if can_exec:
-                actions_taken.append("scale_up")
-                d["metrics"]["automated_actions"] += 1
-                PROM_ACTIONS_EXECUTED_TOTAL.labels(action="scale_up").inc()
-                PROM_AUTOMATED_DECISIONS.labels(action_type="scale_up").inc()
-                PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=service_name).inc()
-                PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
-                action_records.append({
-                    "action_type": "scale_up",
-                    "target_resource": service_name,
-                    "target_namespace": Config.K8S_NAMESPACE,
-                    "status": "executed",
-                    "execution_time_ms": int((time.perf_counter() - started) * 1000),
-                    "mode": d["get_mode"](),
-                    "triggered_by": llm_used,
-                })
-            else:
-                actions_taken.append(f"BLOCKED: {reason}")
-                PROM_ACTIONS_BLOCKED_TOTAL.labels(action="scale_up", reason="blocked").inc()
-                action_records.append({
-                    "action_type": "scale_up",
-                    "target_resource": service_name,
-                    "target_namespace": Config.K8S_NAMESPACE,
-                    "status": "blocked",
-                    "error_message": reason,
-                    "mode": d["get_mode"](),
-                    "triggered_by": llm_used,
-                })
+    # Get LLM-recommended actions
+    llm_recommended_actions = analysis.get("automated_actions", []) if isinstance(analysis, dict) else []
+
+    def _try_action(action_type, target, action_label=None):
+        """Try to execute a K8s action with governance checks and verbose logging."""
+        label = action_label or f"{action_type}({target})"
+        can_exec, reason = d["can_execute"](action_type, target)
+        if can_exec:
+            actions_taken.append(label)
+            d["metrics"]["automated_actions"] += 1
+            PROM_ACTIONS_EXECUTED_TOTAL.labels(action=action_type).inc()
+            PROM_AUTOMATED_DECISIONS.labels(action_type=action_type).inc()
+            PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
+            if action_type == "isolate_pod":
+                PROM_K8S_PODS_ISOLATED_TOTAL.inc()
+            elif action_type == "scale_up":
+                PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=target).inc()
+            action_records.append({
+                "action_type": action_type,
+                "target_resource": target,
+                "target_namespace": Config.K8S_NAMESPACE,
+                "status": "executed",
+                "execution_time_ms": int((time.perf_counter() - started) * 1000),
+                "mode": d["get_mode"](),
+                "triggered_by": llm_used,
+                "severity": severity,
+                "reason": f"LLM recommended '{action_type}' | Severity {severity}/10 | Threat: {threat_type}",
+            })
+            logger.info(
+                f"✅ ACTION EXECUTED: {action_type} → {target} "
+                f"(severity={severity}, threat={threat_type}, engine={llm_used}, "
+                f"mode={d['get_mode']()}, latency={int((time.perf_counter() - started) * 1000)}ms)"
+            )
+        else:
+            blocked_label = f"BLOCKED:{action_type}({target}):{reason}"
+            actions_taken.append(blocked_label)
+            PROM_ACTIONS_BLOCKED_TOTAL.labels(action=action_type, reason="blocked").inc()
+            action_records.append({
+                "action_type": action_type,
+                "target_resource": target,
+                "target_namespace": Config.K8S_NAMESPACE,
+                "status": "blocked",
+                "error_message": reason,
+                "mode": d["get_mode"](),
+                "triggered_by": llm_used,
+                "severity": severity,
+                "reason": f"Governance blocked: {reason}",
+            })
+            logger.warning(
+                f"🚫 ACTION BLOCKED: {action_type} → {target} "
+                f"(reason={reason}, severity={severity}, mode={d['get_mode']()})"
+            )
+
+    if d["k8s"]:
+        # Execute LLM-recommended actions (validated against severity thresholds)
+        executed_actions = set()
+
+        # --- Critical severity (>= 8): isolate_pod + any LLM-recommended actions ---
+        if severity >= 8 and container_name:
+            if "isolate_pod" not in executed_actions:
+                _try_action("isolate_pod", container_name, f"isolate_pod({container_name})")
+                executed_actions.add("isolate_pod")
+
+            # Execute additional LLM-recommended actions
+            for action in llm_recommended_actions:
+                if action in executed_actions:
+                    continue
+                if action == "block_ip" and src_ip:
+                    _try_action("block_ip", src_ip, f"block_ip({src_ip})")
+                    executed_actions.add("block_ip")
+                elif action == "cordon_node" and container_name:
+                    _try_action("cordon_node", container_name, f"cordon_node({container_name})")
+                    executed_actions.add("cordon_node")
+                elif action == "restart_pod" and container_name:
+                    _try_action("restart_pod", container_name, f"restart_pod({container_name})")
+                    executed_actions.add("restart_pod")
+                elif action == "alert_team":
+                    actions_taken.append("alert_team")
+                    action_records.append({
+                        "action_type": "alert_team",
+                        "target_resource": "soc-team",
+                        "status": "executed",
+                        "mode": d["get_mode"](),
+                        "triggered_by": llm_used,
+                        "severity": severity,
+                        "reason": f"LLM recommended team alert for severity {severity} {threat_type}",
+                    })
+                    executed_actions.add("alert_team")
+
+        # --- High severity (>= 6): scale_up + LLM-recommended actions ---
+        elif severity >= 6 and service_name:
+            if "scale_up" not in executed_actions:
+                _try_action("scale_up", service_name, f"scale_up({service_name})")
+                executed_actions.add("scale_up")
+
+            # Execute additional LLM-recommended actions for high severity
+            for action in llm_recommended_actions:
+                if action in executed_actions:
+                    continue
+                if action == "isolate_pod" and container_name:
+                    _try_action("isolate_pod", container_name, f"isolate_pod({container_name})")
+                    executed_actions.add("isolate_pod")
+                elif action == "block_ip" and src_ip:
+                    _try_action("block_ip", src_ip, f"block_ip({src_ip})")
+                    executed_actions.add("block_ip")
+                elif action == "alert_team":
+                    actions_taken.append("alert_team")
+                    action_records.append({
+                        "action_type": "alert_team",
+                        "target_resource": "soc-team",
+                        "status": "executed",
+                        "mode": d["get_mode"](),
+                        "triggered_by": llm_used,
+                        "severity": severity,
+                        "reason": f"LLM recommended team alert for severity {severity} {threat_type}",
+                    })
+                    executed_actions.add("alert_team")
+
+        # --- Medium severity (>= 4): only LLM-recommended non-destructive actions ---
+        elif severity >= 4:
+            for action in llm_recommended_actions:
+                if action in executed_actions:
+                    continue
+                if action == "alert_team":
+                    actions_taken.append("alert_team")
+                    action_records.append({
+                        "action_type": "alert_team",
+                        "target_resource": "soc-team",
+                        "status": "executed",
+                        "mode": d["get_mode"](),
+                        "triggered_by": llm_used,
+                        "severity": severity,
+                        "reason": f"LLM recommended monitoring for severity {severity}",
+                    })
+                    executed_actions.add("alert_team")
+
+        # Log summary of all actions
+        if actions_taken:
+            logger.info(
+                f"📋 AUTOMATION SUMMARY: alert_rule='{alert.rule}' severity={severity} "
+                f"threat='{threat_type}' container='{container_name}' service='{service_name}' "
+                f"actions={actions_taken} engine={llm_used} mode={d['get_mode']()}"
+            )
+        else:
+            logger.info(
+                f"📋 NO AUTOMATION: alert_rule='{alert.rule}' severity={severity} "
+                f"threat='{threat_type}' (below threshold or no target identified)"
+            )
 
     # ===================================================================
     # Stage 6: Persistence — write the alert, analysis, and actions to DB

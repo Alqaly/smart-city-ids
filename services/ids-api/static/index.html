@@ -60,6 +60,7 @@
       <span id="llmPill" class="pill pill-ok">LLM Ready</span>
       <span id="govPill" class="pill pill-ok">Assisted Mode</span>
       <span style="color:var(--text3);font-size:12px" id="uptimeLabel">Uptime: --</span>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light theme" id="themeToggleBtn">&#x1F319;</button>
       <button onclick="doLogout()">Sign Out</button>
     </div>
   </div>
@@ -108,6 +109,39 @@
     </div>
   </div>
 
+  <!-- Live Pipeline Feed — inside overview tab -->
+  <div class="card" id="liveFeedCard" style="margin:0 0 16px;border:1px solid var(--accent);border-radius:8px">
+    <div class="card-header" style="cursor:pointer" onclick="toggleLiveFeed()">
+      <h3><span id="liveFeedDot" class="dot dot-yellow" style="margin-right:6px"></span>Live Pipeline Feed</h3>
+      <span style="font-size:11px;color:var(--text3);margin-left:8px" id="liveFeedStatus">Connecting...</span>
+      <span class="badge badge-info" id="liveFeedCount" style="margin-left:8px">0</span>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearLiveFeed()">Clear</button>
+        <button class="btn btn-outline btn-sm" id="liveFeedToggleBtn" onclick="event.stopPropagation();toggleLiveFeed()">&#x25BC;</button>
+      </div>
+    </div>
+    <div class="card-body" id="liveFeedBody" style="display:block">
+      <pre id="liveFeedLog" style="font-size:11.5px;color:var(--text2);max-height:500px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to live event stream...</pre>
+    </div>
+  </div>
+
+  <!-- IoT Event Feed — inside overview tab -->
+  <div class="card" id="iotLiveCard" style="margin:0 0 16px;border:1px solid var(--green);border-radius:8px">
+    <div class="card-header" style="cursor:pointer" onclick="toggleIoTStream()">
+      <h3><span id="iotStreamDot" class="dot dot-yellow" style="margin-right:6px"></span>IoT Event Feed</h3>
+      <span style="font-size:11px;color:var(--text3);margin-left:8px" id="iotStreamStatus">Starting...</span>
+      <span class="badge badge-purple" id="iotStreamCount" style="margin-left:8px">0</span>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearIoTStream()">Clear</button>
+        <button class="btn btn-outline btn-sm" id="iotStreamToggleBtn" onclick="event.stopPropagation();toggleIoTStream()">&#x25BC;</button>
+      </div>
+    </div>
+    <div class="card-body" id="iotStreamBody" style="display:block">
+      <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Starting IoT event feed...</pre>
+    </div>
+  </div>
+</div>
+
   <!-- ═════════════════════════════════════════════════════════════════════
        TAB: Live Alerts
        ═════════════════════════════════════════════════════════════════════ -->
@@ -126,7 +160,7 @@
       </div>
       <div class="card-body no-pad">
         <table>
-          <thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>Severity</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>Severity</th><th>Confidence</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead>
           <tbody id="alertsTable"></tbody>
         </table>
       </div>
@@ -297,6 +331,10 @@
       <div class="card-header"><h3>Deduplication &amp; Cost Savings</h3></div>
       <div class="card-body" id="dedupDetail"></div>
     </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><h3>&#x1F4AC; Operator Feedback Stats</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Accuracy feedback from analysts on LLM analyses</span></div>
+      <div class="card-body" id="feedbackStats"></div>
+    </div>
   </div>
 
   <!-- ═════════════════════════════════════════════════════════════════════
@@ -389,38 +427,6 @@
   </div>
 
 </div><!-- /dashboard -->
-
-<!-- Live Pipeline Feed — SSE real-time, visible from ALL tabs -->
-<div class="card" id="liveFeedCard" style="margin:0 24px 16px;border:1px solid var(--accent);border-radius:8px">
-  <div class="card-header" style="cursor:pointer" onclick="toggleLiveFeed()">
-    <h3><span id="liveFeedDot" class="dot dot-yellow" style="margin-right:6px"></span>Live Pipeline Feed</h3>
-    <span style="font-size:11px;color:var(--text3);margin-left:8px" id="liveFeedStatus">Connecting...</span>
-    <span class="badge badge-info" id="liveFeedCount" style="margin-left:8px">0</span>
-    <div style="margin-left:auto;display:flex;gap:6px">
-      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearLiveFeed()">Clear</button>
-      <button class="btn btn-outline btn-sm" id="liveFeedToggleBtn" onclick="event.stopPropagation();toggleLiveFeed()">&#x25BC;</button>
-    </div>
-  </div>
-  <div class="card-body" id="liveFeedBody" style="display:block">
-    <pre id="liveFeedLog" style="font-size:11.5px;color:var(--text2);max-height:500px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to live event stream...</pre>
-  </div>
-</div>
-
-<!-- IoT Event Feed — polls /api/iot/events -->
-<div class="card" id="iotLiveCard" style="margin:0 24px 16px;border:1px solid var(--green);border-radius:8px">
-  <div class="card-header" style="cursor:pointer" onclick="toggleIoTStream()">
-    <h3><span id="iotStreamDot" class="dot dot-yellow" style="margin-right:6px"></span>IoT Event Feed</h3>
-    <span style="font-size:11px;color:var(--text3);margin-left:8px" id="iotStreamStatus">Starting...</span>
-    <span class="badge badge-purple" id="iotStreamCount" style="margin-left:8px">0</span>
-    <div style="margin-left:auto;display:flex;gap:6px">
-      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearIoTStream()">Clear</button>
-      <button class="btn btn-outline btn-sm" id="iotStreamToggleBtn" onclick="event.stopPropagation();toggleIoTStream()">&#x25BC;</button>
-    </div>
-  </div>
-  <div class="card-body" id="iotStreamBody" style="display:block">
-    <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Starting IoT event feed...</pre>
-  </div>
-</div>
 
 <!-- Modal overlay for custom alert injection -->
 <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)window._closeModal()">

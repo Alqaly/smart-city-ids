@@ -208,37 +208,52 @@ class LLMConfig:
 # =============================================================================
 
 SYSTEM_PROMPT = """You are a senior cybersecurity analyst specializing in Smart City / ICS infrastructure security.
+You work at a Security Operations Center (SOC) analyzing real-time alerts from an AI-driven Intrusion Detection System.
 
 ENVIRONMENT:
 - Smart City IoT platform on Kubernetes (K3s) with 5 IoT protocol emulators:
-  • Traffic Camera (ONVIF Profile S / RTSP / ANPR)
-  • Parking System (MQTT / CoAP / SenML magnetometer sensors)
-  • Healthcare API (HL7 FHIR R4 / IEEE 11073 medical devices)
-  • Environmental Sensor (Modbus TCP / OPC UA — AQI stations)
-  • Street Lighting (DALI-2 / TALQ v2.4 gateway control)
+  • Traffic Camera (ONVIF Profile S / RTSP / ANPR) — controls traffic signals, ANPR license plate capture
+  • Parking System (MQTT / CoAP / SenML magnetometer sensors) — manages 500+ parking spots
+  • Healthcare API (HL7 FHIR R4 / IEEE 11073 medical devices) — patient vitals, medical records
+  • Environmental Sensor (Modbus TCP / OPC UA — AQI monitoring stations) — air quality, emissions
+  • Street Lighting (DALI-2 / TALQ v2.4 gateway control) — 10,000+ luminaires, smart dimming
 - Monitoring: Falco (runtime syscall detection), Suricata (network IDS/IPS)
 - MITRE ATT&CK for ICS framework applies to this environment
+- Services are intentionally vulnerable for security research/demonstration
 
-YOUR ROLE:
-1. Analyze security alerts from Falco (runtime) and Suricata (network)
-2. Explain threats in clear, plain English suitable for non-expert stakeholders
-3. Assess severity on a 1-10 scale (10 = critical, life-safety impact)
-4. Map to MITRE ATT&CK for ICS techniques where applicable
-5. Recommend specific, actionable mitigation steps
-6. Suggest automated Kubernetes responses (isolate pod, scale up, etc.)
+YOUR ANALYSIS APPROACH:
+1. EVIDENCE: Identify the specific log lines, process names, file paths, and network indicators that prove this alert is real
+2. REASONING: Walk through your analysis step-by-step — what happened, why it matters, what the attacker's goal likely is
+3. CONFIDENCE: Rate your confidence (0.0-1.0) based on evidence quality — be honest when evidence is ambiguous
+4. IMPACT: Assess real-world impact on Smart City operations (traffic safety, patient health, environmental monitoring)
+5. ACTIONS: Recommend specific, executable Kubernetes remediation steps
 
 SEVERITY GUIDELINES:
-- 9-10: Life-safety impact (healthcare data, traffic control compromise)
-- 7-8: Critical infrastructure disruption (service outage, data exfiltration)
-- 5-6: Operational degradation (reconnaissance, policy violations)
-- 1-4: Low-risk events (info gathering, benign anomalies)
+- 9-10: Life-safety impact (healthcare compromise, traffic signal manipulation, emergency system disruption)
+- 7-8: Critical infrastructure disruption (full service outage, mass data exfiltration, cluster compromise)
+- 5-6: Operational degradation (reconnaissance, policy violations, single-service impact)
+- 3-4: Low-risk events (information gathering, benign anomalies, failed attack attempts)
+- 1-2: Informational (normal operations triggering sensitive rules, expected maintenance)
 
-Be concise, accurate, and security-focused. Always respond with valid JSON only."""
+AUTOMATED ACTIONS (only suggest when evidence strongly supports):
+- isolate_pod: Apply deny-all NetworkPolicy — USE FOR severity >= 8 with clear malicious intent
+- scale_up: Increase replicas to absorb load — USE FOR DDoS/availability threats severity >= 6
+- block_ip: Block source IP via NetworkPolicy — USE when source IP is clearly malicious
+- cordon_node: Prevent scheduling on compromised node — USE FOR container escape / node compromise
+- restart_pod: Rolling restart — USE FOR configuration tampering or persistent malware
+- alert_team: Notify SOC team — USE FOR any severity >= 7
+
+CRITICAL RULES:
+- NEVER assign severity 9-10 without strong evidence of life-safety or critical infrastructure impact
+- ALWAYS provide at least 3 key indicators from the actual alert data
+- ALWAYS note mitigating factors that could make this a false positive
+- Respond with valid JSON ONLY — no markdown, no commentary outside the JSON"""
 
 
 def build_analysis_prompt(alert: Dict[str, Any]) -> str:
     """
     Build standardized analysis prompt from alert data.
+    Enhanced with evidence extraction requirements.
     
     Args:
         alert: Security alert dict with keys: output, priority, rule, time, output_fields
@@ -248,28 +263,47 @@ def build_analysis_prompt(alert: Dict[str, Any]) -> str:
     """
     fields = alert.get('output_fields', {})
     
+    # Extract all available evidence fields
+    container = fields.get('container.name', 'Unknown')
+    proc_cmdline = fields.get('proc.cmdline', 'Unknown')
+    proc_name = fields.get('proc.name', 'N/A')
+    user = fields.get('user.name', 'N/A')
+    fd_name = fields.get('fd.name', 'N/A')
+    src_ip = fields.get('fd.sip', fields.get('src.ip', 'N/A'))
+    dst_ip = fields.get('fd.lip', fields.get('dst.ip', 'N/A'))
+    dst_port = fields.get('fd.lport', fields.get('dst.port', 'N/A'))
+    
     return f"""Analyze this security alert from Smart City infrastructure.
 
-**Alert Output:** {alert.get('output', 'N/A')}
-**Priority:** {alert.get('priority', 'N/A')}
-**Rule:** {alert.get('rule', 'N/A')}
-**Timestamp:** {alert.get('time', 'N/A')}
-**Container:** {fields.get('container.name', 'Unknown')}
-**Process:** {fields.get('proc.cmdline', 'Unknown')}
-**Source IP:** {fields.get('fd.sip', fields.get('src.ip', 'N/A'))}
+═══ ALERT DATA ═══
+Rule:        {alert.get('rule', 'N/A')}
+Priority:    {alert.get('priority', 'N/A')}
+Timestamp:   {alert.get('time', 'N/A')}
+Output:      {alert.get('output', 'N/A')}
 
-Provide analysis for human operator review. Respond with JSON ONLY:
+═══ EVIDENCE FIELDS ═══
+Container:   {container}
+Process:     {proc_cmdline}
+Process Name:{proc_name}
+User:        {user}
+File/FD:     {fd_name}
+Source IP:    {src_ip}
+Dest IP:     {dst_ip}
+Dest Port:   {dst_port}
+
+═══ REQUIRED RESPONSE FORMAT (JSON only) ═══
 {{
-  "summary": "1-2 sentence explanation of what happened",
+  "summary": "Clear 1-2 sentence explanation of what happened and why it matters",
   "severity": <1-10 integer>,
-  "threat_type": "DDoS|Privilege Escalation|Data Exfiltration|Malware|Policy Violation|Reconnaissance|Unknown",
-  "confidence": <0.0-1.0 float>,
-  "key_indicators": ["Indicator 1", "Indicator 2"],
-  "mitigating_factors": ["Factor 1", "Factor 2"],
-  "business_impact": "How this affects Smart City operations",
-  "reasoning": "Detailed explanation of the threat assessment",
-  "recommendations": ["Action 1", "Action 2", "Action 3"],
-  "automated_actions": ["isolate_pod", "scale_up", "block_ip", "cordon_node", "alert_team"]
+  "threat_type": "<DDoS|Privilege Escalation|Data Exfiltration|Malware|Policy Violation|Reconnaissance|Credential Access|Lateral Movement|Command and Control|Container Escape|Unknown>",
+  "confidence": <0.0-1.0 float — how confident you are based on evidence quality>,
+  "key_indicators": ["Evidence item 1 from alert data", "Evidence item 2", "Evidence item 3"],
+  "mitigating_factors": ["Reason this could be false positive 1", "Reason 2"],
+  "business_impact": "Specific impact on Smart City operations (which service, what data, what safety implications)",
+  "reasoning": "Step-by-step analysis: (1) What triggered this alert, (2) What the attacker likely intended, (3) How confident you are and why, (4) What the blast radius could be",
+  "mitre_technique": "TXXXX — Technique Name (from MITRE ATT&CK for ICS where applicable)",
+  "recommendations": ["Specific action 1 with target", "Action 2", "Action 3"],
+  "automated_actions": ["isolate_pod|scale_up|block_ip|cordon_node|restart_pod|alert_team"]
 }}"""
 
 

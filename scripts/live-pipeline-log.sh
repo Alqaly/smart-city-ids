@@ -142,6 +142,17 @@ for i, act in enumerate(actions[:3]):
   elif [ "${sev_num:-0}" -ge 4 ]; then SEV_C="$C"; SEV_ICON="● MEDIUM"
   else SEV_C="$G"; SEV_ICON="○ LOW"; fi
 
+  # Confidence coloring
+  CONF_NUM="${confidence//[^0-9.]/}"
+  CONF_NUM="${CONF_NUM:-0}"
+  if awk -v c="$CONF_NUM" 'BEGIN{exit !(c>=0.85)}'; then
+    CONF_C="$G"
+  elif awk -v c="$CONF_NUM" 'BEGIN{exit !(c>=0.65)}'; then
+    CONF_C="$Y"
+  else
+    CONF_C="$R"
+  fi
+
   # ── Print the alert journey ──
   printf "${D}$(tstp)${N} ${W}━━━ Alert #${ALERT_COUNT} ━━━${N}  ${SEV_C}${SEV_ICON}${N}\n"
   printf "  ${D}│${N}\n"
@@ -154,7 +165,7 @@ for i, act in enumerate(actions[:3]):
   printf "  ${D}│${N}    Severity:  ${SEV_C}${severity}/10${N}\n"
   printf "  ${D}│${N}    Threat:    ${Y}${threat_type}${N}\n"
   [ -n "$mitre" ] && printf "  ${D}│${N}    MITRE:     ${M}${mitre}${N}\n"
-  [ -n "$confidence" ] && printf "  ${D}│${N}    Confidence: ${confidence}\n"
+  [ -n "$confidence" ] && printf "  ${D}│${N}    Confidence:${CONF_C} ${confidence}${N} ${D}($(date -u +%H:%M:%S))${N}\n"
   printf "  ${D}│${N}\n"
   printf "  ${D}├─${N} ${W}③ SUMMARY${N}\n"
   printf "  ${D}│${N}    ${summary}\n"

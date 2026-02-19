@@ -268,6 +268,27 @@ window.clearIoTStream = clearIoTStream;
 window.resetCircuitBreakers = () => resetCircuitBreakers(refreshAll);
 window.clearAttackLog = clearAttackLog;
 
+/**
+ * Dark/Light theme toggle.
+ * Persists in localStorage so it survives page reloads.
+ */
+function toggleTheme() {
+  const html = document.documentElement;
+  const isLight = html.classList.toggle('light');
+  localStorage.setItem('ids_theme', isLight ? 'light' : 'dark');
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) btn.innerHTML = isLight ? '&#x2600;&#xFE0F;' : '&#x1F319;';
+}
+window.toggleTheme = toggleTheme;
+
+// Restore saved theme on load
+const savedTheme = localStorage.getItem('ids_theme');
+if (savedTheme === 'light') {
+  document.documentElement.classList.add('light');
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) btn.innerHTML = '&#x2600;&#xFE0F;';
+}
+
 // Alert source filter change handler
 const alertSourceFilter = document.getElementById('alertSourceFilter');
 if (alertSourceFilter) {

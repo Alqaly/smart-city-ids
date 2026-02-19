@@ -135,10 +135,21 @@ export function renderAlertFeed(data) {
 
   let html = '';
   data.alerts.slice(0, 20).forEach(a => {
+    const an = a.analysis || {};
+    const conf = an.confidence || an.confidence_score || 0;
+    const confPct = typeof conf === 'number' ? (conf <= 1 ? Math.round(conf * 100) : Math.round(conf)) : 0;
+    const confClass = confPct >= 80 ? 'conf-high' : confPct >= 50 ? 'conf-medium' : 'conf-low';
+    const engineId = an.analysis_engine || an.engine || '';
+    const mitre = an.mitre_technique || '';
+
     html += `<div class="feed-item">` +
       `<span class="feed-time">${shortTime(a.timestamp)}</span>` +
       `<span class="feed-source"><span class="badge ${a.source === 'falco' ? 'badge-info' : 'badge-purple'}">${esc(a.source || 'unknown')}</span></span>` +
-      `<span class="feed-msg"><strong>${esc(a.rule || '')}</strong> - ${esc(a.summary || a.output || '')}</span>` +
+      `<span class="feed-msg"><strong>${esc(a.rule || '')}</strong> - ${esc(a.summary || a.output || '')}` +
+        (engineId ? ` <span class="ai-badge">&#x1F916; ${esc(engineId)}</span>` : '') +
+        (confPct > 0 ? ` <span class="conf-badge ${confClass}">${confPct}%</span>` : '') +
+        (mitre ? ` <span style="font-size:9px;color:var(--red);font-weight:600">${esc(mitre)}</span>` : '') +
+      `</span>` +
       (a.severity ? `<span class="badge ${sevBadge(a.severity)}">${a.severity}</span>` : '') +
       `</div>`;
   });

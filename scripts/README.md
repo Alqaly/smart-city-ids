@@ -68,7 +68,7 @@ sudo bash scripts/cleanup.sh --light                 # → namespaces + port-for
 
 **Metrics CSV**: Each run appends to `scripts/.attack-metrics.csv`:
 ```
-run_id,scenario_id,scenario_name,severity,threat_type,engine,total_ms,llm_ms,status,timestamp
+run_id,scenario_id,scenario_name,severity,threat_type,engine,total_ms,llm_ms,status,confidence,timestamp
 ```
 
 ### Readiness & Validation

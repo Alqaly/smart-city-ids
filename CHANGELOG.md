@@ -4,6 +4,92 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [v2.5.0] LLM Transparency, SOC Overhaul & Severity-Aware Dedup — 2025-07-17
+
+### Summary
+
+Major release adding an LLM Transparency Panel with operator feedback, severity-aware
+alert deduplication, SOC-grade dashboard overhaul (dark/light theme, glassmorphism,
+confidence badges), enhanced automated actions with dynamic pod targeting, and removal
+of local LLM fallback from the frontend.
+
+### New features
+
+- **LLM Transparency Panel**: Each alert detail row now shows a full analysis breakdown:
+  confidence badge (HIGH/MEDIUM/LOW), evidence & indicators, reasoning chain, business
+  impact assessment, mitigating factors, MITRE ATT&CK technique, and automated action
+  badges with severity-tiered display (CRITICAL/HIGH/MEDIUM/LOW).
+- **Operator Feedback System**: Accuracy feedback buttons (Accurate ✓ / Inaccurate ✗)
+  on every alert, persisted via `POST /api/llm/feedback`. Feedback stats dashboard in
+  LLM tab shows total/accurate/inaccurate counts, accuracy rate with progress bar, and
+  recent feedback history (`GET /api/llm/feedback/stats`).
+- **Severity-Aware Deduplication TTL**: Alert deduplicator now uses severity-driven TTL
+  tiers — critical (≥8) gets base÷3, high (≥6) base÷2, medium (≥4) base, low (<4)
+  base×2. Frontend shows color-coded TTL tier cards in the LLM tab dedup section.
+- **Dark/Light Theme Toggle**: Full theme system with CSS variables, glassmorphism
+  effects (`backdrop-filter: blur`, glass overlays, glow shadows), and localStorage
+  persistence. Toggle via 🌙/☀️ button in topbar.
+- **Confidence Column in Alert Table**: New column showing AI confidence level with
+  color-coded badges (green HIGH, amber MEDIUM, red LOW).
+- **Enhanced SSE Live Feed**: Pipeline feed now shows confidence badges, MITRE ATT&CK
+  technique in red, and severity-tiered automated responses with execution status.
+
+### Improvements
+
+- **Automated Actions Rewrite**: Stage 5 of alert pipeline completely rewritten —
+  dynamic target pod/device selection from alert output_fields, LLM-recommended action
+  execution, verbose logging with clear action descriptions and target names.
+- **Enhanced LLM Prompts**: System prompt and analysis prompt rewritten for SOC analyst
+  output — requires structured evidence, confidence scores, MITRE techniques, business
+  impact, and reasoning chains from the LLM.
+- **SOC Dashboard Styling**: Stat cards and panels get hover glow effects, topbar uses
+  glassmorphism, AI badges on alert feed items, improved visual hierarchy.
+- **Overview Alert Feed**: Enhanced with AI engine badges, confidence badges, and MITRE
+  technique display.
+
+### Fixes
+
+- **`p.label` → `p.name` bug**: Fixed TypeError in alerts.js provider dropdown where
+  `p.label` (non-existent) was used instead of `p.name`.
+- **Local LLM removed from frontend**: Removed `local` from `ALL_PROVIDERS` in state.js
+  — only cloud providers shown (kimi, xai, gemini, openai, anthropic).
+- **Live Pipeline Feed placement**: Moved SSE feed inside `#tab-overview` so it only
+  renders on the Overview tab instead of appearing on every tab.
+- **Re-analyze error handling**: `doReanalyze()` now shows specific HTTP error messages
+  (401/403/500) instead of generic failure.
+- **Falco false positive filters**: Added 2 filter rules in Falco forwarder to suppress
+  known benign alerts (reduces alert flood from ~20/min).
+- **Database purge**: Cleared 1391 junk Falco alerts from PostgreSQL.
+
+### Deployment
+
+- **Docker image now provides all code**: Removed ConfigMap volume mounts (`app-code`,
+  `app-static`) from `ids-api-FINAL.yaml` — Docker image at `/app` is the single
+  source of truth for application code and static assets.
+- **Fixed uvicorn command**: Changed K8s deployment command from `["uvicorn"]` to
+  `["python", "-m", "uvicorn"]` for correct `sys.path` handling.
+- **Image build**: `docker build -f docker/ids-api/Dockerfile .` → tag as
+  `ids-api:latest` → `docker save | k3s ctr images import -`.
+
+### Files changed
+
+- `services/ids-api/static/js/api.js` — `submitFeedback()`, `getFeedbackStats()`
+- `services/ids-api/static/js/modules/alerts.js` — Transparency panel, confidence col
+- `services/ids-api/static/js/modules/llm.js` — Feedback stats, severity TTL tiers
+- `services/ids-api/static/js/modules/overview.js` — AI badges, confidence badges
+- `services/ids-api/static/js/app.js` — Theme toggle with localStorage
+- `services/ids-api/static/js/state.js` — Removed local provider
+- `services/ids-api/static/index.html` — Theme button, feedback div, confidence header
+- `services/ids-api/static/css/style.css` — Light theme, glassmorphism, badge styles
+- `services/ids-api/src/alert_deduplicator.py` — Severity-aware TTL tiers
+- `services/ids-api/src/api/alerts.py` — Automated actions rewrite
+- `services/ids-api/src/api/llm.py` — Feedback endpoints
+- `services/ids-api/src/llm_manager.py` — Enhanced prompts
+- `services/forwarders/falco/src/main.py` — False positive filters
+- `k8s-manifests/ids-api-FINAL.yaml` — Removed volume mounts, fixed command
+
+---
+
 ## [v2.4.0] Re-analyze, Metrics Fixes & Dashboard Clarity — 2025-07-16
 
 ### Summary

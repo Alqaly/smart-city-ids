@@ -31,7 +31,15 @@ FALSE_POSITIVE_FILTERS = [
         "rule": "Clear Log Activities",
         "container_patterns": ["postgres"],
         "proc_names": ["postgres"]
-    }
+    },
+    {
+        "rule": "Contact K8S API Server From Container",
+        "container_patterns": ["forwarder", "falco.*", "metacollector", "ids-api.*"],
+    },
+    {
+        "rule": "Unexpected K8s NodePort Connection",
+        "container_patterns": ["forwarder", "falco.*"],
+    },
 ]
 
 # Track filtered alerts for metrics

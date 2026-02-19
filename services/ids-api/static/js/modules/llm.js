@@ -66,6 +66,8 @@ export function renderLLMTab(llm, cb, dedup, llmDiag) {
   renderCircuitBreakerDetail(cb, configured, diags);
   // ── Deduplication detail ───────────────────────────────────────────
   renderDedupDetail(dedup);
+  // ── Operator feedback stats ────────────────────────────────────────
+  renderFeedbackStats();
 }
 
 // ── Chart renderers ──────────────────────────────────────────────────────
@@ -200,21 +202,90 @@ function renderCircuitBreakerDetail(cb, configured, diags) {
 }
 
 function renderDedupDetail(dedup) {
-  document.getElementById('dedupDetail').innerHTML =
-    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;font-size:13px">' +
+  const sevTtl = (dedup && dedup.severity_ttl) || {};
+  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;font-size:13px">' +
     '<div><span style="color:var(--text3)">Total Alerts:</span><br><strong>' + (dedup && dedup.total_alerts || 0) + '</strong></div>' +
     '<div><span style="color:var(--text3)">Cache Hits:</span><br><strong>' + (dedup && dedup.hits || 0) + '</strong></div>' +
     '<div><span style="color:var(--text3)">Cache Misses:</span><br><strong>' + (dedup && dedup.misses || 0) + '</strong></div>' +
-    '<div><span style="color:var(--text3)">TTL:</span><br><strong>' + (dedup && dedup.ttl_seconds || 60) + 's</strong></div>' +
+    '<div><span style="color:var(--text3)">Base TTL:</span><br><strong>' + (dedup && dedup.ttl_seconds || 60) + 's</strong></div>' +
     '<div><span style="color:var(--text3)">Evictions:</span><br><strong>' + (dedup && dedup.evictions || 0) + '</strong></div>' +
-    '<div><span style="color:var(--text3)">Cost w/o Dedup:</span><br><strong>$' + (dedup && dedup.estimated_cost_without_dedup ? dedup.estimated_cost_without_dedup.toFixed(3) : '0.000') + '</strong></div>' +
-    '<div><span style="color:var(--text3)">Cost w/ Dedup:</span><br><strong>$' + (dedup && dedup.estimated_cost_with_dedup ? dedup.estimated_cost_with_dedup.toFixed(3) : '0.000') + '</strong></div>' +
+    '<div><span style="color:var(--text3)">Hit Rate:</span><br><strong>' + (dedup && dedup.hit_rate_percent || 0) + '%</strong></div>' +
     '</div>';
+
+  // Severity-aware TTL tiers
+  if (sevTtl.critical_gte8 !== undefined) {
+    html += '<div style="margin-top:12px;font-size:12px">' +
+      '<strong style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Severity-Aware TTL</strong>' +
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px">' +
+      '<div style="padding:6px 10px;border-radius:6px;background:rgba(239,68,68,.08);border-left:3px solid var(--red);font-size:12px"><span style="color:var(--red);font-weight:600">Critical (&#x2265;8)</span><br>' + sevTtl.critical_gte8 + 's</div>' +
+      '<div style="padding:6px 10px;border-radius:6px;background:rgba(249,115,22,.08);border-left:3px solid var(--orange);font-size:12px"><span style="color:var(--orange);font-weight:600">High (&#x2265;6)</span><br>' + sevTtl.high_gte6 + 's</div>' +
+      '<div style="padding:6px 10px;border-radius:6px;background:rgba(234,179,8,.08);border-left:3px solid var(--yellow);font-size:12px"><span style="color:var(--yellow);font-weight:600">Medium (&#x2265;4)</span><br>' + sevTtl.medium_gte4 + 's</div>' +
+      '<div style="padding:6px 10px;border-radius:6px;background:rgba(34,197,94,.08);border-left:3px solid var(--green);font-size:12px"><span style="color:var(--green);font-weight:600">Low (&lt;4)</span><br>' + sevTtl.low_lt4 + 's</div>' +
+      '</div></div>';
+  }
+
+  document.getElementById('dedupDetail').innerHTML = html;
 }
 
 /** Reset all circuit breakers and trigger refresh. */
 export function resetCircuitBreakers(refreshFn) {
   api.resetCircuitBreakers().then(() => {
     if (typeof refreshFn === 'function') refreshFn();
+  });
+}
+
+// ── Operator Feedback Stats ──────────────────────────────────────────────
+
+function renderFeedbackStats() {
+  const el = document.getElementById('feedbackStats');
+  if (!el) return;
+  api.getFeedbackStats().then(stats => {
+    if (!stats || stats._error) {
+      el.innerHTML = '<div style="color:var(--text3);padding:12px">No feedback data yet — use the Detail panel in Live Alerts to rate LLM analyses</div>';
+      return;
+    }
+    const total = stats.total || 0;
+    const accurate = stats.accurate || 0;
+    const inaccurate = stats.inaccurate || 0;
+    const rate = stats.accuracy_rate != null ? (stats.accuracy_rate * 100).toFixed(0) : '--';
+    const rateColor = rate >= 80 ? 'var(--green)' : rate >= 50 ? 'var(--yellow)' : 'var(--red)';
+    const barW = rate !== '--' ? Math.max(2, parseInt(rate)) : 0;
+
+    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;font-size:13px;margin-bottom:12px">';
+    html += '<div><span style="color:var(--text3)">Total Reviews:</span><br><strong>' + total + '</strong></div>';
+    html += '<div><span style="color:var(--text3)">Accurate:</span><br><strong style="color:var(--green)">' + accurate + '</strong></div>';
+    html += '<div><span style="color:var(--text3)">Inaccurate:</span><br><strong style="color:var(--red)">' + inaccurate + '</strong></div>';
+    html += '<div><span style="color:var(--text3)">Accuracy Rate:</span><br><strong style="color:' + rateColor + '">' + rate + '%</strong></div>';
+    html += '</div>';
+
+    // Accuracy bar
+    if (total > 0) {
+      html += '<div style="height:20px;background:var(--bg3);border-radius:4px;overflow:hidden;position:relative">';
+      html += '<div style="height:100%;width:' + barW + '%;background:' + rateColor + ';border-radius:4px;transition:width .5s"></div>';
+      html += '<span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:10px;font-weight:600;color:var(--text)">' + rate + '% accuracy</span>';
+      html += '</div>';
+    }
+
+    // Recent feedback
+    if (stats.recent && stats.recent.length) {
+      html += '<div style="margin-top:12px;font-size:12px">';
+      html += '<strong style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.5px">Recent Feedback</strong>';
+      html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">';
+      stats.recent.slice(0, 5).forEach(f => {
+        const icon = f.was_accurate ? '&#x2714;' : '&#x2718;';
+        const color = f.was_accurate ? 'var(--green)' : 'var(--red)';
+        const ts = f.timestamp ? new Date(f.timestamp).toLocaleString() : '';
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 8px;background:rgba(255,255,255,.02);border-radius:4px">';
+        html += '<span style="color:' + color + '">' + icon + '</span>';
+        html += '<span style="font-size:11px;color:var(--text2)">Alert ' + esc(f.analysis_id || '?') + '</span>';
+        html += '<span style="margin-left:auto;font-size:10px;color:var(--text3)">' + ts + '</span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    }
+
+    el.innerHTML = html;
+  }).catch(() => {
+    el.innerHTML = '<div style="color:var(--text3);padding:12px">Unable to load feedback stats</div>';
   });
 }

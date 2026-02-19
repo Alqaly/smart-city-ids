@@ -23,6 +23,38 @@ NAMESPACE="smart-city"
 DEPLOYMENT="ids-api"
 SRC_DIR="$PROJECT_ROOT/services/ids-api/src"
 STATIC_DIR="$PROJECT_ROOT/services/ids-api/static"
+IDS_API_URL="${IDS_API_URL:-http://localhost:30800}"
+
+check_llm_health() {
+    log "Checking LLM provider status..."
+    local llm_status providers_count
+    llm_status="$(curl -s "${IDS_API_URL}/api/llm/status" 2>/dev/null || echo "{}")"
+
+    if command -v jq >/dev/null 2>&1; then
+        providers_count="$(echo "$llm_status" | jq -r '.providers | length // 0' 2>/dev/null || echo "0")"
+    else
+        providers_count="$(python3 -c 'import json,sys
+try:
+    d=json.loads(sys.stdin.read() or "{}")
+    p=d.get("providers", [])
+    print(len(p) if isinstance(p, list) else 0)
+except Exception:
+    print(0)' <<<"$llm_status")"
+    fi
+
+    if [[ "${providers_count:-0}" -le 0 ]]; then
+        warn "⚠️  No LLM providers detected from ${IDS_API_URL}/api/llm/status"
+        warn "   Ensure API keys exist in ids-secrets and pods have env vars."
+        read -r -p "   Continue deployment? (y/N) " -n 1 REPLY
+        echo
+        if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+            err "Deployment cancelled."
+            exit 1
+        fi
+    else
+        log "✓ LLM providers configured: ${providers_count}"
+    fi
+}
 
 # ─── Status check ───────────────────────────────────────────────────────
 if [[ "${1:-}" == "--status" ]]; then
@@ -47,6 +79,7 @@ fi
 # ─── Validate source ────────────────────────────────────────────────────
 [[ -f "$SRC_DIR/main.py" ]]        || { err "Missing $SRC_DIR/main.py"; exit 1; }
 [[ -f "$STATIC_DIR/index.html" ]]  || { err "Missing $STATIC_DIR/index.html"; exit 1; }
+check_llm_health
 
 log "Deploying from: $PROJECT_ROOT"
 echo ""

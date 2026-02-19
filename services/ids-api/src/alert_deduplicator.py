@@ -26,13 +26,20 @@ logger = logging.getLogger(__name__)
 
 class AlertDeduplicator:
     """
-    Fingerprint-based alert deduplicator with TTL caching.
+    Fingerprint-based alert deduplicator with severity-aware TTL caching.
     
     Detects and caches analysis of duplicate security alerts to prevent
     redundant LLM calls during alert storms (common in DDoS/brute-force).
     
+    Severity-aware TTL: High-severity alerts get shorter TTLs so they are
+    re-analyzed more frequently, while low-severity alerts cache longer.
+      - Critical (sev >= 8): TTL = base / 3  (e.g. 20s for 60s base)
+      - High     (sev >= 6): TTL = base / 2  (e.g. 30s for 60s base)
+      - Medium   (sev >= 4): TTL = base      (e.g. 60s)
+      - Low      (sev < 4):  TTL = base * 2  (e.g. 120s)
+    
     Attributes:
-        ttl_seconds (int): Cache TTL in seconds (default 60)
+        ttl_seconds (int): Base cache TTL in seconds (default 60)
         max_cache_size (int): Maximum fingerprints to cache (default 10000)
         hits (int): Number of deduplicated alerts
         misses (int): Number of new alerts analyzed
@@ -44,12 +51,13 @@ class AlertDeduplicator:
         Initialize alert deduplicator.
         
         Args:
-            ttl_seconds: Time-to-live for fingerprint cache (default 60s)
+            ttl_seconds: Base time-to-live for fingerprint cache (default 60s).
+                         Actual TTL varies by severity (see class docstring).
             max_cache_size: Maximum fingerprints to keep in memory
         """
         self.ttl = ttl_seconds
         self.max_cache_size = max_cache_size
-        self.cache: Dict[str, Dict] = {}  # fingerprint -> {timestamp, analysis, count}
+        self.cache: Dict[str, Dict] = {}  # fingerprint -> {timestamp, analysis, count, effective_ttl}
         self.hits = 0
         self.misses = 0
         self.evictions = 0
@@ -94,9 +102,32 @@ class AlertDeduplicator:
         # Hash to fixed-length fingerprint
         return hashlib.sha256(key.encode()).hexdigest()
     
+    def _severity_ttl(self, severity: int) -> int:
+        """
+        Compute effective TTL based on alert severity.
+        
+        High-severity alerts expire faster so they get re-analyzed more
+        frequently, while low-severity alerts stay cached longer.
+        
+        Args:
+            severity: Alert severity (1-10)
+            
+        Returns:
+            Effective TTL in seconds
+        """
+        if severity >= 8:
+            return max(10, self.ttl // 3)   # Critical: ~20s for 60s base
+        elif severity >= 6:
+            return max(15, self.ttl // 2)   # High: ~30s for 60s base
+        elif severity >= 4:
+            return self.ttl                  # Medium: base TTL
+        else:
+            return self.ttl * 2              # Low: 2x base
+    
     def should_analyze(self, alert: Dict) -> Tuple[bool, Optional[Dict]]:
         """
         Check if alert should be analyzed or if cached result can be used.
+        Uses severity-aware TTL: cached high-severity alerts expire faster.
         
         Args:
             alert: Alert dict from Falco/Suricata
@@ -105,24 +136,6 @@ class AlertDeduplicator:
             Tuple of (should_analyze: bool, cached_analysis: dict or None)
                 - (True, None) if alert is new and needs analysis
                 - (False, cached_analysis) if cached result is available
-                
-        Examples:
-            >>> dedup = AlertDeduplicator(ttl_seconds=60)
-            >>> alert = {"rule": "Test", "output_fields": {"container.name": "test"}}
-            >>> 
-            >>> # First call: new alert
-            >>> should_analyze, cached = dedup.should_analyze(alert)
-            >>> should_analyze
-            True
-            >>> cached is None
-            True
-            >>> 
-            >>> # Second call (within 60s): cached result
-            >>> should_analyze, cached = dedup.should_analyze(alert)
-            >>> should_analyze
-            False
-            >>> cached is not None
-            True
         """
         fp = self.get_fingerprint(alert)
         now = time.time()
@@ -132,15 +145,19 @@ class AlertDeduplicator:
             entry = self.cache[fp]
             age = now - entry["timestamp"]
             
-            if age < self.ttl:
+            # Use the severity-aware TTL from the cached analysis
+            effective_ttl = entry.get("effective_ttl", self.ttl)
+            
+            if age < effective_ttl:
                 # Cache hit: return cached analysis
                 self.hits += 1
                 entry["hit_count"] = entry.get("hit_count", 1) + 1
                 self.dedup_count[fp] += 1
                 
+                cached_sev = entry.get("analysis", {}).get("severity", "?")
                 logger.info(
-                    f"Alert deduplication HIT (fp={fp[:8]}..., age={age:.1f}s, "
-                    f"hits={self.hits}, dedup_count={entry['hit_count']})"
+                    f"Alert dedup HIT (fp={fp[:8]}…, age={age:.1f}s/{effective_ttl}s, "
+                    f"sev={cached_sev}, hits={self.hits}, count={entry['hit_count']})"
                 )
                 
                 return False, entry.get("analysis")
@@ -148,17 +165,18 @@ class AlertDeduplicator:
                 # Cache expired: remove and process as new
                 del self.cache[fp]
                 self.misses += 1
-                logger.info(f"Cache expired for fingerprint {fp[:8]}... (age={age:.1f}s)")
+                logger.info(f"Cache expired for fp={fp[:8]}… (age={age:.1f}s, ttl={effective_ttl}s)")
                 return True, None
         
         # Cache miss: need to analyze
         self.misses += 1
-        logger.info(f"Alert deduplication MISS (fp={fp[:8]}..., total_misses={self.misses})")
+        logger.info(f"Alert dedup MISS (fp={fp[:8]}…, total_misses={self.misses})")
         return True, None
     
     def cache_analysis(self, alert: Dict, analysis: Dict) -> None:
         """
         Store analysis result in cache for future deduplication.
+        Uses severity-aware TTL: high-severity results expire faster.
         
         Args:
             alert: Original alert dict
@@ -167,7 +185,7 @@ class AlertDeduplicator:
         Side effects:
             - Updates cache with new fingerprint/analysis pair
             - Evicts old entries if cache exceeds max_cache_size
-            - Logs cache statistics
+            - Computes effective TTL from analysis severity
         """
         fp = self.get_fingerprint(alert)
         
@@ -177,19 +195,27 @@ class AlertDeduplicator:
             del self.cache[oldest_fp]
             self.evictions += 1
             logger.warning(
-                f"Cache eviction: removed oldest entry (fp={oldest_fp[:8]}..., "
+                f"Cache eviction: removed oldest entry (fp={oldest_fp[:8]}…, "
                 f"total_evictions={self.evictions})"
             )
         
-        # Store new analysis
+        # Compute severity-aware TTL
+        severity = analysis.get("severity", 5) if isinstance(analysis, dict) else 5
+        effective_ttl = self._severity_ttl(severity)
+        
+        # Store new analysis with effective TTL
         self.cache[fp] = {
             "timestamp": time.time(),
             "analysis": analysis,
             "alert": alert,
-            "hit_count": 1
+            "hit_count": 1,
+            "effective_ttl": effective_ttl,
         }
         
-        logger.debug(f"Cached analysis for fingerprint {fp[:8]}... (cache_size={len(self.cache)})")
+        logger.debug(
+            f"Cached analysis for fp={fp[:8]}… "
+            f"(sev={severity}, ttl={effective_ttl}s, cache_size={len(self.cache)})"
+        )
     
     def get_stats(self) -> Dict:
         """
@@ -230,6 +256,12 @@ class AlertDeduplicator:
             "max_cache_size": self.max_cache_size,
             "cache_utilization_percent": round(len(self.cache) / self.max_cache_size * 100, 2),
             "ttl_seconds": self.ttl,
+            "severity_ttl": {
+                "critical_gte8": self._severity_ttl(8),
+                "high_gte6": self._severity_ttl(6),
+                "medium_gte4": self._severity_ttl(4),
+                "low_lt4": self._severity_ttl(1),
+            },
             "evictions": self.evictions,
             "top_duplicates": [
                 {
