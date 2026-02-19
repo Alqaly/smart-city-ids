@@ -290,6 +290,8 @@ from api.iot import router as iot_router  # noqa: E402             — /api/iot/
 from api.metrics_routes import router as metrics_router  # noqa: E402 — /health, /metrics, /api/metrics
 from api.health import router as health_router  # noqa: E402       — /, /ui
 from api.demo import router as demo_router  # noqa: E402           — /api/iot/scale, /api/demo/chaos
+from api.analyst import router as analyst_router  # noqa: E402         — /api/analyst/* (AI Chat)
+from api.credits import credits_router as credits_router  # noqa: E402     — /llm/credits/* (LLM Monitoring)
 
 app.include_router(auth_router)
 app.include_router(alerts_router)
@@ -300,6 +302,8 @@ app.include_router(iot_router)
 app.include_router(metrics_router)
 app.include_router(health_router)
 app.include_router(demo_router)
+app.include_router(analyst_router)
+app.include_router(credits_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

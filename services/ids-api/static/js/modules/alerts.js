@@ -18,7 +18,7 @@
 
 import { store, ALL_PROVIDERS } from '../state.js';
 import { api } from '../api.js';
-import { esc, shortTime, sevBadge } from '../utils.js';
+import { $, esc, shortTime, sevBadge } from '../utils.js';
 
 // ── Module-level SSE state ───────────────────────────────────────────────
 let _sse = null;
@@ -32,12 +32,13 @@ let _incidentQueryKey = '';
  * Load and render the alert history table with optional source filter.
  */
 export function loadAlerts() {
-  const src = document.getElementById('alertSourceFilter').value;
+  const srcEl = $('alertSourceFilter');
+  const src = srcEl ? srcEl.value : 'all';
   api.getAlertsFiltered(50, src).then(data => {
     if (!data || !data.alerts) return;
     let rows = [...data.alerts];
 
-    const search = (document.getElementById('incidentSearch')?.value || '').trim().toLowerCase();
+    const search = ($('incidentSearch')?.value || '').trim().toLowerCase();
     if (search) {
       rows = rows.filter(a => {
         const an = a.analysis || {};
@@ -49,8 +50,8 @@ export function loadAlerts() {
       });
     }
 
-    const sort = document.getElementById('incidentSort')?.value || 'time_desc';
-    const pageSize = parseInt(document.getElementById('incidentPageSize')?.value || '25', 10);
+    const sort = $('incidentSort')?.value || 'time_desc';
+    const pageSize = parseInt($('incidentPageSize')?.value || '25', 10);
     const queryKey = [src, search, sort, pageSize].join('|');
     if (queryKey !== _incidentQueryKey) {
       _incidentPage = 1;
@@ -216,8 +217,9 @@ export function loadAlerts() {
       html += `<pre id="reanalyze-result-${idx}" style="display:none;margin-top:10px;font-size:11.5px;color:var(--text2);background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border);white-space:pre-wrap;max-height:400px;overflow-y:auto"></pre>`;
       html += `</td></tr>`;
     });
-    document.getElementById('alertsTable').innerHTML = html || '<tr><td colspan="10" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
-    const info = document.getElementById('incidentPageInfo');
+    const alertsTableEl = $('alertsTable');
+    if (alertsTableEl) alertsTableEl.innerHTML = html || '<tr><td colspan="10" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
+    const info = $('incidentPageInfo');
     if (info) info.textContent = `Page ${_incidentPage}/${totalPages} • ${rows.length} incidents`;
   });
 }
@@ -397,21 +399,21 @@ window._exportIncidentsCsv = () => {
  */
 export function connectLiveFeed(onNewAlert) {
   if (_sse) { try { _sse.close(); } catch (e) { /* ignore */ } }
-  const dot = document.getElementById('liveFeedDot');
-  const status = document.getElementById('liveFeedStatus');
-  dot.className = 'dot dot-yellow';
-  status.textContent = 'Connecting...';
+  const dot = $('liveFeedDot');
+  const status = $('liveFeedStatus');
+  if (dot) dot.className = 'dot dot-yellow';
+  if (status) status.textContent = 'Connecting...';
 
   _sse = new EventSource('/api/alerts/live');
 
   _sse.onopen = () => {
-    dot.className = 'dot dot-green';
-    status.textContent = 'Connected — streaming all alert processing';
+    if (dot) dot.className = 'dot dot-green';
+    if (status) status.textContent = 'Connected — streaming all alert processing';
   };
 
   _sse.addEventListener('connected', () => {
-    const log = document.getElementById('liveFeedLog');
-    if (log.innerHTML === 'Connecting to live event stream...') {
+    const log = $('liveFeedLog');
+    if (log && log.innerHTML === 'Connecting to live event stream...') {
       log.innerHTML = '';
     }
   });
@@ -422,9 +424,10 @@ export function connectLiveFeed(onNewAlert) {
       const state = store.getState();
       const newCount = state.sseFeedCount + 1;
       store.setState({ sseFeedCount: newCount });
-      document.getElementById('liveFeedCount').textContent = newCount;
+      const countEl = $('liveFeedCount');
+      if (countEl) countEl.textContent = newCount;
 
-      const log = document.getElementById('liveFeedLog');
+      const log = $('liveFeedLog');
       const ts = new Date().toLocaleTimeString();
       const sev = d.severity || '?';
       const sevColor = sev >= 8 ? '#ef4444' : sev >= 5 ? '#f59e0b' : '#22c55e';
@@ -512,9 +515,11 @@ export function connectLiveFeed(onNewAlert) {
       line += '└─────────────────────────────────────────────────────────────\n';
 
       // Prepend (newest on top)
-      let old = log.innerHTML;
-      if (old === 'Connecting to live event stream...') old = '';
-      log.innerHTML = line + '\n' + old;
+      if (log) {
+        let old = log.innerHTML;
+        if (old === 'Connecting to live event stream...') old = '';
+        log.innerHTML = line + '\n' + old;
+      }
 
       // Audio alert for critical severity
       if (typeof window._handleAudioAlert === 'function') {
@@ -522,9 +527,11 @@ export function connectLiveFeed(onNewAlert) {
       }
 
       // Flash card border
-      const card = document.getElementById('liveFeedCard');
-      card.style.borderColor = sevColor;
-      setTimeout(() => { card.style.borderColor = 'var(--accent)'; }, 1500);
+      const card = $('liveFeedCard');
+      if (card) {
+        card.style.borderColor = sevColor;
+        setTimeout(() => { card.style.borderColor = 'var(--accent)'; }, 1500);
+      }
 
       // Trigger a targeted refresh instead of full refreshAll
       if (typeof onNewAlert === 'function') {
@@ -536,8 +543,8 @@ export function connectLiveFeed(onNewAlert) {
   });
 
   _sse.onerror = () => {
-    dot.className = 'dot dot-red';
-    status.textContent = 'Disconnected — reconnecting...';
+    if (dot) dot.className = 'dot dot-red';
+    if (status) status.textContent = 'Disconnected — reconnecting...';
   };
 }
 
@@ -551,13 +558,17 @@ export function toggleLiveFeed() {
   const state = store.getState();
   const open = !state.ui.liveFeedOpen;
   store.setState({ ui: { ...state.ui, liveFeedOpen: open } });
-  document.getElementById('liveFeedBody').style.display = open ? 'block' : 'none';
-  document.getElementById('liveFeedToggleBtn').textContent = open ? '▼' : '▲';
+  const body = $('liveFeedBody');
+  const btn = $('liveFeedToggleBtn');
+  if (body) body.style.display = open ? 'block' : 'none';
+  if (btn) btn.textContent = open ? '▼' : '▲';
 }
 
 /** Clear the live feed log. */
 export function clearLiveFeed() {
-  document.getElementById('liveFeedLog').innerHTML = 'Waiting for alerts...';
+  const log = $('liveFeedLog');
+  if (log) log.innerHTML = 'Waiting for alerts...';
   store.setState({ sseFeedCount: 0 });
-  document.getElementById('liveFeedCount').textContent = '0';
+  const count = $('liveFeedCount');
+  if (count) count.textContent = '0';
 }

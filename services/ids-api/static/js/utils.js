@@ -6,12 +6,22 @@
  * imports from other dashboard modules.  Safe to use anywhere.
  *
  * Functions:
+ *   $(id)              — safe document.getElementById (returns element or null)
  *   esc(str)           — HTML-escape a string (XSS prevention)
  *   shortTime(ts)      — ISO timestamp → "HH:MM:SS"
  *   formatDuration(s)  — seconds → "2h 14m" human-readable
  *   sevBadge(sev)      — severity int → CSS class name
  *   countCB(cb)        — count engines in circuit-breaker data
  */
+
+/**
+ * Safe getElementById — returns the element or null, never throws.
+ * @param {string} id — element ID
+ * @returns {HTMLElement|null}
+ */
+export function $(id) {
+  return document.getElementById(id);
+}
 
 /**
  * HTML-escape a string to prevent XSS when injecting into innerHTML.

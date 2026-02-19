@@ -15,7 +15,7 @@
  */
 
 import { ALL_PROVIDERS } from '../state.js';
-import { esc, formatDuration, shortTime, sevBadge, countCB } from '../utils.js';
+import { $, esc, formatDuration, shortTime, sevBadge, countCB } from '../utils.js';
 
 // ── Stat Cards ───────────────────────────────────────────────────────────
 
@@ -24,6 +24,8 @@ import { esc, formatDuration, shortTime, sevBadge, countCB } from '../utils.js';
  */
 export function renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDiag) {
   if (!m) return;
+  const statsEl = $('overviewStats');
+  if (!statsEl) return;
   const uptime = m.uptime_seconds ? formatDuration(m.uptime_seconds) : '--';
   const smry = (llmDiag && llmDiag.summary) ? llmDiag.summary : {};
 
@@ -64,7 +66,7 @@ export function renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDi
     dedupSub = `${dedupPct}% duplicate alerts suppressed`;
   }
 
-  document.getElementById('overviewStats').innerHTML =
+  statsEl.innerHTML =
     `<div class="stat-card blue"><div class="stat-label">Total Alerts</div><div class="stat-value">${totalAlerts}</div><div class="stat-sub">Ingested via Falco / Suricata</div></div>` +
     `<div class="stat-card red"><div class="stat-label">Critical Alerts</div><div class="stat-value">${critAlerts}</div><div class="stat-sub">${critSub}</div></div>` +
     `<div class="stat-card green"><div class="stat-label">IoT Devices</div><div class="stat-value">${iotCount}</div><div class="stat-sub">${iotSub}</div></div>` +
@@ -79,8 +81,9 @@ export function renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDi
  * Render the 5-stage pipeline and alert fatigue reduction card.
  */
 export function renderPipelineOverview(data) {
-  const pipeEl = document.getElementById('pipelineOverview');
-  const fatigueEl = document.getElementById('alertFatigue');
+  const pipeEl = $('pipelineOverview');
+  const fatigueEl = $('alertFatigue');
+  if (!pipeEl || !fatigueEl) return;
   if (!data || !data.stages) {
     pipeEl.innerHTML = '';
     fatigueEl.innerHTML = '<span style="color:var(--text3)">Pipeline metrics unavailable</span>';
@@ -125,8 +128,10 @@ export function renderPipelineOverview(data) {
  */
 export function renderAlertFeed(data) {
   if (!data || !data.alerts) return;
-  const el = document.getElementById('alertFeed');
-  document.getElementById('alertCountBadge').textContent = data.total || 0;
+  const el = $('alertFeed');
+  if (!el) return;
+  const badgeEl = $('alertCountBadge');
+  if (badgeEl) badgeEl.textContent = data.total || 0;
 
   if (!data.alerts.length) {
     el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No alerts yet - run an attack simulation!</div>';
@@ -163,7 +168,8 @@ export function renderAlertFeed(data) {
  * Render compact LLM provider status in the overview sidebar.
  */
 export function renderLLMOverview(llm, cb, llmDiag) {
-  const el = document.getElementById('llmOverview');
+  const el = $('llmOverview');
+  if (!el) return;
   const engines = (cb && cb.engines) ? cb.engines : {};
   const configured = (llm && llm.providers) ? llm.providers : [];
   const diags = (llmDiag && llmDiag.providers) ? llmDiag.providers : {};
@@ -213,7 +219,8 @@ export function renderLLMOverview(llm, cb, llmDiag) {
  * Render system component health in the overview sidebar.
  */
 export function renderSystemHealth(h, prod) {
-  const el = document.getElementById('systemHealth');
+  const el = $('systemHealth');
+  if (!el) return;
   if (!h) { el.innerHTML = '<div style="color:var(--text3)">Connecting...</div>'; return; }
   const c = h.components || {};
   const rl = (prod && prod.rate_limiter) ? prod.rate_limiter : {};

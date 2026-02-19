@@ -16,7 +16,7 @@
 
 import { store } from '../state.js';
 import { api } from '../api.js';
-import { esc, sevBadge, severityToPriority } from '../utils.js';
+import { $, esc, sevBadge, severityToPriority } from '../utils.js';
 
 // ══════════════════════════════════════════════════════════════════════════
 // Scenario Registry — 12 MITRE ATT&CK for ICS attack templates
@@ -62,10 +62,14 @@ export function renderAttackTab() {
   const targets = [...new Set(ATTACK_SCENARIOS.map(a => a.pod))];
   const mitres = [...new Set(ATTACK_SCENARIOS.map(a => a.mitre))];
 
-  document.getElementById('atkScenarioCount').textContent = ATTACK_SCENARIOS.length + ' + Custom';
-  document.getElementById('atkMitreCount').textContent = mitres.length;
-  document.getElementById('atkTargetCount').textContent = targets.length + '/5';
-  document.getElementById('atkRunCount').textContent = state.attackRunCount;
+  const atkScEl = $('atkScenarioCount');
+  if (atkScEl) atkScEl.textContent = ATTACK_SCENARIOS.length + ' + Custom';
+  const atkMiEl = $('atkMitreCount');
+  if (atkMiEl) atkMiEl.textContent = mitres.length;
+  const atkTgEl = $('atkTargetCount');
+  if (atkTgEl) atkTgEl.textContent = targets.length + '/5';
+  const atkRnEl = $('atkRunCount');
+  if (atkRnEl) atkRnEl.textContent = state.attackRunCount;
 
   // ── Category filter chips ──────────────────────────────────────────
   const activeCategory = state.activeCategory;
@@ -76,7 +80,8 @@ export function renderAttackTab() {
     chips += '<button class="btn btn-sm ' + (activeCategory === cat ? 'btn-primary' : 'btn-outline') +
       '" onclick="window._filterAttacks(\'' + cat + '\')">' + cat + ' (' + count + ')</button>';
   });
-  document.getElementById('attackCategoryFilter').innerHTML = chips;
+  const catFilterEl = $('attackCategoryFilter');
+  if (catFilterEl) catFilterEl.innerHTML = chips;
 
   // ── Scenario cards ─────────────────────────────────────────────────
   const filtered = activeCategory === 'all' ? ATTACK_SCENARIOS : ATTACK_SCENARIOS.filter(a => a.cat === activeCategory);
@@ -100,7 +105,8 @@ export function renderAttackTab() {
     '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:18px">\u2699\uFE0F</span><h4 style="margin:0;font-size:13px">Custom Alert</h4></div>' +
     '<p style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.5">Create a custom Falco/Suricata payload and inject into the real IDS analysis pipeline.</p>' +
     '<div style="font-size:11px"><span class="badge badge-purple">Custom</span></div></div>';
-  document.getElementById('attackGrid').innerHTML = html;
+  const gridEl = $('attackGrid');
+  if (gridEl) gridEl.innerHTML = html;
 
   // ── MITRE ATT&CK table ─────────────────────────────────────────────
   const mitreMap = {};
@@ -115,7 +121,8 @@ export function renderAttackTab() {
       '<td><span class="badge badge-info">' + m.tactic + '</span></td>' +
       '<td style="font-size:11px">' + m.scenarios.join(', ') + '</td></tr>';
   });
-  document.getElementById('mitreTable').innerHTML = mitreHtml;
+  const mitreEl = $('mitreTable');
+  if (mitreEl) mitreEl.innerHTML = mitreHtml;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -136,12 +143,20 @@ export function launchAttack(attackId, refreshFn) {
     attackTimerMs: 0,
     attackRunCount: state.attackRunCount + 1,
   });
-  document.getElementById('atkRunCount').textContent = state.attackRunCount + 1;
-  document.getElementById('attackStatus').textContent = 'Attacking: ' + attack.name;
-  document.getElementById('attackStatus').className = 'pill pill-err';
-  document.getElementById('attackProgressFill').style.background = 'var(--red)';
-  document.getElementById('attackProgressFill').style.width = '0%';
-  document.getElementById('attackTimer').textContent = '00:00';
+  const runCountEl = $('atkRunCount');
+  if (runCountEl) runCountEl.textContent = state.attackRunCount + 1;
+  const atkStatusEl = $('attackStatus');
+  if (atkStatusEl) {
+    atkStatusEl.textContent = 'Attacking: ' + attack.name;
+    atkStatusEl.className = 'pill pill-err';
+  }
+  const progressFill = $('attackProgressFill');
+  if (progressFill) {
+    progressFill.style.background = 'var(--red)';
+    progressFill.style.width = '0%';
+  }
+  const timerEl = $('attackTimer');
+  if (timerEl) timerEl.textContent = '00:00';
 
   addLog('[' + new Date().toLocaleTimeString() + '] \u2501\u2501\u2501 ATTACK START: ' + attack.name + ' (' + attack.mitre + ' | ' + attack.source.toUpperCase() + ' | Sev ' + attack.sev + '/10) \u2501\u2501\u2501');
   addLog('[' + new Date().toLocaleTimeString() + '] Target: ' + attack.pod + ' | Threat: ' + attack.threat);
@@ -154,8 +169,10 @@ export function launchAttack(attackId, refreshFn) {
     const newMs = s.attackTimerMs + 100;
     store.setState({ attackTimerMs: newMs });
     const progress = Math.min(100, (newMs / attack.duration) * 100);
-    document.getElementById('attackProgressFill').style.width = progress + '%';
-    document.getElementById('attackTimer').textContent = new Date(newMs).toISOString().substr(14, 5);
+    const pf = $('attackProgressFill');
+    if (pf) pf.style.width = progress + '%';
+    const tm = $('attackTimer');
+    if (tm) tm.textContent = new Date(newMs).toISOString().substr(14, 5);
     if (Math.random() < 0.3) createAttackParticle(attack);
     if (newMs >= attack.duration) {
       clearInterval(attackInterval);
@@ -199,7 +216,7 @@ function triggerRealAttack(attack, refreshFn) {
 }
 
 function createAttackParticle(attack) {
-  const vis = document.getElementById('attackFlowVis');
+  const vis = $('attackFlowVis');
   if (!vis) return;
   const particle = document.createElement('div');
   particle.style.cssText = 'position:absolute;left:0;top:' + (Math.random() * 180) + 'px;width:4px;height:4px;background:' + attack.color + ';border-radius:50%;opacity:.8;animation:attackFlow 2s linear forwards;font-size:10px';
@@ -207,22 +224,28 @@ function createAttackParticle(attack) {
   vis.appendChild(particle);
   const state = store.getState();
   store.setState({ attackFlowEvents: state.attackFlowEvents + 1 });
-  document.getElementById('attackFlowCount').textContent = (state.attackFlowEvents + 1) + ' events';
+  const flowCountEl = $('attackFlowCount');
+  if (flowCountEl) flowCountEl.textContent = (state.attackFlowEvents + 1) + ' events';
   setTimeout(() => { particle.remove(); }, 2000);
 }
 
 function attackComplete() {
-  document.getElementById('attackStatus').textContent = 'Complete';
-  document.getElementById('attackStatus').className = 'pill pill-success';
-  document.getElementById('attackProgressFill').style.background = 'var(--green)';
+  const statusEl = $('attackStatus');
+  if (statusEl) {
+    statusEl.textContent = 'Complete';
+    statusEl.className = 'pill pill-success';
+  }
+  const pf = $('attackProgressFill');
+  if (pf) pf.style.background = 'var(--green)';
   const attack = store.getState().currentAttack;
   addLog('[' + new Date().toLocaleTimeString() + '] \u2705 Attack simulation complete — ' + attack.name + ' (' + attack.mitre + ')');
   setTimeout(() => {
-    document.getElementById('attackStatus').textContent = 'Idle';
-    document.getElementById('attackStatus').className = 'pill pill-ok';
-    document.getElementById('attackProgressFill').style.width = '0%';
-    document.getElementById('attackProgressFill').style.background = 'var(--red)';
-    document.getElementById('attackTimer').textContent = '00:00';
+    const s = $('attackStatus');
+    if (s) { s.textContent = 'Idle'; s.className = 'pill pill-ok'; }
+    const p = $('attackProgressFill');
+    if (p) { p.style.width = '0%'; p.style.background = 'var(--red)'; }
+    const t = $('attackTimer');
+    if (t) t.textContent = '00:00';
     store.setState({ currentAttack: null });
   }, 3000);
 }
@@ -233,7 +256,8 @@ function attackComplete() {
 
 export function showCustomModal() {
   const podOpts = ALL_PODS.map(p => '<option value="' + p + '">' + p + '</option>').join('');
-  document.getElementById('modalContent').innerHTML =
+  const mc = $('modalContent'); if (!mc) return;
+  mc.innerHTML =
     '<h2 style="margin-bottom:4px">Custom Alert Injection</h2>' +
     '<p style="font-size:12px;color:var(--text3);margin-bottom:16px">Inject a custom security event into the IDS pipeline. It will flow through dedup, LLM analysis, governance, and K8s automation.</p>' +
     '<label style="font-size:12px;color:var(--text2)">Rule Name</label>' +
@@ -253,19 +277,20 @@ export function showCustomModal() {
     '<input id="customMitre" placeholder="e.g. T0836" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"></div>' +
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="window._closeModal()">Cancel</button><button class="btn btn-primary" onclick="window._sendCustom()">Inject Alert</button></div>';
-  document.getElementById('modalOverlay').classList.add('open');
+  const modalOv = $('modalOverlay');
+  if (modalOv) modalOv.classList.add('open');
 }
 
 export function sendCustom(refreshFn) {
   const ts = new Date().toISOString();
-  const mitre = document.getElementById('customMitre').value || '';
+  const mitre = ($('customMitre') || {}).value || '';
   const payload = {
-    output: document.getElementById('customOutput').value,
-    priority: document.getElementById('customPriority').value,
-    rule: document.getElementById('customRule').value,
+    output: ($('customOutput') || {}).value || '',
+    priority: ($('customPriority') || {}).value || 'Warning',
+    rule: ($('customRule') || {}).value || 'Custom',
     time: ts,
     output_fields: {
-      'container.name': document.getElementById('customContainer').value,
+      'container.name': ($('customContainer') || {}).value || 'unknown',
       'proc.cmdline': 'custom-injection',
       'mitre.technique': mitre,
     },
@@ -274,7 +299,7 @@ export function sendCustom(refreshFn) {
 
   const state = store.getState();
   store.setState({ attackRunCount: state.attackRunCount + 1 });
-  document.getElementById('atkRunCount').textContent = state.attackRunCount + 1;
+  const rc = $('atkRunCount'); if (rc) rc.textContent = state.attackRunCount + 1;
 
   addLog('\u2501'.repeat(64));
   addLog('  CUSTOM ALERT INJECTION' + (mitre ? ' [' + mitre + ']' : ''));
@@ -324,15 +349,18 @@ export function sendCustom(refreshFn) {
 }
 
 function closeModal() {
-  document.getElementById('modalOverlay').classList.remove('open');
+  const m = $('modalOverlay');
+  if (m) m.classList.remove('open');
 }
 
 export function clearAttackLog() {
-  document.getElementById('attackLog').textContent = '';
+  const el = $('attackLog');
+  if (el) el.textContent = '';
 }
 
 function addLog(msg) {
-  const el = document.getElementById('attackLog');
+  const el = $('attackLog');
+  if (!el) return;
   const t = new Date().toLocaleTimeString();
   const isIndent = msg.startsWith('  ') || msg.startsWith('\u2501') || msg === '' || msg.startsWith('\n');
   const prefix = isIndent ? '           ' : '[' + t + '] ';

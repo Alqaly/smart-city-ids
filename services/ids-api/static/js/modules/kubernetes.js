@@ -13,6 +13,7 @@
  */
 
 import { api } from '../api.js';
+import { $ } from '../utils.js';
 
 /**
  * Load cluster health then render all K8s sub-panels.
@@ -20,7 +21,8 @@ import { api } from '../api.js';
 export function loadK8s() {
   api.getHealth().then(h => {
     const c = (h && h.components) ? h.components : {};
-    document.getElementById('k8sStats').innerHTML =
+    const k8sStatsEl = $('k8sStats');
+    if (k8sStatsEl) k8sStatsEl.innerHTML =
       '<div class="stat-card green"><div class="stat-label">Kubernetes</div><div class="stat-value">' +
       (c.kubernetes === 'connected' ? 'Connected' : 'Offline') +
       '</div><div class="stat-sub">Cluster API</div></div>' +
@@ -66,10 +68,11 @@ function renderK8sTables() {
     ph += '<tr><td>' + p[0] + '</td><td><span class="dot dot-green"></span>' +
       p[1] + '</td><td>' + p[2] + '</td><td>' + p[3] + '</td></tr>';
   });
-  document.getElementById('podsTable').innerHTML = ph;
+  const podsEl = $('podsTable');
+  if (podsEl) podsEl.innerHTML = ph;
 
   // Explanation blurb
-  const explEl = document.getElementById('k8sExplain');
+  const explEl = $('k8sExplain');
   if (explEl) {
     explEl.innerHTML =
       '<strong>Pods</strong> are running container instances (the actual processes). ' +
@@ -95,5 +98,6 @@ function renderK8sTables() {
     sh += '<tr><td>' + s[0] + '</td><td><span class="badge badge-info">' + s[1] +
       '</span></td><td>' + s[2] + '</td><td>' + s[3] + '</td></tr>';
   });
-  document.getElementById('servicesTable').innerHTML = sh;
+  const svcsEl = $('servicesTable');
+  if (svcsEl) svcsEl.innerHTML = sh;
 }

@@ -13,7 +13,7 @@
 
 import { ALL_PROVIDERS } from '../state.js';
 import { api } from '../api.js';
-import { esc } from '../utils.js';
+import { $, esc } from '../utils.js';
 
 // Bar chart colour palette per engine
 const BAR_COLORS = {
@@ -36,7 +36,8 @@ export function renderLLMTab(llm, cb, dedup, llmDiag) {
   const smry = (llmDiag && llmDiag.summary) ? llmDiag.summary : {};
 
   // ── Summary cards ──────────────────────────────────────────────────
-  document.getElementById('llmStats').innerHTML =
+  const llmStatsEl = $('llmStats');
+  if (llmStatsEl) llmStatsEl.innerHTML =
     '<div class="stat-card purple"><div class="stat-label">Total Providers</div><div class="stat-value">' + ALL_PROVIDERS.length + '</div><div class="stat-sub">' + ALL_PROVIDERS.map(p => p.id).join(', ') + '</div></div>' +
     '<div class="stat-card green"><div class="stat-label">Operational</div><div class="stat-value">' + (smry.operational || 0) + '/' + ALL_PROVIDERS.length + '</div><div class="stat-sub">Configured: ' + configCount + '</div></div>' +
     '<div class="stat-card red"><div class="stat-label">Errors / Cooldown</div><div class="stat-value">' + ((smry.error || 0) + (smry.cooldown || 0)) + '</div><div class="stat-sub">' + (smry.error || 0) + ' errors, ' + (smry.cooldown || 0) + ' in cooldown</div></div>' +
@@ -55,8 +56,10 @@ export function renderLLMTab(llm, cb, dedup, llmDiag) {
     const primary = names.find(n => eng[n].total_requests > 0);
     if (primary) {
       const avg = eng[primary].avg_latency_s || 0;
-      document.getElementById('llmAvgLatVal').textContent = avg.toFixed(2) + 's';
-      document.getElementById('llmAvgLatSub').textContent = primary + ' (' + eng[primary].total_requests + ' requests)';
+      const latVal = $('llmAvgLatVal');
+      if (latVal) latVal.textContent = avg.toFixed(2) + 's';
+      const latSub = $('llmAvgLatSub');
+      if (latSub) latSub.textContent = primary + ' (' + eng[primary].total_requests + ' requests)';
     }
   });
 
@@ -98,7 +101,8 @@ function renderLatencyChart(eng, names) {
       '</div></td></tr>';
   });
   html += '</table>';
-  document.getElementById('llmLatencyChart').innerHTML = html || '<div style="color:var(--text3);padding:12px">No data yet — run attacks to generate stats</div>';
+  const latChartEl = $('llmLatencyChart');
+  if (latChartEl) latChartEl.innerHTML = html || '<div style="color:var(--text3);padding:12px">No data yet — run attacks to generate stats</div>';
 }
 
 function renderCostChart(eng, names) {
@@ -125,7 +129,8 @@ function renderCostChart(eng, names) {
       '</div></td></tr>';
   });
   html += '</table>';
-  document.getElementById('llmCostChart').innerHTML = html || '<div style="color:var(--text3);padding:12px">No data yet</div>';
+  const costChartEl = $('llmCostChart');
+  if (costChartEl) costChartEl.innerHTML = html || '<div style="color:var(--text3);padding:12px">No data yet</div>';
 }
 
 function renderTokenTable(eng, names) {
@@ -142,13 +147,15 @@ function renderTokenTable(eng, names) {
       '<td>$' + ((e.avg_cost_per_request_usd || 0).toFixed(6)) + '</td>' +
       '</tr>';
   });
-  document.getElementById('llmTokenTable').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:var(--text3)">No token data yet</td></tr>';
+  const tokenTableEl = $('llmTokenTable');
+  if (tokenTableEl) tokenTableEl.innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:var(--text3)">No token data yet</td></tr>';
 }
 
 // ── Provider cards ───────────────────────────────────────────────────────
 
 function renderProviderCards(configured, engines, diags) {
-  const pc = document.getElementById('llmProviderCards');
+  const pc = $('llmProviderCards');
+  if (!pc) return;
   let html = '';
   ALL_PROVIDERS.forEach(p => {
     const info = engines[p.id];
@@ -198,7 +205,8 @@ function renderCircuitBreakerDetail(cb, configured, diags) {
     html += '<span class="badge ' + badgeClass + '" style="margin-right:4px;margin-bottom:4px;display:inline-block;opacity:' + opacity + '">' + p.id + ': ' + label + '</span>';
   });
   html += '</div></div>';
-  document.getElementById('circuitBreakerDetail').innerHTML = html;
+  const cbEl = $('circuitBreakerDetail');
+  if (cbEl) cbEl.innerHTML = html;
 }
 
 function renderDedupDetail(dedup) {
@@ -224,7 +232,8 @@ function renderDedupDetail(dedup) {
       '</div></div>';
   }
 
-  document.getElementById('dedupDetail').innerHTML = html;
+  const dedupEl = $('dedupDetail');
+  if (dedupEl) dedupEl.innerHTML = html;
 }
 
 /** Reset all circuit breakers and trigger refresh. */

@@ -14,7 +14,7 @@
 
 import { store } from '../state.js';
 import { api } from '../api.js';
-import { esc } from '../utils.js';
+import { $, esc } from '../utils.js';
 
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -44,7 +44,8 @@ export function loadIoT() {
       .forEach(k => { if (telem[k] && telem[k].online) protos++; });
 
     // ── Summary stat cards ───────────────────────────────────────────
-    document.getElementById('iotStats').innerHTML =
+    const iotStatsEl = $('iotStats');
+    if (iotStatsEl) iotStatsEl.innerHTML =
       '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">' + runningPods + '</div><div class="stat-sub">Running in cluster</div></div>' +
       '<div class="stat-card blue"><div class="stat-label">Total Pods</div><div class="stat-value">' + totalPods + '</div><div class="stat-sub">IoT workloads deployed</div></div>' +
       '<div class="stat-card purple"><div class="stat-label">Protocol Emulators</div><div class="stat-value">' + protos + '/5</div><div class="stat-sub">ONVIF, MQTT, FHIR, Modbus, DALI</div></div>' +
@@ -77,7 +78,8 @@ export function loadIoT() {
     } else {
       ih = '<tr><td colspan="5" style="text-align:center;color:var(--text3)">No IoT devices found</td></tr>';
     }
-    document.getElementById('iotTable').innerHTML = ih;
+    const iotTableEl = $('iotTable');
+    if (iotTableEl) iotTableEl.innerHTML = ih;
   });
 }
 
@@ -85,14 +87,18 @@ export function loadIoT() {
 
 function renderTrafficCamera(telem) {
   const tc = telem['traffic-camera'] || {};
-  document.getElementById('tc-status').innerHTML = tc.online
-    ? '<span class="dot dot-green"></span>Online'
-    : '<span class="dot dot-red"></span>Offline';
-  document.getElementById('tc-status').className = tc.online ? 'badge badge-low' : 'badge badge-crit';
+  const tcStatus = $('tc-status');
+  if (tcStatus) {
+    tcStatus.innerHTML = tc.online
+      ? '<span class="dot dot-green"></span>Online'
+      : '<span class="dot dot-red"></span>Offline';
+    tcStatus.className = tc.online ? 'badge badge-low' : 'badge badge-crit';
+  }
 
   if (tc.online && tc.telemetry) {
     const t = tc.telemetry, st = tc.stats || {};
-    document.getElementById('tc-detail').innerHTML =
+    const tcDetail = $('tc-detail');
+    if (tcDetail) tcDetail.innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">' +
       '<div style="color:var(--text3)">Device ID</div><div><strong>' + esc(t.device_id || '-') + '</strong></div>' +
       '<div style="color:var(--text3)">Resolution</div><div>' + esc(t.codec || 'H.264') + ' @ ' + esc(t.current_fps || '-') + ' fps</div>' +
@@ -108,7 +114,8 @@ function renderTrafficCamera(telem) {
     // ANPR telemetry panel
     const lp = t.last_plate;
     if (lp) {
-      document.getElementById('tc-telemetry').innerHTML =
+      const tcTelem = $('tc-telemetry');
+      if (tcTelem) tcTelem.innerHTML =
         '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">' +
         '<div style="background:var(--bg);border-radius:6px;padding:12px;border:1px solid var(--border)">' +
         '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Last Plate</div>' +
@@ -127,21 +134,27 @@ function renderTrafficCamera(telem) {
         '</div></div>';
     }
   } else {
-    document.getElementById('tc-detail').innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
-    document.getElementById('tc-telemetry').innerHTML = '<div style="color:var(--text3);text-align:center">No ONVIF telemetry available</div>';
+    const tcDet = $('tc-detail');
+    if (tcDet) tcDet.innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
+    const tcTel = $('tc-telemetry');
+    if (tcTel) tcTel.innerHTML = '<div style="color:var(--text3);text-align:center">No ONVIF telemetry available</div>';
   }
 }
 
 function renderParking(telem) {
   const pk = telem['parking-system'] || {};
-  document.getElementById('pk-status').innerHTML = pk.online
-    ? '<span class="dot dot-green"></span>Online'
-    : '<span class="dot dot-red"></span>Offline';
-  document.getElementById('pk-status').className = pk.online ? 'badge badge-low' : 'badge badge-crit';
+  const pkStatus = $('pk-status');
+  if (pkStatus) {
+    pkStatus.innerHTML = pk.online
+      ? '<span class="dot dot-green"></span>Online'
+      : '<span class="dot dot-red"></span>Offline';
+    pkStatus.className = pk.online ? 'badge badge-low' : 'badge badge-crit';
+  }
 
   if (pk.online && pk.stats) {
     const ps = pk.stats, gw = pk.gateway || {};
-    document.getElementById('pk-detail').innerHTML =
+    const pkDetail = $('pk-detail');
+    if (pkDetail) pkDetail.innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">' +
       '<div style="color:var(--text3)">Gateway ID</div><div><strong>' + esc(gw.gateway_id || '-') + '</strong></div>' +
       '<div style="color:var(--text3)">Sensors</div><div>' + esc(gw.sensors_online || ps.sensors_total - ps.sensors_faulted || 0) + ' / ' + esc(ps.sensors_total || 0) + ' online</div>' +
@@ -177,24 +190,31 @@ function renderParking(telem) {
           '</div></div>';
       });
       lh += '</div>';
-      document.getElementById('pk-lots').innerHTML = lh;
+      const pkLots = $('pk-lots');
+      if (pkLots) pkLots.innerHTML = lh;
     }
   } else {
-    document.getElementById('pk-detail').innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
-    document.getElementById('pk-lots').innerHTML = '<div style="color:var(--text3);text-align:center">No parking data available</div>';
+    const pkDet = $('pk-detail');
+    if (pkDet) pkDet.innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
+    const pkLots = $('pk-lots');
+    if (pkLots) pkLots.innerHTML = '<div style="color:var(--text3);text-align:center">No parking data available</div>';
   }
 }
 
 function renderHealthcare(telem) {
   const hc = telem['healthcare-api'] || {};
-  document.getElementById('hc-status').innerHTML = hc.online
-    ? '<span class="dot dot-green"></span>Online'
-    : '<span class="dot dot-red"></span>Offline';
-  document.getElementById('hc-status').className = hc.online ? 'badge badge-low' : 'badge badge-crit';
+  const hcStatus = $('hc-status');
+  if (hcStatus) {
+    hcStatus.innerHTML = hc.online
+      ? '<span class="dot dot-green"></span>Online'
+      : '<span class="dot dot-red"></span>Offline';
+    hcStatus.className = hc.online ? 'badge badge-low' : 'badge badge-crit';
+  }
 
   if (hc.online && hc.stats) {
     const hs = hc.stats;
-    document.getElementById('hc-detail').innerHTML =
+    const hcDetail = $('hc-detail');
+    if (hcDetail) hcDetail.innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">' +
       '<div style="color:var(--text3)">FHIR Version</div><div><strong>' + esc(hs.fhir_version || '-') + '</strong></div>' +
       '<div style="color:var(--text3)">Active Devices</div><div>' + (hs.active_devices || 0) + '</div>' +
@@ -229,24 +249,31 @@ function renderHealthcare(telem) {
           '<td>' + alarmBadge + '</td></tr>';
       });
       dh += '</tbody></table>';
-      document.getElementById('hc-telemetry').innerHTML = dh;
+      const hcTelem = $('hc-telemetry');
+      if (hcTelem) hcTelem.innerHTML = dh;
     }
   } else {
-    document.getElementById('hc-detail').innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
-    document.getElementById('hc-telemetry').innerHTML = '<div style="color:var(--text3);text-align:center">No FHIR telemetry available</div>';
+    const hcDet = $('hc-detail');
+    if (hcDet) hcDet.innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline or unreachable</div>';
+    const hcTel = $('hc-telemetry');
+    if (hcTel) hcTel.innerHTML = '<div style="color:var(--text3);text-align:center">No FHIR telemetry available</div>';
   }
 }
 
 function renderEnvSensor(telem) {
   const ev = telem['env-sensor'] || {};
-  document.getElementById('ev-status').innerHTML = ev.online
-    ? '<span class="dot dot-green"></span>Online'
-    : '<span class="dot dot-red"></span>Offline';
-  document.getElementById('ev-status').className = ev.online ? 'badge badge-low' : 'badge badge-crit';
+  const evStatus = $('ev-status');
+  if (evStatus) {
+    evStatus.innerHTML = ev.online
+      ? '<span class="dot dot-green"></span>Online'
+      : '<span class="dot dot-red"></span>Offline';
+    evStatus.className = ev.online ? 'badge badge-low' : 'badge badge-crit';
+  }
 
   if (ev.online && ev.stats) {
     const es = ev.stats;
-    document.getElementById('ev-detail').innerHTML =
+    const evDetail = $('ev-detail');
+    if (evDetail) evDetail.innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">' +
       '<div style="color:var(--text3)">Stations</div><div><strong>' + (es.stations_online || 0) + ' / ' + (es.stations_total || 0) + '</strong> online</div>' +
       '<div style="color:var(--text3)">Sensor Channels</div><div>' + (es.total_sensor_channels || 0) + '</div>' +
@@ -277,24 +304,31 @@ function renderEnvSensor(telem) {
           '<div style="font-size:10px;color:var(--text2)">' + esc(s.category || '') + '</div></div>';
       });
       ah += '</div></div>';
-      document.getElementById('ev-aqi').innerHTML = ah;
+      const evAqi = $('ev-aqi');
+      if (evAqi) evAqi.innerHTML = ah;
     }
   } else {
-    document.getElementById('ev-detail').innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
-    document.getElementById('ev-aqi').innerHTML = '<div style="color:var(--text3);text-align:center">No environmental data</div>';
+    const evDet = $('ev-detail');
+    if (evDet) evDet.innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
+    const evAqi = $('ev-aqi');
+    if (evAqi) evAqi.innerHTML = '<div style="color:var(--text3);text-align:center">No environmental data</div>';
   }
 }
 
 function renderStreetLighting(telem) {
   const sl = telem['street-lighting'] || {};
-  document.getElementById('sl-status').innerHTML = sl.online
-    ? '<span class="dot dot-green"></span>Online'
-    : '<span class="dot dot-red"></span>Offline';
-  document.getElementById('sl-status').className = sl.online ? 'badge badge-low' : 'badge badge-crit';
+  const slStatus = $('sl-status');
+  if (slStatus) {
+    slStatus.innerHTML = sl.online
+      ? '<span class="dot dot-green"></span>Online'
+      : '<span class="dot dot-red"></span>Offline';
+    slStatus.className = sl.online ? 'badge badge-low' : 'badge badge-crit';
+  }
 
   if (sl.online && sl.stats) {
     const ss = sl.stats;
-    document.getElementById('sl-detail').innerHTML =
+    const slDetail = $('sl-detail');
+    if (slDetail) slDetail.innerHTML =
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;text-align:left">' +
       '<div style="color:var(--text3)">Luminaires</div><div><strong>' + (ss.luminaires_on || 0) + ' / ' + (ss.luminaires_total || 0) + '</strong> on</div>' +
       '<div style="color:var(--text3)">Total Power</div><div>' + (ss.total_power_w || 0).toFixed(0) + ' W</div>' +
@@ -317,11 +351,14 @@ function renderStreetLighting(telem) {
           '<div style="font-size:10px;color:var(--text2)">' + (z.on || 0) + '/' + z.count + ' on &bull; ' + (z.power_w || 0).toFixed(0) + 'W</div></div>';
       });
       zh += '</div>';
-      document.getElementById('sl-zones').innerHTML = zh;
+      const slZones = $('sl-zones');
+      if (slZones) slZones.innerHTML = zh;
     }
   } else {
-    document.getElementById('sl-detail').innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
-    document.getElementById('sl-zones').innerHTML = '<div style="color:var(--text3);text-align:center">No lighting data</div>';
+    const slDet = $('sl-detail');
+    if (slDet) slDet.innerHTML = '<div style="color:var(--text3);text-align:center;padding:12px">Service offline</div>';
+    const slZon = $('sl-zones');
+    if (slZon) slZon.innerHTML = '<div style="color:var(--text3);text-align:center">No lighting data</div>';
   }
 }
 
@@ -341,13 +378,13 @@ let lastEventCount = 0;
  * Start the IoT Event Feed — polls /api/iot/events every 10 seconds.
  */
 export function connectIoTStream() {
-  const dot = document.getElementById('iotStreamDot');
-  const status = document.getElementById('iotStreamStatus');
-  const log = document.getElementById('iotStreamLog');
+  const dot = $('iotStreamDot');
+  const status = $('iotStreamStatus');
+  const log = $('iotStreamLog');
 
-  dot.className = 'dot dot-green';
-  status.textContent = 'Polling IoT events';
-  log.innerHTML = '';
+  if (dot) dot.className = 'dot dot-green';
+  if (status) status.textContent = 'Polling IoT events';
+  if (log) log.innerHTML = '';
 
   fetchIoTEvents(); // immediate first fetch
   iotFeedTimer = setInterval(fetchIoTEvents, 10000);
@@ -357,21 +394,21 @@ function fetchIoTEvents() {
   api.getIoTEvents(30).then(data => {
     if (!data || !data.events) return;
     const events = data.events;
-    const dot = document.getElementById('iotStreamDot');
-    const status = document.getElementById('iotStreamStatus');
-    const log = document.getElementById('iotStreamLog');
-    const countEl = document.getElementById('iotStreamCount');
+    const dot = $('iotStreamDot');
+    const status = $('iotStreamStatus');
+    const log = $('iotStreamLog');
+    const countEl = $('iotStreamCount');
 
     if (events.length === 0) {
-      dot.className = 'dot dot-yellow';
-      status.textContent = 'No events yet — waiting for IoT traffic';
+      if (dot) dot.className = 'dot dot-yellow';
+      if (status) status.textContent = 'No events yet — waiting for IoT traffic';
       return;
     }
 
-    dot.className = 'dot dot-green';
-    status.textContent = 'Live — ' + data.total + ' total events';
+    if (dot) dot.className = 'dot dot-green';
+    if (status) status.textContent = 'Live — ' + data.total + ' total events';
     store.setState({ iotStreamCount: data.total });
-    countEl.textContent = data.total;
+    if (countEl) countEl.textContent = data.total;
 
     // Only re-render if count changed
     if (data.total === lastEventCount) return;
@@ -387,7 +424,7 @@ function fetchIoTEvents() {
       return '[' + ts + '] ' + device + ' (' + ns + ') ' + evType + ' → ' + detail;
     });
 
-    log.textContent = lines.join('\n');
+    if (log) log.textContent = lines.join('\n');
   }).catch(() => {
     // silently retry on next interval
   });
@@ -403,14 +440,18 @@ export function toggleIoTStream() {
   const state = store.getState();
   const open = !state.ui.iotStreamOpen;
   store.setState({ ui: { ...state.ui, iotStreamOpen: open } });
-  document.getElementById('iotStreamBody').style.display = open ? 'block' : 'none';
-  document.getElementById('iotStreamToggleBtn').textContent = open ? '\u25BC' : '\u25B2';
+  const body = $('iotStreamBody');
+  const btn = $('iotStreamToggleBtn');
+  if (body) body.style.display = open ? 'block' : 'none';
+  if (btn) btn.textContent = open ? '\u25BC' : '\u25B2';
 }
 
 /** Clear the IoT event feed log. */
 export function clearIoTStream() {
-  document.getElementById('iotStreamLog').textContent = 'IoT event feed cleared.';
+  const log = $('iotStreamLog');
+  if (log) log.textContent = 'IoT event feed cleared.';
   store.setState({ iotStreamCount: 0 });
-  document.getElementById('iotStreamCount').textContent = '0';
+  const count = $('iotStreamCount');
+  if (count) count.textContent = '0';
   lastEventCount = 0;
 }

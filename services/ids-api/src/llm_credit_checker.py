@@ -186,8 +186,12 @@ class CreditChecker:
             self._cache_timestamp = datetime.now()
             return self._cache.copy()
     
-    async def check_provider(self, provider: str) -> CreditInfo:
+    async def check_provider(self, provider: str, force_refresh: bool = False) -> CreditInfo:
         """Check credits for a specific provider"""
+        if not force_refresh and self._cache and provider in self._cache:
+            cached = self._cache[provider]
+            if self._cache_timestamp and (datetime.now() - self._cache_timestamp).total_seconds() < self._cache_ttl:
+                return cached
         api_key = self._get_api_key(provider)
         if not api_key:
             return CreditInfo(

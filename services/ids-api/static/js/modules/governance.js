@@ -11,7 +11,7 @@
  */
 
 import { api } from '../api.js';
-import { esc, shortTime, sevBadge } from '../utils.js';
+import { $, esc, shortTime, sevBadge } from '../utils.js';
 
 /**
  * Render the governance tab: mode selector, pending queue, history.
@@ -22,12 +22,14 @@ import { esc, shortTime, sevBadge } from '../utils.js';
 export function renderGovernanceTab(gov, dashboard, refreshFn) {
   if (!gov) {
     // Show helpful fallback instead of blank
-    document.getElementById('govStats').innerHTML =
+    const govStatsEl = $('govStats');
+    if (govStatsEl) govStatsEl.innerHTML =
       '<div class="stat-card purple"><div class="stat-label">Mode</div><div class="stat-value" style="font-size:20px">Loading...</div><div class="stat-sub">Connecting to governance API</div></div>' +
       '<div class="stat-card yellow"><div class="stat-label">Pending</div><div class="stat-value">-</div><div class="stat-sub">Actions awaiting decision</div></div>' +
       '<div class="stat-card green"><div class="stat-label">Approved</div><div class="stat-value">-</div><div class="stat-sub">Total approved actions</div></div>' +
       '<div class="stat-card red"><div class="stat-label">Rejected</div><div class="stat-value">-</div><div class="stat-sub">Actions blocked by analyst</div></div>';
-    document.getElementById('govModeControl').innerHTML =
+    const govModeEl = $('govModeControl');
+    if (govModeEl) govModeEl.innerHTML =
       '<div style="padding:16px;text-align:center;color:var(--text3)">' +
       '<div style="font-size:24px;margin-bottom:8px">&#x1F512;</div>' +
       '<div style="font-size:13px;margin-bottom:4px"><strong style="color:var(--text)">Governance Controls Loading</strong></div>' +
@@ -40,7 +42,8 @@ export function renderGovernanceTab(gov, dashboard, refreshFn) {
   // ── Summary stat cards ─────────────────────────────────────────────
   const modeLabel = gov.mode === 'assisted' ? '&#x1F6E1;&#xFE0F; Assisted' : gov.mode === 'autopilot' ? '&#x26A1; Autopilot' : '&#x1F6D1; Manual';
   const modeColor = gov.mode === 'autopilot' ? 'orange' : gov.mode === 'assisted' ? 'purple' : 'blue';
-  document.getElementById('govStats').innerHTML =
+  const govStatsEl2 = $('govStats');
+  if (govStatsEl2) govStatsEl2.innerHTML =
     '<div class="stat-card ' + modeColor + '"><div class="stat-label">Automation Mode</div><div class="stat-value" style="font-size:20px">' + modeLabel +
     '</div><div class="stat-sub">Severity &ge; ' + (gov.assisted_threshold || 8) + ' requires analyst approval</div></div>' +
     '<div class="stat-card yellow"><div class="stat-label">Pending Review</div><div class="stat-value">' + (gov.pending_count || 0) + '</div><div class="stat-sub">Actions awaiting analyst decision</div></div>' +
@@ -48,7 +51,8 @@ export function renderGovernanceTab(gov, dashboard, refreshFn) {
     '<div class="stat-card red"><div class="stat-label">Rejected</div><div class="stat-value">' + (gm.rejected || 0) + '</div><div class="stat-sub">Actions blocked by analyst</div></div>';
 
   // Update navbar badge
-  document.getElementById('pendingBadge').textContent = gov.pending_count || 0;
+  const pendingEl = $('pendingBadge');
+  if (pendingEl) pendingEl.textContent = gov.pending_count || 0;
 
   // ── Mode control ───────────────────────────────────────────────────
   const modes = ['manual', 'assisted', 'autopilot'];
@@ -72,7 +76,8 @@ export function renderGovernanceTab(gov, dashboard, refreshFn) {
       '</div>';
   });
   mHtml += '</div>';
-  document.getElementById('govModeControl').innerHTML = mHtml;
+  const govModeEl2 = $('govModeControl');
+  if (govModeEl2) govModeEl2.innerHTML = mHtml;
 
   loadPending(refreshFn);
   loadHistory();
@@ -100,7 +105,7 @@ window._setGovMode = (mode) => {
  */
 function loadPending(refreshFn) {
   api.getGovernancePending().then(data => {
-    const el = document.getElementById('pendingActions');
+    const el = $('pendingActions');
     if (!data || !data.pending || !data.pending.length) {
       el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No actions pending approval</div>';
       return;
@@ -123,7 +128,8 @@ function loadPending(refreshFn) {
  */
 function loadHistory() {
   api.getGovernanceHistory().then(data => {
-    const el = document.getElementById('govHistory');
+    const el = $('govHistory');
+    if (!el) return;
     if (!data || !data.history || !data.history.length) {
       el.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3)">No action history</td></tr>';
       return;

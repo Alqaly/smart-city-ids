@@ -22,7 +22,7 @@
 
 import { store, ALL_PROVIDERS } from './state.js';
 import { api, fetchOverviewBundle } from './api.js';
-import { formatDuration, countCB, esc } from './utils.js';
+import { $, formatDuration, countCB, esc } from './utils.js';
 
 // ── Feature modules ──────────────────────────────────────────────────────
 import {
@@ -64,8 +64,9 @@ let activeTab = 'overview';
 // ══════════════════════════════════════════════════════════════════════════
 
 function doLogin() {
-  const u = document.getElementById('loginUser').value;
-  const p = document.getElementById('loginPass').value;
+  const uEl = $('loginUser'), pEl = $('loginPass');
+  if (!uEl || !pEl) return;
+  const u = uEl.value, p = pEl.value;
   api.login(u, p)
     .then(d => {
       if (d && d.access_token) {
@@ -73,15 +74,13 @@ function doLogin() {
         localStorage.setItem('ids_token', d.access_token);
         showDashboard();
       } else {
-        const err = document.getElementById('loginError');
-        err.textContent = (d && d.detail) || 'Login failed';
-        err.style.display = 'block';
+        const err = $('loginError');
+        if (err) { err.textContent = (d && d.detail) || 'Login failed'; err.style.display = 'block'; }
       }
     })
     .catch(() => {
-      const err = document.getElementById('loginError');
-      err.textContent = 'Connection error';
-      err.style.display = 'block';
+      const err = $('loginError');
+      if (err) { err.textContent = 'Connection error'; err.style.display = 'block'; }
     });
 }
 
@@ -91,8 +90,8 @@ function doLogout() {
   clearInterval(refreshTimer);
   disconnectLiveFeed();
   disconnectIoTStream();
-  document.getElementById('dashboard').style.display = 'none';
-  document.getElementById('loginScreen').style.display = 'flex';
+  const dash = $('dashboard'); if (dash) dash.style.display = 'none';
+  const ls = $('loginScreen'); if (ls) ls.style.display = 'flex';
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -100,8 +99,8 @@ function doLogout() {
 // ══════════════════════════════════════════════════════════════════════════
 
 function showDashboard() {
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('dashboard').style.display = 'block';
+  const ls = $('loginScreen'); if (ls) ls.style.display = 'none';
+  const dash = $('dashboard'); if (dash) dash.style.display = 'block';
   refreshAll();
   // 15-second polling (was 10s) — SSE provides instant alert updates
   refreshTimer = setInterval(refreshAll, 15000);
@@ -201,7 +200,7 @@ function initTabSwitching() {
       document.querySelectorAll('.tab-panel').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       const tabId = b.dataset.tab;
-      document.getElementById('tab-' + tabId).classList.add('active');
+      const tabPanel = $('tab-' + tabId); if (tabPanel) tabPanel.classList.add('active');
       activeTab = tabId;
 
       // Immediate data load for the newly-activated tab
@@ -229,34 +228,38 @@ function initTabSwitching() {
 
 function updateTopBar(h, gov, llm, llmDiag) {
   // Kubernetes cluster pill
-  const cp = document.getElementById('clusterPill');
-  if (h && h.components && h.components.kubernetes === 'connected') {
-    cp.className = 'pill pill-ok';
-    cp.textContent = 'K8s Connected';
-  } else {
-    cp.className = 'pill pill-err';
-    cp.textContent = 'K8s Disconnected';
+  const cp = $('clusterPill');
+  if (cp) {
+    if (h && h.components && h.components.kubernetes === 'connected') {
+      cp.className = 'pill pill-ok';
+      cp.textContent = 'K8s Connected';
+    } else {
+      cp.className = 'pill pill-err';
+      cp.textContent = 'K8s Disconnected';
+    }
   }
 
   // LLM pill
-  const lp = document.getElementById('llmPill');
-  const pc = (h && h.llm_provider_count) ? h.llm_provider_count : ((llm && llm.provider_count) ? llm.provider_count : 0);
-  const smry = (llmDiag && llmDiag.summary) ? llmDiag.summary : {};
-  const errCount = (smry.error || 0) + (smry.cooldown || 0);
-  if (pc > 0 && errCount === 0) {
-    lp.className = 'pill pill-ok';
-    lp.textContent = pc + '/' + ALL_PROVIDERS.length + ' LLM OK';
-  } else if (pc > 0) {
-    lp.className = 'pill pill-warn';
-    lp.textContent = (smry.operational || pc) + '/' + ALL_PROVIDERS.length + ' LLM (' + errCount + ' issue' + (errCount > 1 ? 's' : '') + ')';
-  } else {
-    lp.className = 'pill pill-err';
-    lp.textContent = 'No LLM';
+  const lp = $('llmPill');
+  if (lp) {
+    const pc = (h && h.llm_provider_count) ? h.llm_provider_count : ((llm && llm.provider_count) ? llm.provider_count : 0);
+    const smry = (llmDiag && llmDiag.summary) ? llmDiag.summary : {};
+    const errCount = (smry.error || 0) + (smry.cooldown || 0);
+    if (pc > 0 && errCount === 0) {
+      lp.className = 'pill pill-ok';
+      lp.textContent = pc + '/' + ALL_PROVIDERS.length + ' LLM OK';
+    } else if (pc > 0) {
+      lp.className = 'pill pill-warn';
+      lp.textContent = (smry.operational || pc) + '/' + ALL_PROVIDERS.length + ' LLM (' + errCount + ' issue' + (errCount > 1 ? 's' : '') + ')';
+    } else {
+      lp.className = 'pill pill-err';
+      lp.textContent = 'No LLM';
+    }
   }
 
   // Governance mode pill
-  const gp = document.getElementById('govPill');
-  if (gov) {
+  const gp = $('govPill');
+  if (gp && gov) {
     const m = gov.mode || 'assisted';
     gp.textContent = m.charAt(0).toUpperCase() + m.slice(1);
     gp.className = 'pill ' + (m === 'autopilot' ? 'pill-warn' : 'pill-ok');
@@ -264,7 +267,7 @@ function updateTopBar(h, gov, llm, llmDiag) {
 
   // Uptime
   if (h && h.uptime_seconds) {
-    document.getElementById('uptimeLabel').textContent = 'Uptime: ' + formatDuration(h.uptime_seconds);
+    const ut = $('uptimeLabel'); if (ut) ut.textContent = 'Uptime: ' + formatDuration(h.uptime_seconds);
   }
 }
 
@@ -273,7 +276,9 @@ function updateTopBar(h, gov, llm, llmDiag) {
 // ══════════════════════════════════════════════════════════════════════════
 
 window._refreshAll = refreshAll;
-window.doLogin = doLogin;
+window._showDashboard = showDashboard;
+// Inline script already defines a robust doLogin w/ spinner — only set fallback
+if (!window.doLogin) window.doLogin = doLogin;
 window.doLogout = doLogout;
 window.toggleLiveFeed = toggleLiveFeed;
 window.clearLiveFeed = clearLiveFeed;
@@ -292,7 +297,7 @@ window.loadIoT = loadIoT;
 let audioAlertsEnabled = localStorage.getItem('ids_audio') === 'true';
 
 function updateAudioBtn() {
-  const btn = document.getElementById('audioToggleBtn');
+  const btn = $('audioToggleBtn');
   if (btn) btn.innerHTML = audioAlertsEnabled ? '&#x1F50A;' : '&#x1F507;';
 }
 
@@ -374,21 +379,21 @@ window._handleAudioAlert = handleAudioAlert;
 // ══════════════════════════════════════════════════════════════════════════
 
 function scaleAllIoT() {
-  const slider = document.getElementById('iotScaleSlider');
-  const statusEl = document.getElementById('iotScaleStatus');
+  const slider = $('iotScaleSlider');
+  const statusEl = $('iotScaleStatus');
   const replicas = parseInt(slider?.value || '3', 10);
-  statusEl.innerHTML = '<span style="color:var(--yellow)">Scaling to ' + replicas + ' replicas...</span>';
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--yellow)">Scaling to ' + replicas + ' replicas...</span>';
 
   api.setIoTScale(replicas).then(res => {
     if (!res || res.error) {
-      statusEl.innerHTML = '<span style="color:var(--red)">Error: ' + (res?.error || 'Failed') + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Error: ' + (res?.error || 'Failed') + '</span>';
       return;
     }
-    statusEl.innerHTML = '<span style="color:var(--green)">All services scaled to ' + replicas + ' replicas</span>';
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green)">All services scaled to ' + replicas + ' replicas</span>';
     setTimeout(loadIoTScale, 2000);
     setTimeout(loadIoT, 3000);
   }).catch(() => {
-    statusEl.innerHTML = '<span style="color:var(--red)">Network error</span>';
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Network error</span>';
   });
 }
 window._scaleAllIoT = scaleAllIoT;
@@ -396,7 +401,7 @@ window._scaleAllIoT = scaleAllIoT;
 function loadIoTScale() {
   api.getIoTScale().then(res => {
     if (!res || !res.services) return;
-    const el = document.getElementById('iotScaleDetail');
+    const el = $('iotScaleDetail');
     if (!el) return;
     let html = '';
     const services = res.services;
@@ -410,8 +415,8 @@ function loadIoTScale() {
     }
     el.innerHTML = html;
     // Update slider to match
-    const slider = document.getElementById('iotScaleSlider');
-    const valEl = document.getElementById('iotScaleValue');
+    const slider = $('iotScaleSlider');
+    const valEl = $('iotScaleValue');
     const firstSvc = Object.values(services)[0];
     if (firstSvc && slider) {
       slider.value = firstSvc.replicas;
@@ -425,7 +430,7 @@ function loadIoTScale() {
 // ══════════════════════════════════════════════════════════════════════════
 
 function startChaos(mode) {
-  const log = document.getElementById('attackLog');
+  const log = $('attackLog');
   if (log) log.textContent += '\n[' + new Date().toLocaleTimeString() + '] \uD83D\uDD25 CHAOS MODE (' + mode + ') — triggering attack-iot-pipeline.sh...\n';
 
   api.startChaos(mode).then(res => {
@@ -448,7 +453,7 @@ function toggleTheme() {
   const html = document.documentElement;
   const isLight = html.classList.toggle('light');
   localStorage.setItem('ids_theme', isLight ? 'light' : 'dark');
-  const btn = document.getElementById('themeToggleBtn');
+  const btn = $('themeToggleBtn');
   if (btn) btn.innerHTML = isLight ? '&#x2600;&#xFE0F;' : '&#x1F319;';
 }
 window.toggleTheme = toggleTheme;
@@ -457,20 +462,20 @@ window.toggleTheme = toggleTheme;
 const savedTheme = localStorage.getItem('ids_theme');
 if (savedTheme === 'light') {
   document.documentElement.classList.add('light');
-  const btn = document.getElementById('themeToggleBtn');
+  const btn = $('themeToggleBtn');
   if (btn) btn.innerHTML = '&#x2600;&#xFE0F;';
 }
 
 // Alert source filter change handler
-const alertSourceFilter = document.getElementById('alertSourceFilter');
+const alertSourceFilter = $('alertSourceFilter');
 if (alertSourceFilter) {
   alertSourceFilter.addEventListener('change', loadAlerts);
 }
-const incidentSearch = document.getElementById('incidentSearch');
+const incidentSearch = $('incidentSearch');
 if (incidentSearch) incidentSearch.addEventListener('input', loadAlerts);
-const incidentSort = document.getElementById('incidentSort');
+const incidentSort = $('incidentSort');
 if (incidentSort) incidentSort.addEventListener('change', loadAlerts);
-const incidentPageSize = document.getElementById('incidentPageSize');
+const incidentPageSize = $('incidentPageSize');
 if (incidentPageSize) incidentPageSize.addEventListener('change', loadAlerts);
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -485,5 +490,5 @@ if (savedToken) {
   store.setState({ auth: { token: savedToken } });
   showDashboard();
 } else {
-  document.getElementById('loginScreen').style.display = 'flex';
+  const ls = $('loginScreen'); if (ls) ls.style.display = 'flex';
 }
