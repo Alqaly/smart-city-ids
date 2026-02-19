@@ -20,6 +20,7 @@ Security notes:
 """
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -34,14 +35,42 @@ logger = logging.getLogger(__name__)
 # ``Authorization`` header automatically.
 security = HTTPBearer()
 
-# ── Demo credentials ──────────────────────────────────────────────────────
-# Three built-in users for live demonstrations.
-# In production, replace with AD/LDAP/database-backed auth.
-_DEMO_USERS = {
-    "analyst": "analyst",    # View-only analyst role.
-    "operator": "operator",  # Can approve/reject governance actions.
-    "admin": "admin",        # Full administrative access.
-}
+# ── Credentials ───────────────────────────────────────────────────────────
+# Configurable via environment variables.  Each user reads from:
+#   IDS_USER_<ROLE>  / IDS_PASS_<ROLE>
+# Falls back to demo defaults so existing deployments keep working.
+#
+# To change passwords, set these env vars (or add to .env):
+#   IDS_USER_ANALYST=analyst   IDS_PASS_ANALYST=my-secret
+#   IDS_USER_OPERATOR=operator IDS_PASS_OPERATOR=my-secret
+#   IDS_USER_ADMIN=admin       IDS_PASS_ADMIN=my-secret
+
+def _load_users() -> dict:
+    """Build the user→password dict from environment variables.
+
+    For each role in (analyst, operator, admin) the username and password
+    are read from ``IDS_USER_<ROLE>`` / ``IDS_PASS_<ROLE>`` environment
+    variables.  If the env var is not set, the demo default is used.
+
+    Extra users can be added by setting ``IDS_EXTRA_USERS`` to a
+    comma-separated list of ``user:password`` pairs, e.g.
+    ``IDS_EXTRA_USERS=alice:hunter2,bob:pa$$word``.
+    """
+    users = {
+        os.getenv("IDS_USER_ANALYST",  "analyst"):  os.getenv("IDS_PASS_ANALYST",  "analyst"),
+        os.getenv("IDS_USER_OPERATOR", "operator"): os.getenv("IDS_PASS_OPERATOR", "operator"),
+        os.getenv("IDS_USER_ADMIN",    "admin"):    os.getenv("IDS_PASS_ADMIN",    "admin"),
+    }
+    # Optional: extra users via a single env var.
+    extra = os.getenv("IDS_EXTRA_USERS", "")
+    for pair in extra.split(","):
+        pair = pair.strip()
+        if ":" in pair:
+            u, p = pair.split(":", 1)
+            users[u.strip()] = p.strip()
+    return users
+
+_DEMO_USERS = _load_users()
 
 
 def create_jwt_token(username: str) -> str:

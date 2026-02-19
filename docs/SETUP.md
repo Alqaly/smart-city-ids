@@ -169,8 +169,39 @@ kubectl apply -f k8s-manifests/grafana-deployment.yaml
 | `K8S_NAMESPACE` | No | smart-city | Target namespace |
 | `POSTGRES_USER` | No | idsuser | Database user |
 | `POSTGRES_PASSWORD` | No | idspassword | Database password |
+| `IDS_USER_ADMIN` | No | admin | Dashboard admin username |
+| `IDS_PASS_ADMIN` | No | admin | Dashboard admin password |
+| `IDS_USER_ANALYST` | No | analyst | Dashboard analyst username |
+| `IDS_PASS_ANALYST` | No | analyst | Dashboard analyst password |
+| `IDS_USER_OPERATOR` | No | operator | Dashboard operator username |
+| `IDS_PASS_OPERATOR` | No | operator | Dashboard operator password |
+| `IDS_EXTRA_USERS` | No | - | Extra users as `user:pass,user2:pass2` |
+| `SECRET_KEY` | No | auto-generated | JWT signing key |
 
 *At least one LLM API key is required.
+
+### Changing Dashboard Passwords
+
+Edit your `.env` file (or set environment variables):
+
+```bash
+# Change the admin password
+IDS_PASS_ADMIN=my-secure-password
+
+# Change all passwords
+IDS_PASS_ADMIN=admin-secret-123
+IDS_PASS_ANALYST=analyst-secret-456
+IDS_PASS_OPERATOR=operator-secret-789
+
+# Add extra users
+IDS_EXTRA_USERS=alice:hunter2,bob:s3cure
+```
+
+Then restart the IDS API to pick up the changes:
+
+```bash
+kubectl rollout restart deployment/ids-api -n smart-city
+```
 
 ### Customizing Thresholds
 
@@ -212,6 +243,7 @@ curl http://${NODE_IP}:30800/docs
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
+| IDS Dashboard | http://NODE_IP:30800/ui | admin / admin (configurable via `IDS_PASS_ADMIN`) |
 | Grafana | http://NODE_IP:30300 | admin / admin |
 | Prometheus | http://NODE_IP:31106 | - |
 | IDS API Docs | http://NODE_IP:30800/docs | - |
