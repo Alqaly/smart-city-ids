@@ -52,10 +52,10 @@ PROM_ALERTS_AFTER_DEDUP_TOTAL = Counter(
     "smartcity_ids_alerts_after_dedup_total",
     "Alerts that required a fresh analysis after dedup checks.",
 )
-# Alerts triaged by LLM or local rule engine (excludes cached results).
+# Alerts triaged by LLM or rule-based engine (excludes cached results).
 PROM_LLM_TRIAGED_ALERTS_TOTAL = Counter(
     "smartcity_ids_llm_triaged_alerts_total",
-    "Alerts triaged by LLM/local analysis (non-cached).",
+    "Alerts triaged by LLM/rule-based analysis (non-cached).",
 )
 # Alerts that require human analyst review (governance mode dependent).
 PROM_HUMAN_REVIEW_REQUIRED_TOTAL = Counter(

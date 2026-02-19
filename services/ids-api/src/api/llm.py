@@ -1,9 +1,9 @@
 """LLM diagnostics, circuit-breaker management, and stats export API router.
 
 This module provides deep observability into the multi-provider LLM subsystem.
-The Smart City IDS supports up to six LLM providers simultaneously
-(xAI Grok, OpenAI, Anthropic, Google Gemini, Kimi, and a local rule-based
-engine).  Each provider can be in one of several states:
+The Smart City IDS supports up to five LLM providers simultaneously
+(xAI Grok, OpenAI, Anthropic, Google Gemini, and Kimi).  Each provider can be
+in one of several states:
 
     operational     – healthy, accepting requests
     not_configured  – no API key set for this provider
@@ -57,7 +57,7 @@ async def _build_llm_diagnostics():
     This function is reused by both ``GET /api/llm/diagnostics`` and the
     ``GET /health`` endpoint (in ``api/metrics_routes.py``).
 
-    For each of the six known providers, it builds a diagnostic dict with:
+    For each known provider, it builds a diagnostic dict with:
         - **status**: one of ``operational``, ``not_configured``, ``cooldown``,
           ``error``, ``circuit_open``, ``recovering``.
         - **reason**: human-readable explanation (powered by
@@ -71,19 +71,18 @@ async def _build_llm_diagnostics():
         - **circuit_breaker_state**: closed / open / half_open.
 
     The diagnostic state-machine priority:
-        1. ``local`` engine → always operational (no API key needed).
-        2. Not configured → ``not_configured``.
-        3. In cooldown → ``cooldown``.
-        4. All requests failed → ``error``.
-        5. Circuit breaker open → ``circuit_open``.
-        6. Circuit breaker half-open → ``recovering``.
-        7. Otherwise → ``operational``.
+        1. Not configured → ``not_configured``.
+        2. In cooldown → ``cooldown``.
+        3. All requests failed → ``error``.
+        4. Circuit breaker open → ``circuit_open``.
+        5. Circuit breaker half-open → ``recovering``.
+        6. Otherwise → ``operational``.
 
     Returns:
         Dict[str, dict] keyed by provider name.
     """
     llm_manager, circuit_breaker, _ = _deps()
-    all_known = ["xai", "anthropic", "openai", "gemini", "kimi", "local"]
+    all_known = ["xai", "anthropic", "openai", "gemini", "kimi"]
     key_validation = Config.get_valid_engines() if hasattr(Config, "get_valid_engines") else {}
     diags = {}
 
@@ -103,10 +102,7 @@ async def _build_llm_diagnostics():
             failures_count = details.get("failures", 0)
 
             # ── Determine diagnostic status (state machine) ──────────────
-            if prov_name == "local":
-                diag_status = "operational"
-                reason = "Rule-based engine, always available (no API key needed)"
-            elif not is_configured:
+            if not is_configured:
                 diag_status = "not_configured"
                 if not key_info:
                     reason = f"No API key set — add {prov_name.upper()}_API_KEY environment variable"
@@ -136,7 +132,7 @@ async def _build_llm_diagnostics():
                 "status": diag_status,
                 "reason": reason,
                 "configured": is_configured,
-                "key_format_valid": key_info.get("valid_format", True) if key_info else (prov_name == "local"),
+                "key_format_valid": key_info.get("valid_format", True) if key_info else False,
                 "model": details.get("model", ""),
                 "attempts": attempts,
                 "successes": successes_count,

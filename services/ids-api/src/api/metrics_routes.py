@@ -237,7 +237,7 @@ async def pipeline_overview():
         1. **Falco Alerts** — runtime security alerts from Falco.
         2. **Suricata Alerts** — network IDS alerts from Suricata.
         3. **IDS Ingest + Dedup** — combined ingest with dedup hit-rate.
-        4. **LLM / Local Analysis** — analysis engine throughput and p95.
+        4. **LLM / Rule-Based Analysis** — analysis engine throughput and p95.
         5. **Governance + K8s Actions** — human-review vs auto-handled count.
 
     Also includes an ``alert_fatigue`` section showing how many raw alerts
@@ -286,8 +286,8 @@ async def pipeline_overview():
             {"id": "suricata", "label": "Suricata Alerts", "rate_per_minute": round(by_source.get("suricata", 0) / total_minutes, 2), "p95_latency_ms": 0, "status": "green" if by_source.get("suricata", 0) > 0 else "yellow"},
             # Stage 3: Ingest and fingerprint-based deduplication.
             {"id": "ingest", "label": "IDS Ingest + Dedup", "rate_per_minute": round(total_alerts / total_minutes, 2), "p95_latency_ms": 0, "status": "green", "dedup_hit_rate_percent": dedup_stats.get("hit_rate_percent", 0)},
-            # Stage 4: LLM or local rule-based analysis.
-            {"id": "llm", "label": "LLM / Local Analysis", "rate_per_minute": round(llm_requests / total_minutes, 2), "p95_latency_ms": int(llm_p95 * 1000), "status": "green" if llm_requests > 0 else "yellow"},
+            # Stage 4: LLM or rule-based analysis.
+            {"id": "llm", "label": "LLM / Rule-Based Analysis", "rate_per_minute": round(llm_requests / total_minutes, 2), "p95_latency_ms": int(llm_p95 * 1000), "status": "green" if llm_requests > 0 else "yellow"},
             # Stage 5: HITL governance decisions and K8s automated actions.
             {"id": "gov", "label": "Governance + K8s Actions", "rate_per_minute": round(actions_total / total_minutes, 2), "p95_latency_ms": 0, "status": "green", "human_review_required": human_review, "auto_handled": auto_handled},
         ],

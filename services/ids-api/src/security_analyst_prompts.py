@@ -235,7 +235,7 @@ When you need to call a function, respond with:
 ## Interaction Guidelines
 1. **Always verify before acting**: Query current state before taking action
 2. **Respect governance mode**: In "assisted" mode, high-severity actions need approval
-3. **Check credits first**: If credits are low, use local fallback
+3. **Check credits first**: If credits are low, prioritize available configured providers
 4. **Log your reasoning**: Explain why you're taking each action
 5. **Protected services never auto-isolate**: healthcare-api, ids-api, postgres
 

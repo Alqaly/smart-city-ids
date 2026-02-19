@@ -761,7 +761,7 @@ PROM_ALERTS_AFTER_DEDUP_TOTAL = Counter(
 )
 PROM_LLM_TRIAGED_ALERTS_TOTAL = Counter(
     "smartcity_ids_llm_triaged_alerts_total",
-    "Alerts triaged by LLM/local analysis (non-cached).",
+    "Alerts triaged by LLM/rule-based analysis (non-cached).",
 )
 PROM_HUMAN_REVIEW_REQUIRED_TOTAL = Counter(
     "smartcity_ids_human_review_required_total",
@@ -813,7 +813,7 @@ PROM_LLM_TOKENS_TOTAL = Counter(
 # Per-provider cost estimates (USD per call, approximate)
 _LLM_COST_PER_CALL = {
     "xai": 0.006, "openai": 0.005, "anthropic": 0.008,
-    "gemini": 0.001, "kimi": 0.003, "local": 0.0,
+    "gemini": 0.001, "kimi": 0.003,
 }
 
 # In-memory per-provider stats for /api/llm-stats/export
@@ -1242,7 +1242,7 @@ async def health():
     # Build LLM provider status - generic, works with any provider
     llm_status = {}
     llm_diagnostics = {}
-    all_known_providers = ["xai", "anthropic", "openai", "gemini", "kimi", "local"]
+    all_known_providers = ["xai", "anthropic", "openai", "gemini", "kimi"]
     key_validation = Config.get_valid_engines() if hasattr(Config, 'get_valid_engines') else {}
     
     if llm_manager:
@@ -1264,10 +1264,7 @@ async def health():
             failures_count = details.get("failures", 0)
             
             # Determine verbose status and human-readable reason
-            if prov_name == "local":
-                diag_status = "operational"
-                reason = "Rule-based engine, always available (no API key needed)"
-            elif not is_configured:
+            if not is_configured:
                 diag_status = "not_configured"
                 if not key_info:
                     reason = "No API key set — add " + prov_name.upper() + "_API_KEY environment variable"
@@ -1299,7 +1296,7 @@ async def health():
                 "status": diag_status,
                 "reason": reason,
                 "configured": is_configured,
-                "key_format_valid": key_info.get("valid_format", True) if key_info else (prov_name == "local"),
+                "key_format_valid": key_info.get("valid_format", True) if key_info else False,
                 "model": details.get("model", ""),
                 "attempts": attempts,
                 "successes": successes_count,
@@ -1347,7 +1344,7 @@ async def llm_diagnostics_endpoint():
     cb_states = h.get("circuit_breaker_states", {})
     
     # Enrich with unconfigured providers for full picture
-    all_names = ["xai", "anthropic", "openai", "gemini", "kimi", "local"]
+    all_names = ["xai", "anthropic", "openai", "gemini", "kimi"]
     for name in all_names:
         if name not in diags:
             diags[name] = {
@@ -2939,7 +2936,7 @@ async def pipeline_overview():
             },
             {
                 "id": "llm",
-                "label": "LLM / Local Analysis",
+                "label": "LLM / Rule-Based Analysis",
                 "rate_per_minute": round(llm_requests / total_minutes, 2),
                 "p95_latency_ms": int(llm_p95 * 1000),
                 "status": "green" if llm_requests > 0 else "yellow",

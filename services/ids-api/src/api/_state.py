@@ -185,7 +185,6 @@ LLM_COST_PER_CALL = {
     "anthropic": 0.008, # Anthropic Claude — highest per-call estimate
     "gemini": 0.001,    # Google Gemini — lowest commercial cost
     "kimi": 0.003,      # Moonshot Kimi — mid-range
-    "local": 0.0,       # Local/self-hosted model — no API cost
 }
 
 # Populated lazily by ``record_llm_call()`` — keys are engine names, values

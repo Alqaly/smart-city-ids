@@ -701,19 +701,19 @@ class EnhancedLLMManager:
         # All engines failed
         logger.error(f"All LLM engines failed. Errors: {failed_engines}")
         
-        # Return local fallback analysis
+        # Return rule-based fallback analysis
         return {
             "status": "fallback",
-            "analysis": self._local_fallback_analysis(alert),
-            "engine": "local_fallback",
+            "analysis": self._rule_based_fallback_analysis(alert),
+            "engine": "rule_based_fallback",
             "error": f"All providers failed. Last error: {last_error}",
             "failed_engines": failed_engines,
             "credit_issues": credit_issues,
             "latency_ms": 0
         }
     
-    def _local_fallback_analysis(self, alert: Dict[str, Any]) -> Dict[str, Any]:
-        """Local rule-based analysis when all LLMs fail"""
+    def _rule_based_fallback_analysis(self, alert: Dict[str, Any]) -> Dict[str, Any]:
+        """Rule-based analysis when all LLMs fail"""
         output = alert.get("output", "").lower()
         rule = alert.get("rule", "").lower()
         
@@ -740,9 +740,9 @@ class EnhancedLLMManager:
                     "threat_type": threat_type,
                     "confidence": 0.6,
                     "key_indicators": [f"Rule match: {rule}", f"Output: {output[:100]}"],
-                    "mitigating_factors": ["Local fallback analysis - LLM unavailable"],
+                    "mitigating_factors": ["Rule-based fallback analysis - LLM unavailable"],
                     "business_impact": "Unknown - manual review required",
-                    "reasoning": "Local pattern matching used due to LLM provider failures",
+                    "reasoning": "Rule-based pattern matching used due to LLM provider failures",
                     "recommendations": ["Review alert manually", "Check LLM provider status"],
                     "automated_actions": ["isolate_pod"] if severity >= 8 else []
                 }
@@ -753,9 +753,9 @@ class EnhancedLLMManager:
             "threat_type": "Policy Violation",
             "confidence": 0.5,
             "key_indicators": [rule],
-            "mitigating_factors": ["Local fallback - limited analysis"],
+            "mitigating_factors": ["Rule-based fallback - limited analysis"],
             "business_impact": "Unknown",
-            "reasoning": "Default local analysis - no specific pattern matched",
+            "reasoning": "Default rule-based analysis - no specific pattern matched",
             "recommendations": ["Manual review required"],
             "automated_actions": []
         }

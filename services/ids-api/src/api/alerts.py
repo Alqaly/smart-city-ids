@@ -949,7 +949,7 @@ async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends
 
     Fetches the stored alert from the database, rebuilds the raw alert payload,
     and sends it through the LLM analysis pipeline — optionally targeting a
-    specific engine (e.g. "xai", "openai", "kimi", "local").
+    specific engine (e.g. "xai", "openai", "kimi").
 
     The new analysis replaces the old one in the database so the dashboard
     reflects the updated severity, summary, and threat classification.
@@ -957,7 +957,7 @@ async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends
     Args:
         alert_id: Database ID of the alert to re-analyze.
         engine:   Optional LLM engine name to use (e.g. "xai", "openai",
-                  "kimi", "local").  If omitted, uses the default priority
+              "kimi").  If omitted, uses the default priority
                   order with failover.
 
     Returns:
