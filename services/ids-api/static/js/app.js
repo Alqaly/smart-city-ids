@@ -50,6 +50,7 @@ import {
 import { renderLLMTab, resetCircuitBreakers } from './modules/llm.js';
 import { renderGovernanceTab } from './modules/governance.js';
 import { renderAttackTab, clearAttackLog } from './modules/attacks.js';
+import { renderThreatsTab, renderMetricsTab, initHunt } from './modules/threats.js';
 
 // ══════════════════════════════════════════════════════════════════════════
 // Module-level state
@@ -160,6 +161,15 @@ function refreshAll() {
       case 'governance':
         renderGovernanceTab(gov, dash, refreshAll);
         break;
+      case 'threats':
+        renderThreatsTab(alerts);
+        break;
+      case 'metrics':
+        renderMetricsTab(m, pipeline, llmDiag);
+        break;
+      case 'hunt':
+        initHunt();
+        break;
       case 'attacks':
         renderAttackTab();
         break;
@@ -200,6 +210,9 @@ function initTabSwitching() {
         case 'iot':        loadIoT(); break;
         case 'llm':
         case 'governance':
+        case 'threats':
+        case 'metrics':
+        case 'hunt':
         case 'attacks':
           // These tabs use data from refreshAll, so trigger it immediately
           refreshAll();
@@ -267,6 +280,9 @@ window.toggleIoTStream = toggleIoTStream;
 window.clearIoTStream = clearIoTStream;
 window.resetCircuitBreakers = () => resetCircuitBreakers(refreshAll);
 window.clearAttackLog = clearAttackLog;
+window.loadAlerts = loadAlerts;
+window.loadK8s = loadK8s;
+window.loadIoT = loadIoT;
 
 /**
  * Dark/Light theme toggle.
@@ -294,6 +310,12 @@ const alertSourceFilter = document.getElementById('alertSourceFilter');
 if (alertSourceFilter) {
   alertSourceFilter.addEventListener('change', loadAlerts);
 }
+const incidentSearch = document.getElementById('incidentSearch');
+if (incidentSearch) incidentSearch.addEventListener('input', loadAlerts);
+const incidentSort = document.getElementById('incidentSort');
+if (incidentSort) incidentSort.addEventListener('change', loadAlerts);
+const incidentPageSize = document.getElementById('incidentPageSize');
+if (incidentPageSize) incidentPageSize.addEventListener('change', loadAlerts);
 
 // ══════════════════════════════════════════════════════════════════════════
 // Init

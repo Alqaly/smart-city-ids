@@ -142,6 +142,7 @@ export function renderAlertFeed(data) {
     const engineId = an.analysis_engine || an.engine || '';
     const mitre = an.mitre_technique || '';
 
+    const sevLabel = a.severity >= 8 ? 'CRIT' : a.severity >= 6 ? 'HIGH' : a.severity >= 4 ? 'MED' : 'LOW';
     html += `<div class="feed-item">` +
       `<span class="feed-time">${shortTime(a.timestamp)}</span>` +
       `<span class="feed-source"><span class="badge ${a.source === 'falco' ? 'badge-info' : 'badge-purple'}">${esc(a.source || 'unknown')}</span></span>` +
@@ -150,7 +151,7 @@ export function renderAlertFeed(data) {
         (confPct > 0 ? ` <span class="conf-badge ${confClass}">${confPct}%</span>` : '') +
         (mitre ? ` <span style="font-size:9px;color:var(--red);font-weight:600">${esc(mitre)}</span>` : '') +
       `</span>` +
-      (a.severity ? `<span class="badge ${sevBadge(a.severity)}">${a.severity}</span>` : '') +
+      (a.severity ? `<span class="badge ${sevBadge(a.severity)}" title="Severity ${a.severity}/10 — ${sevLabel}">${a.severity} ${sevLabel}</span>` : '') +
       `</div>`;
   });
   el.innerHTML = html;

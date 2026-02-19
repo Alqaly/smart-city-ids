@@ -347,7 +347,7 @@ export function connectIoTStream() {
 
   dot.className = 'dot dot-green';
   status.textContent = 'Polling IoT events';
-  log.innerHTML = '<span style="color:var(--green)">\u2713 IoT Event Feed active — polling every 10s</span>\n';
+  log.innerHTML = '';
 
   fetchIoTEvents(); // immediate first fetch
   iotFeedTimer = setInterval(fetchIoTEvents, 10000);

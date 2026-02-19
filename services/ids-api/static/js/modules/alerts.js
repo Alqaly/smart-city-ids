@@ -22,6 +22,9 @@ import { esc, shortTime, sevBadge } from '../utils.js';
 
 // ── Module-level SSE state ───────────────────────────────────────────────
 let _sse = null;
+let _incidentPage = 1;
+let _incidentRows = [];
+let _incidentQueryKey = '';
 
 // ── Alert History Table ──────────────────────────────────────────────────
 
@@ -32,6 +35,42 @@ export function loadAlerts() {
   const src = document.getElementById('alertSourceFilter').value;
   api.getAlertsFiltered(50, src).then(data => {
     if (!data || !data.alerts) return;
+    let rows = [...data.alerts];
+
+    const search = (document.getElementById('incidentSearch')?.value || '').trim().toLowerCase();
+    if (search) {
+      rows = rows.filter(a => {
+        const an = a.analysis || {};
+        const blob = [
+          a.rule, a.source, a.summary, a.threat_type,
+          an.threat_type, an.reasoning, an.mitre_technique,
+        ].filter(Boolean).join(' ').toLowerCase();
+        return blob.includes(search);
+      });
+    }
+
+    const sort = document.getElementById('incidentSort')?.value || 'time_desc';
+    const pageSize = parseInt(document.getElementById('incidentPageSize')?.value || '25', 10);
+    const queryKey = [src, search, sort, pageSize].join('|');
+    if (queryKey !== _incidentQueryKey) {
+      _incidentPage = 1;
+      _incidentQueryKey = queryKey;
+    }
+    rows.sort((a, b) => {
+      if (sort === 'severity_desc') return (b.severity || 0) - (a.severity || 0);
+      if (sort === 'severity_asc') return (a.severity || 0) - (b.severity || 0);
+      const ta = new Date(a.timestamp || 0).getTime();
+      const tb = new Date(b.timestamp || 0).getTime();
+      return sort === 'time_asc' ? ta - tb : tb - ta;
+    });
+
+    _incidentRows = rows;
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    if (_incidentPage > totalPages) _incidentPage = totalPages;
+    if (_incidentPage < 1) _incidentPage = 1;
+    const start = (_incidentPage - 1) * pageSize;
+    const pageRows = rows.slice(start, start + pageSize);
+
     let html = '';
 
     // Build LLM engine options for the re-analyze dropdown
@@ -39,7 +78,8 @@ export function loadAlerts() {
       .map(p => `<option value="${p.id}">${p.name}</option>`)
       .join('');
 
-    data.alerts.forEach((a, idx) => {
+    pageRows.forEach((a, localIdx) => {
+      const idx = start + localIdx;
       const recs = a.recommendations || [];
       const an = a.analysis || {};
       const traceId = a.trace_id || ('alert-' + (a.id || idx));
@@ -169,6 +209,8 @@ export function loadAlerts() {
       html += `</td></tr>`;
     });
     document.getElementById('alertsTable').innerHTML = html || '<tr><td colspan="9" style="text-align:center;color:var(--text3)">No alerts</td></tr>';
+    const info = document.getElementById('incidentPageInfo');
+    if (info) info.textContent = `Page ${_incidentPage}/${totalPages} • ${rows.length} incidents`;
   });
 }
 
@@ -297,6 +339,46 @@ function submitFeedback(alertId, traceId, wasAccurate, idx) {
 }
 window._submitFeedback = submitFeedback;
 
+window._incidentPrev = () => {
+  _incidentPage = Math.max(1, _incidentPage - 1);
+  loadAlerts();
+};
+window._incidentNext = () => {
+  const pageSize = parseInt(document.getElementById('incidentPageSize')?.value || '25', 10);
+  const totalPages = Math.max(1, Math.ceil(_incidentRows.length / pageSize));
+  _incidentPage = Math.min(totalPages, _incidentPage + 1);
+  loadAlerts();
+};
+window._exportIncidentsCsv = () => {
+  const header = ['id', 'timestamp', 'trace_id', 'source', 'rule', 'severity', 'confidence', 'threat_type', 'summary'];
+  const lines = _incidentRows.map(a => {
+    const an = a.analysis || {};
+    const conf = an.confidence || an.confidence_score || '';
+    const row = [
+      a.id || '',
+      a.timestamp || '',
+      a.trace_id || `alert-${a.id || ''}`,
+      a.source || '',
+      a.rule || '',
+      a.severity || '',
+      conf,
+      a.threat_type || an.threat_type || '',
+      (a.summary || '').replace(/\\n/g, ' '),
+    ];
+    return row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  });
+  const csv = header.join(',') + '\n' + lines.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `incidents-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 // ══════════════════════════════════════════════════════════════════════════
 // SSE Live Pipeline Feed
 // ══════════════════════════════════════════════════════════════════════════
@@ -322,7 +404,7 @@ export function connectLiveFeed(onNewAlert) {
   _sse.addEventListener('connected', () => {
     const log = document.getElementById('liveFeedLog');
     if (log.innerHTML === 'Connecting to live event stream...') {
-      log.innerHTML = '<span style="color:var(--green)">\u2713 Connected to live pipeline stream. Alerts from ALL sources (CLI, Falco, Suricata, dashboard) will appear here in real-time.</span>';
+      log.innerHTML = '';
     }
   });
 

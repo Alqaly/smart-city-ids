@@ -71,11 +71,14 @@
   <!-- Tab Bar -->
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="overview">Overview</button>
-    <button class="tab-btn" data-tab="alerts">Live Alerts</button>
-    <button class="tab-btn" data-tab="kubernetes">Kubernetes</button>
-    <button class="tab-btn" data-tab="iot">IoT Devices</button>
+    <button class="tab-btn" data-tab="alerts">Incidents</button>
+    <button class="tab-btn" data-tab="governance">Approvals</button>
+    <button class="tab-btn" data-tab="threats">Threats</button>
+    <button class="tab-btn" data-tab="iot">IoT</button>
+    <button class="tab-btn" data-tab="kubernetes">K8s</button>
     <button class="tab-btn" data-tab="llm">LLM Providers</button>
-    <button class="tab-btn" data-tab="governance">Governance / HITL</button>
+    <button class="tab-btn" data-tab="metrics">Metrics</button>
+    <button class="tab-btn" data-tab="hunt">Hunt</button>
     <button class="tab-btn" data-tab="attacks">Attack Simulation</button>
   </div>
 
@@ -107,10 +110,9 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Live Pipeline Feed — inside overview tab -->
-  <div class="card" id="liveFeedCard" style="margin:0 0 16px;border:1px solid var(--accent);border-radius:8px">
+    <!-- Live Pipeline Feed — inside overview tab -->
+    <div class="card" id="liveFeedCard" style="margin:0 0 16px;border:1px solid var(--accent);border-radius:8px">
     <div class="card-header" style="cursor:pointer" onclick="toggleLiveFeed()">
       <h3><span id="liveFeedDot" class="dot dot-yellow" style="margin-right:6px"></span>Live Pipeline Feed</h3>
       <span style="font-size:11px;color:var(--text3);margin-left:8px" id="liveFeedStatus">Connecting...</span>
@@ -140,7 +142,7 @@
       <pre id="iotStreamLog" style="font-size:11.5px;color:var(--text2);max-height:400px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:var(--bg);padding:12px;border-radius:6px;border:1px solid var(--border)">Starting IoT event feed...</pre>
     </div>
   </div>
-</div>
+  </div><!-- /tab-overview -->
 
   <!-- ═════════════════════════════════════════════════════════════════════
        TAB: Live Alerts
@@ -148,13 +150,26 @@
   <div class="tab-panel" id="tab-alerts">
     <div class="card">
       <div class="card-header">
-        <h3>Alert History</h3>
-        <div style="display:flex;gap:8px">
+        <h3>Incident Grid</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="incidentSearch" placeholder="Search rule, threat, summary..." style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px;min-width:220px">
           <select id="alertSourceFilter" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
             <option value="">All Sources</option>
             <option value="falco">Falco</option>
             <option value="suricata">Suricata</option>
           </select>
+          <select id="incidentSort" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
+            <option value="time_desc">Newest</option>
+            <option value="time_asc">Oldest</option>
+            <option value="severity_desc">Severity High-Low</option>
+            <option value="severity_asc">Severity Low-High</option>
+          </select>
+          <select id="incidentPageSize" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="window._exportIncidentsCsv()">Export CSV</button>
           <button class="btn btn-outline btn-sm" onclick="loadAlerts()">Refresh</button>
         </div>
       </div>
@@ -164,6 +179,61 @@
           <tbody id="alertsTable"></tbody>
         </table>
       </div>
+      <div class="card-body" style="display:flex;justify-content:space-between;align-items:center">
+        <span id="incidentPageInfo" style="font-size:12px;color:var(--text3)">Page 1</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline btn-sm" onclick="window._incidentPrev()">Prev</button>
+          <button class="btn btn-outline btn-sm" onclick="window._incidentNext()">Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-threats">
+    <div class="row">
+      <div class="card">
+        <div class="card-header"><h3>MITRE ATT&CK Coverage</h3></div>
+        <div class="card-body" id="threatMitreHeatmap"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Top Threats by Service</h3></div>
+        <div class="card-body" id="threatServiceMatrix"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Threat Timeline (Recent)</h3></div>
+      <div class="card-body" id="threatTimeline"></div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-metrics">
+    <div class="row">
+      <div class="card">
+        <div class="card-header"><h3>Service MTTR Proxy</h3></div>
+        <div class="card-body" id="metricsMttr"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>p95 Processing Latency</h3></div>
+        <div class="card-body" id="metricsLatency"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Template Presets</h3></div>
+      <div class="card-body" id="metricsTemplates"></div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="tab-hunt">
+    <div class="card">
+      <div class="card-header"><h3>Threat Hunt Console</h3></div>
+      <div class="card-body">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-outline btn-sm" onclick="window._huntPreset('healthcare')">show healthcare incidents</button>
+          <button class="btn btn-outline btn-sm" onclick="window._huntPreset('mitre')">mitre coverage</button>
+          <button class="btn btn-outline btn-sm" onclick="window._exportIncidentsCsv()">export last 24h</button>
+        </div>
+        <div id="huntOutput" style="font-size:12px;color:var(--text2)">Use quick hunt commands to pivot the incident grid.</div>
+        </div>
     </div>
   </div>
 

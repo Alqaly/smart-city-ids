@@ -22,6 +22,12 @@ import { esc, sevBadge, severityToPriority } from '../utils.js';
 // Scenario Registry — 12 MITRE ATT&CK for ICS attack templates
 // ══════════════════════════════════════════════════════════════════════════
 
+const ALL_PODS = ['traffic-camera', 'parking-system', 'healthcare-api', 'env-sensor', 'street-lighting'];
+function randomPod(exclude) {
+  const pool = exclude ? ALL_PODS.filter(p => p !== exclude) : ALL_PODS;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 export const ATTACK_SCENARIOS = [
   // ── Initial Access ──
   { id: 0, name: 'DDoS Traffic Cameras', cat: 'Denial of Service', source: 'suricata', threat: 'DDoS / Volumetric Flood', pod: 'traffic-camera', sev: 9, color: '#ef4444', duration: 15000, icon: '\uD83C\uDF10', particles: 50, mitre: 'T0866', mitreName: 'Exploitation of Remote Services', description: 'SYN flood targeting ONVIF Profile S camera endpoints. Saturates RTSP/HTTP ports to blind surveillance.' },
@@ -86,7 +92,7 @@ export function renderAttackTab() {
       '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px">' +
       '<span class="badge ' + attackSeverityClass(attack.sev) + '">' + attack.sev + '/10</span>' +
       '<span class="badge badge-info">' + attack.source.toUpperCase() + '</span>' +
-      '<span style="color:var(--text3)">' + attack.pod + '</span>' +
+      '<span style="color:var(--text3)">Any IoT device</span>' +
       '</div></div>';
   });
   // Custom alert card
@@ -161,13 +167,15 @@ export function launchAttack(attackId, refreshFn) {
 function triggerRealAttack(attack, refreshFn) {
   const ts = new Date().toISOString();
   const traceId = 'attack-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+  // Randomize target pod across all IoT services
+  const targetPod = ALL_PODS[Math.floor(Math.random() * ALL_PODS.length)];
   const payload = {
-    output: attack.source.toUpperCase() + ' Attack: ' + attack.name + ' on ' + attack.pod + ' [' + attack.mitre + ']',
+    output: attack.source.toUpperCase() + ' Attack: ' + attack.name + ' on ' + targetPod + ' [' + attack.mitre + ']',
     priority: severityToPriority(attack.sev),
     rule: attack.name,
     time: ts,
     output_fields: {
-      'container.name': attack.pod,
+      'container.name': targetPod,
       'alert.signature': attack.name,
       'threat.type': attack.threat,
       'mitre.technique': attack.mitre,
@@ -224,20 +232,26 @@ function attackComplete() {
 // ══════════════════════════════════════════════════════════════════════════
 
 export function showCustomModal() {
-  const pods = ['traffic-camera', 'parking-system', 'healthcare-api', 'env-sensor', 'street-lighting'];
-  const podOpts = pods.map(p => '<option value="' + p + '">' + p + '</option>').join('');
+  const podOpts = ALL_PODS.map(p => '<option value="' + p + '">' + p + '</option>').join('');
   document.getElementById('modalContent').innerHTML =
-    '<h2>Custom Alert Injection</h2>' +
+    '<h2 style="margin-bottom:4px">Custom Alert Injection</h2>' +
+    '<p style="font-size:12px;color:var(--text3);margin-bottom:16px">Inject a custom security event into the IDS pipeline. It will flow through dedup, LLM analysis, governance, and K8s automation.</p>' +
     '<label style="font-size:12px;color:var(--text2)">Rule Name</label>' +
     '<input id="customRule" value="Custom Security Rule" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px">' +
-    '<label style="font-size:12px;color:var(--text2)">Alert Output</label>' +
-    '<textarea id="customOutput" style="width:100%;min-height:60px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px;margin-bottom:12px">Custom security event detected in smart-city service</textarea>' +
-    '<label style="font-size:12px;color:var(--text2)">Priority</label>' +
-    '<select id="customPriority" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px"><option value="Critical">Critical</option><option value="Warning" selected>Warning</option><option value="Notice">Notice</option></select>' +
-    '<label style="font-size:12px;color:var(--text2)">Target Pod</label>' +
-    '<select id="customContainer" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:12px">' + podOpts + '</select>' +
-    '<label style="font-size:12px;color:var(--text2)">MITRE Technique (optional)</label>' +
-    '<input id="customMitre" placeholder="e.g. T0836" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);margin-bottom:16px">' +
+    '<label style="font-size:12px;color:var(--text2)">Alert Description</label>' +
+    '<textarea id="customOutput" style="width:100%;min-height:60px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:8px;margin-bottom:12px">Suspicious process execution detected in smart-city IoT container — unauthorized binary spawned with network access</textarea>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">' +
+    '<div><label style="font-size:12px;color:var(--text2)">Source</label>' +
+    '<select id="customSource" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"><option value="falco">Falco</option><option value="suricata">Suricata</option></select></div>' +
+    '<div><label style="font-size:12px;color:var(--text2)">Priority</label>' +
+    '<select id="customPriority" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"><option value="Critical">Critical</option><option value="Warning" selected>Warning</option><option value="Notice">Notice</option></select></div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">' +
+    '<div><label style="font-size:12px;color:var(--text2)">Target Pod</label>' +
+    '<select id="customContainer" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)">' + podOpts + '</select></div>' +
+    '<div><label style="font-size:12px;color:var(--text2)">MITRE Technique</label>' +
+    '<input id="customMitre" placeholder="e.g. T0836" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text)"></div>' +
+    '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline" onclick="window._closeModal()">Cancel</button><button class="btn btn-primary" onclick="window._sendCustom()">Inject Alert</button></div>';
   document.getElementById('modalOverlay').classList.add('open');
 }

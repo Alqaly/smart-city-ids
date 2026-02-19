@@ -55,9 +55,13 @@ async function request(path, opts = {}) {
  * @param {string} path — API path
  * @returns {Promise<Object|null>}
  */
-async function requestNoAuth(path) {
+async function requestNoAuth(path, opts = {}) {
   try {
-    const res = await fetch(`${API_BASE}${path}`);
+    const res = await fetch(`${API_BASE}${path}`, opts);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { _error: true, _status: res.status, detail: body.detail || `HTTP ${res.status}` };
+    }
     return res.json();
   } catch {
     return null;
