@@ -40,7 +40,7 @@ Both detectors feed their alerts through **forwarders** — lightweight Python s
 1. Parse raw alert output into a normalized JSON shape
 2. Deduplicate repeated alerts (fingerprint-based, 60s window)
 3. Map priority strings to numeric severity (1–10)
-4. POST to `http://ids-api:8000/api/alerts/internal`
+4. POST to `http://ids-api:8000/api/alerts/internal` (forwarders only, `X-IDS-Internal-Token` required)
 
 ---
 
@@ -83,7 +83,7 @@ The manager maintains a priority-ordered list of LLM engines. For each call:
 2. Check if engine is in **cooldown** (15min after auth/quota error) → skip if so
 3. Attempt API call with the alert context
 
-If the call fails, the manager tries the next provider. The local fallback engine always succeeds (no network call).
+If the call fails, the manager tries the next configured provider in priority order.
 
 ### The Prompt
 
@@ -102,14 +102,13 @@ The engine attempts to extract JSON from the response:
 3. Validate required fields (severity, summary, threat_type)
 4. If parsing fails entirely → return conservative fallback analysis (severity 5, "Policy Violation")
 
-### Local Fallback Engine
+### Provider Failure Handling
 
-When no cloud LLM is available (all have open circuit breakers or no API keys), the local engine performs pattern matching against 11 rules:
+When one or more providers are unavailable (cooldown, circuit breaker, auth/quota issues), the manager fails over to the next configured provider.
 
-- Matches keywords in the alert `output` and `rule` fields
-- Returns pre-defined severity and threat type per pattern
-- Zero latency, zero cost, always available
-- Used as the last resort in the provider chain
+- Per-provider circuit-breaker state is exposed via `/api/circuit-breaker/status`
+- Provider diagnostics are exposed via `/api/llm/diagnostics`
+- Startup requires at least one configured API key (`Config.validate()`), so keyless local-only startup is not enabled in this branch
 
 ---
 
@@ -226,7 +225,7 @@ The dashboard auto-refreshes data every 30 seconds. Unauthenticated tabs (`/heal
 
 ### Dashboard Buttons
 
-The Attack Simulation tab provides one-click attack triggers that POST pre-built alert payloads to `/api/alerts/internal`. These test the full pipeline without executing real attacks.
+Synthetic attack injection was removed. Generate detections using LIVE attacks (real traffic) so Falco/Suricata produce real alerts.
 
 ### CLI Pipeline Script
 

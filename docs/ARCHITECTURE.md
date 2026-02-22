@@ -50,7 +50,7 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
                      │                                                       │
               ┌──────┴──────┐                                                │
               │  LLM APIs   │  xAI Grok-4 · OpenAI GPT-4 · Anthropic Claude │
-              │  (external) │  Google Gemini · Moonshot Kimi · Local Fallback│
+              │  (external) │  Google Gemini · Moonshot Kimi                 │
               └─────────────┘
 ```
 
@@ -78,7 +78,7 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 | `monitoring` | prometheus | 1 | Metrics collection (NodePort 31106) |
 | `monitoring` | grafana | 1 | Dashboards (NodePort 30300) |
 
-**Total: ~45 pods across 4 namespaces** (+ kube-system pods managed by K3s).
+**Pod total is deployment-profile dependent across 4 namespaces** (+ kube-system pods managed by K3s).
 
 ---
 
@@ -90,9 +90,9 @@ Every security event follows this path:
 1. DETECTION
    Falco (runtime syscalls)  ──→  Falco Forwarder  ──→  POST /api/alerts/internal
    Suricata (network sigs)   ──→  Suricata Forwarder ─→  POST /api/alerts/internal
-   Dashboard buttons / CLI   ──────────────────────────→  POST /api/alerts/internal
+   (Removed) Synthetic dashboard/CLI injection path.
 
-2. INTAKE (main.py)
+2. INTAKE (`api/alerts.py`)
    ├─ Rate limiter: per-rule (10/min), per-source (100/min), global (500/min)
    │  └─ Exceeds → HTTP 429, stored in throttled_alerts table
    ├─ Request queue: max 100 concurrent
@@ -101,10 +101,10 @@ Every security event follows this path:
    └─ Dedup cache: MD5(rule + proc.cmdline + container.name), 60s TTL
       └─ Cache hit → return cached analysis, skip LLM call
 
-3. LLM ANALYSIS (llm_manager.py)
+3. LLM ANALYSIS (`llm_providers/*` + `api/_state.py`)
    ├─ Circuit breaker check (per-engine, threshold=5 failures, 30s recovery)
    ├─ Cooldown check (15min after quota/auth errors)
-   ├─ Try engines in priority order: xai → openai → kimi → local
+   ├─ Try configured providers in priority order (`LLM_PRIORITY` / `LLM_PROVIDER_CHAIN`)
    │  └─ Each: build prompt → API call → parse JSON → validate
    └─ Output: {severity, threat_type, summary, recommendations, automated_actions}
 
@@ -128,7 +128,7 @@ The Overview "Pipeline Overview" row maps each stage to concrete metrics:
 | Falco alerts | `smartcity_ids_alerts_raw_total{source="falco"}` | Raw ingress rate before dedup/throttling |
 | Suricata alerts | `smartcity_ids_alerts_raw_total{source="suricata"}` | Raw network alert ingress |
 | IDS ingest + dedup | `smartcity_ids_alerts_after_dedup_total`, `smartcity_ids_dedup_hit_rate_percent` | Shows analysis workload after dedup |
-| LLM / local analysis | `smartcity_ids_llm_requests_total{engine,result}`, `smartcity_ids_llm_latency_seconds` | p95 latency and per-engine throughput |
+| LLM analysis | `smartcity_ids_llm_requests_total{engine,result}`, `smartcity_ids_llm_latency_seconds` | p95 latency and per-engine throughput |
 | Governance + K8s actions | `smartcity_ids_human_review_required_total`, `smartcity_ids_actions_executed_total` | Analyst touch vs automated response |
 
 Additional LLM observability exported by IDS API:
@@ -144,10 +144,10 @@ Additional LLM observability exported by IDS API:
 ```
 services/ids-api/
 ├── src/
-│   ├── main.py                 (2327 lines)  FastAPI app, endpoints, pipeline
-│   ├── config.py               (161 lines)   Environment-based configuration
-│   ├── llm_manager.py          (870 lines)   Multi-provider LLM with failover
-│   ├── database.py             (893 lines)   PostgreSQL + memory fallback
+│   ├── main.py                 (current)      FastAPI app bootstrap + router registration
+│   ├── config.py               (current)      Environment-based configuration
+│   ├── llm_manager.py          (current)      Legacy manager + compatibility path
+│   ├── database.py             (current)      PostgreSQL + memory fallback
 │   ├── operator_interface.py   (572 lines)   Incident transforms for dashboard
 │   ├── governance.py           (507 lines)   HITL governance controller
 │   ├── alert_rate_limiter.py   (287 lines)   Time-window rate limiter
@@ -180,17 +180,15 @@ smart-city-services/
 
 ## LLM Provider Architecture
 
-Six providers with priority-ordered failover:
+Cloud providers with priority-ordered failover:
 
-| Priority | Provider | API Endpoint | Model | Env Var |
-|---|---|---|---|---|
-| 1 | xAI Grok-4 | `api.x.ai/v1/chat/completions` | grok-4-latest | `XAI_API_KEY` |
-| 2 | Anthropic Claude | `api.anthropic.com/v1/messages` | claude-3-5-sonnet | `ANTHROPIC_API_KEY` |
-| 3 | OpenAI GPT-4 | `api.openai.com/v1/chat/completions` | gpt-4-turbo | `OPENAI_API_KEY` |
-| 4 | Google Gemini | `generativelanguage.googleapis.com` | gemini-2.0-flash | `GEMINI_API_KEY` |
-| 5 | Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | moonshot-v1-128k | `KIMI
-_API_KEY` |
-| 6 | Local Fallback | (no network call) | 11 rule patterns | (always available) |
+| Provider | API Endpoint | Model (default) | Env Var |
+|---|---|---|---|
+| xAI Grok | `api.x.ai/v1/chat/completions` | `grok-4-latest` | `XAI_API_KEY` |
+| Anthropic Claude | `api.anthropic.com/v1/messages` | `claude-3-5-sonnet-20241022` | `ANTHROPIC_API_KEY` |
+| OpenAI GPT | `api.openai.com/v1/chat/completions` | `gpt-4-turbo-preview` | `OPENAI_API_KEY` |
+| Google Gemini | `generativelanguage.googleapis.com` | `gemini-2.0-flash` | `GEMINI_API_KEY` |
+| Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | `moonshot-v1-8k` | `KIMI_API_KEY` |
 
 ### Resilience
 
@@ -199,7 +197,6 @@ _API_KEY` |
 | Circuit Breaker | 5 failures → open, 30s recovery | Per-engine, half-open allows 3 test calls |
 | Provider Cooldown | 15 minutes (env: `LLM_PROVIDER_COOLDOWN_SECONDS`) | After HTTP 401/403/429 or quota errors |
 | Dedup Cache | 60s TTL, 100 max entries | MD5(rule+process+container), avoids duplicate LLM calls |
-| Local Fallback | Always active | Rule-based pattern matching, no API key needed |
 
 ### LLM Response Contract
 
@@ -218,22 +215,7 @@ _API_KEY` |
 }
 ```
 
-### Local Fallback Engine Rules
-
-| Pattern | Severity | Threat Type |
-|---|---|---|
-| crypto, miner, xmrig, stratum | 7 | Malware |
-| sql injection, sqlmap, union select | 8 | Data Exfiltration |
-| /etc/shadow, /etc/passwd, sensitive file | 8 | Data Exfiltration |
-| container escape, nsenter, /proc/1 | 9 | Privilege Escalation |
-| privilege escalation, setuid, sudo | 9 | Privilege Escalation |
-| shell, bash, /bin/sh spawned | 7 | Privilege Escalation |
-| ddos, flood, amplification | 8 | DDoS |
-| dns exfiltration, dns tunnel | 7 | Data Exfiltration |
-| lateral movement, service discovery | 8 | Reconnaissance |
-| outbound connection, unexpected | 7 | Policy Violation |
-| port scan, network scan | 6 | Reconnaissance |
-| (default fallback) | 5 | Policy Violation |
+Note: current startup validation requires at least one configured LLM API key; keyless local-only startup mode is not enabled in this branch.
 
 ---
 
@@ -293,7 +275,7 @@ All external access uses `localhost` — WiFi/IP-independent.
 
 ---
 
-## Prometheus Metrics (38 total)
+## Prometheus Metrics
 
 **Core:** `ids_alerts_received_total`, `ids_alerts_processed_total`, `ids_automated_actions_total`, `ids_blocked_actions_total`, `ids_alert_processing_seconds`, `ids_uptime_seconds`
 

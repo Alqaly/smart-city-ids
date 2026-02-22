@@ -9,7 +9,7 @@ Technical documentation for the LLM-driven Intrusion Detection System.
 | Document | Description |
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design: namespace layout, pod inventory, alert pipeline, source structure, LLM provider architecture, database schema, network topology, Prometheus metrics |
-| [API_REFERENCE.md](API_REFERENCE.md) | All 37 API endpoints, request/response models, authentication, configuration variables, error codes |
+| [API_REFERENCE.md](API_REFERENCE.md) | Complete API endpoint reference, request/response models, authentication, configuration variables, error codes |
 | [HOW_IT_WORKS.md](HOW_IT_WORKS.md) | End-to-end walkthrough: detection → intake → LLM analysis → automated response → governance → persistence |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Local setup, K3s deployment, code architecture, testing, debugging, scripts reference |
 
@@ -35,10 +35,18 @@ Technical documentation for the LLM-driven Intrusion Detection System.
 | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md) | Research context and academic positioning |
 | [EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md) | Defense preparation and examiner Q&A |
 
+## Capstone Report Build (Start Here for Writing)
+
+| Document | Description |
+|---|---|
+| [CAPSTONE_70P_REPORT_BLUEPRINT.md](CAPSTONE_70P_REPORT_BLUEPRINT.md) | 70-page IEEE writing plan with chapter page budget |
+| [CAPSTONE_CANONICAL_SOURCE_LEDGER.md](CAPSTONE_CANONICAL_SOURCE_LEDGER.md) | Single-source-of-truth map to resolve conflicting claims |
+| [CAPSTONE_EVIDENCE_MATRIX.md](CAPSTONE_EVIDENCE_MATRIX.md) | Chapter-to-evidence mapping to keep report traceable |
+
 ## Quick Links
 
 - **Dashboard**: `http://localhost:30800/ui`
 - **Health check**: `curl http://localhost:30800/health`
 - **Prometheus**: `http://localhost:31106`
 - **Grafana**: `http://localhost:30300`
-- **Demo credentials**: `operator` / `operator`
+- **Demo credentials**: configured via environment variables (`IDS_USER_*` / `IDS_PASS_*`)

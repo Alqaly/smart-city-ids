@@ -1,12 +1,20 @@
+"""Kubernetes Automation - REAL Actions.
+
+Executes defensive actions on the K8s cluster.
+
+Important: The official Kubernetes Python client is synchronous.
+This module is used from FastAPI async request handlers; therefore any
+Kubernetes API calls must be executed off the event loop to avoid
+stalling HTTP responsiveness (which can trip readiness/liveness probes).
 """
-Kubernetes Automation - REAL Actions
-Executes defensive actions on the K8s cluster
-"""
+
+import asyncio
 import logging
 from typing import Optional
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +39,95 @@ class K8sAutomation:
             self.apps_v1 = client.AppsV1Api()
             self.core_v1 = client.CoreV1Api()
             self.networking_v1 = client.NetworkingV1Api()
+            self.custom_objects = client.CustomObjectsApi()
             
             logger.info("Kubernetes client initialized successfully")
             
         except Exception as e:
             logger.error(f"Failed to initialize Kubernetes client: {e}")
             raise
+
+    async def _call_k8s(self, fn, *args, timeout_s: float = 3.0, **kwargs):
+        """Run a synchronous Kubernetes client call off the event loop.
+
+        Args:
+            fn: Callable (bound method) from kubernetes.client.*Api.
+            timeout_s: Hard timeout for the *overall* call.
+        """
+        return await asyncio.wait_for(asyncio.to_thread(fn, *args, **kwargs), timeout=timeout_s)
+
+    async def create_threat_response(
+        self,
+        *,
+        alert_id: str,
+        target_resource: str,
+        severity: int,
+        actions: list,
+        namespace: str = "smart-city",
+        trace_id: Optional[str] = None,
+    ) -> dict:
+        """Create a ThreatResponse CRD resource for operator-driven reconciliation."""
+        if self.automation_mode == 'dry-run':
+            logger.info(
+                "[DRY-RUN] Would create ThreatResponse (alert_id=%s, target=%s, severity=%s, actions=%s)",
+                alert_id,
+                target_resource,
+                severity,
+                actions,
+            )
+            return {"success": True, "status": "dry-run"}
+
+        if os.getenv("K8S_USE_THREATRESPONSE_CRD", "true").lower() != "true":
+            return {"success": False, "status": "disabled", "reason": "K8S_USE_THREATRESPONSE_CRD=false"}
+
+        crd_name = f"tr-{str(alert_id).lower().replace('_', '-')}-{int(time.time())}"
+        crd_name = ''.join(ch if (ch.isalnum() or ch == '-') else '-' for ch in crd_name)[:63].strip('-') or f"tr-{int(time.time())}"
+
+        body = {
+            "apiVersion": "ids.smartcity.local/v1alpha1",
+            "kind": "ThreatResponse",
+            "metadata": {
+                "name": crd_name,
+                "namespace": namespace,
+                "labels": {
+                    "app.kubernetes.io/managed-by": "smart-city-ids-api",
+                    "ids.smartcity.local/trace-id": (trace_id or "none")[:63],
+                },
+            },
+            "spec": {
+                "alertId": str(target_resource or alert_id),
+                "severity": int(severity),
+                "actions": [str(a) for a in (actions or [])],
+            },
+        }
+
+        try:
+            created = await self._call_k8s(
+                self.custom_objects.create_namespaced_custom_object,
+                group="ids.smartcity.local",
+                version="v1alpha1",
+                namespace=namespace,
+                plural="threatresponses",
+                body=body,
+                timeout_s=5.0,
+            )
+            logger.info("✅ ThreatResponse created: %s", crd_name)
+            return {
+                "success": True,
+                "name": created.get("metadata", {}).get("name", crd_name),
+                "namespace": namespace,
+            }
+        except ApiException as e:
+            if e.status == 409:
+                logger.warning("ThreatResponse already exists: %s", crd_name)
+                return {"success": True, "name": crd_name, "namespace": namespace, "status": "exists"}
+            logger.error(f"Failed to create ThreatResponse: {e}")
+            return {"success": False, "error": str(e)}
     
     def check_connection(self) -> bool:
         """Check if Kubernetes is accessible"""
         try:
-            self.core_v1.list_namespace()
+            self.core_v1.list_namespace(_request_timeout=(1, 2))
             return True
         except:
             return False
@@ -69,10 +155,12 @@ class K8sAutomation:
                     egress=[]
                 )
             )
-            
-            self.networking_v1.create_namespaced_network_policy(
+
+            await self._call_k8s(
+                self.networking_v1.create_namespaced_network_policy,
                 namespace=namespace,
-                body=network_policy
+                body=network_policy,
+                timeout_s=5.0,
             )
             
             logger.info(f"✅ Isolated pod: {pod_name} in {namespace}")
@@ -93,16 +181,20 @@ class K8sAutomation:
 
         try:
             deployment_name = f"{service_name}-deployment"
-            deployment = self.apps_v1.read_namespaced_deployment(
-                name=deployment_name,
-                namespace=namespace
-            )
-            deployment.spec.replicas = replicas
-            
-            self.apps_v1.patch_namespaced_deployment(
+            deployment = await self._call_k8s(
+                self.apps_v1.read_namespaced_deployment,
                 name=deployment_name,
                 namespace=namespace,
-                body=deployment
+                timeout_s=5.0,
+            )
+            deployment.spec.replicas = replicas
+
+            await self._call_k8s(
+                self.apps_v1.patch_namespaced_deployment,
+                name=deployment_name,
+                namespace=namespace,
+                body=deployment,
+                timeout_s=5.0,
             )
             
             logger.info(f"✅ Scaled {service_name} to {replicas} replicas")
@@ -120,7 +212,7 @@ class K8sAutomation:
 
         try:
             body = {"spec": {"unschedulable": True}}
-            self.core_v1.patch_node(node_name, body)
+            await self._call_k8s(self.core_v1.patch_node, node_name, body, timeout_s=5.0)
             logger.info(f"✅ Cordoned node: {node_name}")
         except ApiException as e:
             logger.error(f"Failed to cordon node: {e}")
@@ -157,10 +249,12 @@ class K8sAutomation:
                     ]
                 )
             )
-            
-            self.networking_v1.create_namespaced_network_policy(
+
+            await self._call_k8s(
+                self.networking_v1.create_namespaced_network_policy,
                 namespace=namespace,
-                body=network_policy
+                body=network_policy,
+                timeout_s=5.0,
             )
             
             logger.info(f"✅ Blocked IP: {ip_address}")
@@ -180,15 +274,19 @@ class K8sAutomation:
             return
 
         try:
-            pods = self.core_v1.list_namespaced_pod(
+            pods = await self._call_k8s(
+                self.core_v1.list_namespaced_pod,
                 namespace=namespace,
-                label_selector=f"app={service_name}"
+                label_selector=f"app={service_name}",
+                timeout_s=5.0,
             )
             
             for pod in pods.items:
-                self.core_v1.delete_namespaced_pod(
+                await self._call_k8s(
+                    self.core_v1.delete_namespaced_pod,
                     name=pod.metadata.name,
-                    namespace=namespace
+                    namespace=namespace,
+                    timeout_s=5.0,
                 )
             
             logger.info(f"✅ Restarted service: {service_name}")
@@ -200,7 +298,12 @@ class K8sAutomation:
     async def get_pod_node(self, pod_name: str, namespace: str) -> Optional[str]:
         """Get node name for a pod"""
         try:
-            pod = self.core_v1.read_namespaced_pod(pod_name, namespace)
+            pod = await self._call_k8s(
+                self.core_v1.read_namespaced_pod,
+                pod_name,
+                namespace,
+                timeout_s=3.0,
+            )
             return pod.spec.node_name
         except ApiException as e:
             logger.error(f"Failed to get pod node: {e}")

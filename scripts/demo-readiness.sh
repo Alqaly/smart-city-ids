@@ -76,7 +76,8 @@ for target in \
     "monitoring deploy/prometheus" \
     "monitoring deploy/grafana" \
     "monitoring deploy/suricata" \
-    "monitoring deploy/suricata-forwarder"
+    "monitoring deploy/suricata-forwarder" \
+    "falco-system deploy/falco-forwarder"
 do
     ns="${target%% *}"
     obj="${target##* }"
@@ -107,7 +108,62 @@ else
     check_fail "Suricata forwarder pod not running"
 fi
 
-log_section "4) API Health and Auth"
+if kubectl get pods -n falco-system -l app=falco-forwarder --no-headers 2>/dev/null | grep -q Running; then
+    check_ok "Falco forwarder pod running"
+else
+    check_fail "Falco forwarder pod not running"
+fi
+
+log_section "4) Prometheus & Grafana"
+NODE_IP="$(get_node_ip)"
+PROM_PORT="$(get_service_nodeport prometheus monitoring 31106)"
+GRAFANA_PORT="$(get_service_nodeport grafana monitoring 30300)"
+
+prom_up_is_1() {
+    local job="$1"
+    local tries="${2:-6}"
+    local i
+    for i in $(seq 1 "$tries"); do
+        if curl -fsS "http://${NODE_IP}:${PROM_PORT}/api/v1/query?query=up%7Bjob%3D%22${job}%22%7D" 2>/dev/null \
+            | jq -e '.data.result[0].value[1] == "1"' >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+if curl -fsS "http://${NODE_IP}:${PROM_PORT}/-/healthy" >/dev/null 2>&1; then
+    check_ok "Prometheus healthy (NodePort)"
+else
+    check_fail "Prometheus not reachable via NodePort"
+fi
+
+if curl -fsS "http://${NODE_IP}:${GRAFANA_PORT}/api/health" >/dev/null 2>&1; then
+    check_ok "Grafana healthy (NodePort)"
+else
+    check_fail "Grafana not reachable via NodePort"
+fi
+
+if prom_up_is_1 "smart-city-ids"; then
+    check_ok "Prometheus scraping IDS API (up=1)"
+else
+    check_fail "Prometheus scrape missing for IDS API (up!=1)"
+fi
+
+if prom_up_is_1 "suricata-forwarder"; then
+    check_ok "Prometheus scraping Suricata forwarder (up=1)"
+else
+    check_fail "Prometheus scrape missing for Suricata forwarder (up!=1)"
+fi
+
+if prom_up_is_1 "falco-forwarder"; then
+    check_ok "Prometheus scraping Falco forwarder (up=1)"
+else
+    check_fail "Prometheus scrape missing for Falco forwarder (up!=1)"
+fi
+
+log_section "5) API Health and Auth"
 IDS_API_SVC_PORT=8000
 HEALTH_JSON=$(kubectl exec -n smart-city deploy/ids-api -- curl -fsS "http://localhost:${IDS_API_SVC_PORT}/health" 2>/dev/null || true)
 
@@ -115,6 +171,33 @@ if [[ -n "$HEALTH_JSON" ]] && echo "$HEALTH_JSON" | jq -e '.status == "healthy"'
     check_ok "IDS API health endpoint is healthy"
 else
     check_fail "IDS API health endpoint check failed"
+fi
+
+# Database connectivity check (via health endpoint component field)
+DB_STATUS=""
+if [[ -n "$HEALTH_JSON" ]]; then
+    DB_STATUS=$(echo "$HEALTH_JSON" | jq -r '.components.database // empty' 2>/dev/null || true)
+fi
+if [[ "$DB_STATUS" == "postgresql" ]]; then
+    check_ok "PostgreSQL database connected (components.database=postgresql)"
+else
+    # Fallback: direct psql ping
+    if kubectl exec -n smart-city deploy/postgres -- psql -U postgres -d smartcity_ids -c "SELECT 1" >/dev/null 2>&1; then
+        check_ok "PostgreSQL database connected (psql ping)"
+    else
+        check_fail "PostgreSQL database unreachable (status=${DB_STATUS:-unknown})"
+    fi
+fi
+
+# LLM provider check (at least 1 configured and not auth_failed)
+LLM_CONFIGURED_COUNT=""
+if [[ -n "$HEALTH_JSON" ]]; then
+    LLM_CONFIGURED_COUNT=$(echo "$HEALTH_JSON" | jq '.llm_provider_count // 0' 2>/dev/null || echo "0")
+fi
+if [[ "${LLM_CONFIGURED_COUNT:-0}" -ge 1 ]]; then
+    check_ok "LLM providers configured: ${LLM_CONFIGURED_COUNT} provider(s) available"
+else
+    check_fail "No LLM providers configured — alerts will use safe-mode analysis only"
 fi
 
 LOGIN_JSON=""
@@ -150,7 +233,7 @@ if [[ -n "$TOKEN" ]]; then
 fi
 
 if [[ $QUICK -eq 0 ]]; then
-    log_section "5) Recent Alert Activity"
+    log_section "6) Recent Alert Activity"
     # Check for at least one recent alert in the last 5 minutes
     RECENT_ALERTS=""
     if [[ -n "$TOKEN" ]]; then
@@ -173,30 +256,18 @@ except: print(0)
         check_fail "No recent alerts found — pipeline may not be producing data"
     fi
 
-    log_section "6) IoT Device Pod Coverage"
-    IOT_TOTAL=0
-    # Count by pod name prefix (catches both label-based and name-based matches)
-    IOT_TOTAL=$(kubectl get pods -n smart-city --no-headers 2>/dev/null \
-        | grep -cE '^(iot-device|iot-devices|iot-simulator|env-sensor|street-lighting).*Running' || true)
-    if [[ $IOT_TOTAL -ge 10 ]]; then
-        check_ok "IoT device pods running: ${IOT_TOTAL} (>= 10 required)"
-    elif [[ $IOT_TOTAL -ge 1 ]]; then
-        check_ok "IoT device pods running: ${IOT_TOTAL} (< 10 but functional)"
-    else
-        check_fail "No IoT device pods found — deploy IoT device manifests"
-    fi
+    log_section "7) BYO IoT Device Ingest (REST)"
+    IDS_PORT="$(get_service_nodeport ids-api-service smart-city 30800)"
+    BYO_JSON=$(curl -fsS -X POST "http://${NODE_IP}:${IDS_PORT}/api/iot/sensor" \
+        -H "Content-Type: application/json" \
+        -d '{"device_id":"readiness-check-device","device_type":"external","event_type":"heartbeat","value":{"status":"alive"}}' \
+        2>/dev/null || true)
 
-    log_section "7) Demo Script Smoke Checks"
-    for cmd in \
-        "bash $SCRIPT_DIR/check-system.sh --help" \
-        "bash $SCRIPT_DIR/demo.sh --help"
-    do
-        if timeout 10 bash -c "$cmd" >/dev/null 2>&1; then
-            check_ok "Smoke check passed: $cmd"
-        else
-            check_fail "Smoke check failed: $cmd"
-        fi
-    done
+    if [[ -n "$BYO_JSON" ]] && echo "$BYO_JSON" | jq -e '.status == "received"' >/dev/null 2>&1; then
+        check_ok "IoT REST ingest works (/api/iot/sensor)"
+    else
+        check_fail "IoT REST ingest failed (/api/iot/sensor)"
+    fi
 fi
 
 log_section "Summary"

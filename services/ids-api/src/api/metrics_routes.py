@@ -27,7 +27,7 @@ Design notes:
       pipeline strip.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -162,8 +162,8 @@ async def health():
 async def get_safety_status():
     """Get safety controls status — used for demo pre-flight verification.
 
-    Returns the current automation mode (``autopilot`` | ``assisted`` |
-    ``manual`` | ``dry-run``), the list of protected services, alert
+    Returns the current automation mode (``autonomous`` | ``assisted`` |
+    ``manual`` | ``emergency``), the list of protected services, alert
     cache statistics, and severity thresholds.
 
     Operators should check this before a live demo: if ``automation_mode``
@@ -181,7 +181,7 @@ async def get_safety_status():
             "critical_severity": Config.CRITICAL_SEVERITY_THRESHOLD,
             "high_severity": Config.HIGH_SEVERITY_THRESHOLD,
         },
-        "note": "Set AUTOMATION_MODE=dry-run for safe demos",
+        "note": "Use AUTOMATION_MODE=manual for approval-only demos",
     }
 
 
@@ -349,6 +349,91 @@ async def get_metrics():
     return d["metrics"]
 
 
+@router.get("/api/metrics/llm-usage")
+async def llm_usage(window: str = "today"):
+    """DB-backed LLM usage summary.
+
+    Purpose: give the operator a "today" view of:
+      - total calls
+      - prompt/completion tokens
+      - estimated cost (token-based model)
+      - per-provider breakdown
+
+        Query params:
+            - window: "today" (default) or "week" (last 7 days).
+    """
+    from api._state import LLM_COST_PER_1K_TOKENS, llm_last_provider_used, llm_manager
+
+    d = _deps()
+    db = d["db"]
+
+    w = (window or "today").strip().lower()
+
+    usage = None
+    if w == "today":
+        if hasattr(db, "get_llm_usage_today"):
+            usage = db.get_llm_usage_today()
+    elif w in ("week", "weekly", "7d", "last7d"):
+        if hasattr(db, "get_llm_usage_window"):
+            end = datetime.utcnow()
+            start = end - timedelta(days=7)
+            usage = db.get_llm_usage_window(start, end)
+            w = "week"
+    else:
+        w = "today"
+        if hasattr(db, "get_llm_usage_today"):
+            usage = db.get_llm_usage_today()
+
+    if not usage:
+        usage = {
+            "start_utc": "",
+            "end_utc": "",
+            "totals": {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "tokens": 0},
+            "providers": [],
+        }
+
+    # Estimate cost from token totals (provider-specific per-1k token rate).
+    providers_out = []
+    total_cost = 0.0
+    for row in usage.get("providers", []) or []:
+        prov = (row.get("provider") or "unknown").strip().lower() or "unknown"
+        prompt_tokens = int(row.get("prompt_tokens") or 0)
+        completion_tokens = int(row.get("completion_tokens") or 0)
+        tokens_total = prompt_tokens + completion_tokens
+        rate = float(LLM_COST_PER_1K_TOKENS.get(prov, 0.0))
+        cost = round((tokens_total / 1000.0) * rate, 6) if rate > 0 else 0.0
+        total_cost += cost
+        providers_out.append({
+            "provider": prov,
+            "calls": int(row.get("calls") or 0),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "tokens": tokens_total,
+            "estimated_cost_usd": cost,
+            "rate_per_1k_tokens_usd": rate,
+        })
+
+    totals = usage.get("totals", {}) or {}
+    out_totals = {
+        "calls": int(totals.get("calls") or 0),
+        "prompt_tokens": int(totals.get("prompt_tokens") or 0),
+        "completion_tokens": int(totals.get("completion_tokens") or 0),
+        "tokens": int(totals.get("tokens") or 0),
+        "estimated_cost_usd": round(float(total_cost), 6),
+    }
+
+    return {
+        "window": w,
+        "start_utc": usage.get("start_utc"),
+        "end_utc": usage.get("end_utc"),
+        "totals": out_totals,
+        "providers": providers_out,
+        "active_provider": (llm_last_provider_used or (llm_manager.get_status().get("active_provider") if llm_manager else None)),
+        "cost_threshold_usd": 5.0,
+        "generated_at": int(datetime.utcnow().timestamp()),
+    }
+
+
 @router.get("/api/db/stats")
 async def get_db_stats():
     """Get raw database storage statistics (table row counts, storage type).
@@ -453,5 +538,10 @@ async def prometheus_metrics():
     uptime = (datetime.now() - datetime.fromisoformat(d["metrics"]["started_at"])).total_seconds()
     PROM_UPTIME_SECONDS.set(uptime)
     d["update_cb"]()    # Sync circuit-breaker states → Prometheus gauges.
-    d["refresh_iot"]()  # Update active IoT device count gauge.
+    
+    # Run the synchronous refresh_iot in a thread pool to avoid blocking the event loop
+    import asyncio
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, d["refresh_iot"])
+    
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

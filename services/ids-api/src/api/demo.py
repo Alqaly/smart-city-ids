@@ -1,20 +1,11 @@
-"""Demo control endpoints — IoT fleet scaling + Chaos Mode.
+"""Demo control endpoints — IoT fleet scaling.
 
-Provides two operator-facing API endpoints:
-
-1. **IoT Fleet Scaling** — ``POST /api/iot/scale`` and ``GET /api/iot/scale``
-   allow the dashboard to dynamically scale the 5 IoT emulator deployments
-   up or down (1–10 replicas each).
-
-2. **Chaos Mode** — ``POST /api/demo/chaos`` triggers the 13-scenario
-   attack pipeline script (``scripts/attack-iot-pipeline.sh``) in a
-   background process.  Returns immediately with a run-id.
+Synthetic “attack registry / chaos mode / injected alerts” endpoints were
+removed. This project runs LIVE attacks only (real traffic that triggers
+Falco/Suricata).
 """
 
 import logging
-import os
-import subprocess
-import uuid
 from typing import Dict, Optional
 
 from fastapi import APIRouter
@@ -111,75 +102,3 @@ async def set_iot_scale(replicas: int = 3, service: Optional[str] = None):
             logger.error(f"Failed to scale {dep_name}: {e}")
 
     return {"replicas": replicas, "results": results}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Chaos Mode — triggers the attack-iot-pipeline.sh script
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Track running chaos processes
-_chaos_processes: Dict[str, subprocess.Popen] = {}
-
-
-@router.post("/api/demo/chaos")
-async def run_chaos_mode(mode: str = "quick"):
-    """Trigger the IoT attack pipeline script in the background.
-
-    Query params:
-        mode: 'quick' (5 fast attacks) or 'full' (all 13 scenarios).
-    """
-    run_id = f"chaos-{uuid.uuid4().hex[:8]}"
-
-    # Locate the script
-    script_candidates = [
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts", "attack-iot-pipeline.sh"),
-        "/app/scripts/attack-iot-pipeline.sh",
-        os.path.join(os.getcwd(), "scripts", "attack-iot-pipeline.sh"),
-    ]
-    script_path = None
-    for candidate in script_candidates:
-        resolved = os.path.realpath(candidate)
-        if os.path.isfile(resolved):
-            script_path = resolved
-            break
-
-    if not script_path:
-        return {"error": "attack-iot-pipeline.sh not found", "searched": script_candidates}
-
-    args = ["bash", script_path]
-    if mode == "quick":
-        args.append("--quick")
-
-    try:
-        proc = subprocess.Popen(
-            args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env={**os.environ, "IDS_API_URL": "http://localhost:8000"},
-        )
-        _chaos_processes[run_id] = proc
-        logger.info(f"Chaos mode started: {run_id} (mode={mode}, pid={proc.pid})")
-        return {
-            "status": "started",
-            "run_id": run_id,
-            "mode": mode,
-            "pid": proc.pid,
-            "script": script_path,
-        }
-    except Exception as e:
-        logger.error(f"Failed to start chaos mode: {e}")
-        return {"error": str(e)}
-
-
-@router.get("/api/demo/chaos/status")
-async def chaos_status():
-    """Check status of running chaos processes."""
-    active = {}
-    for rid, proc in list(_chaos_processes.items()):
-        poll = proc.poll()
-        if poll is None:
-            active[rid] = {"status": "running", "pid": proc.pid}
-        else:
-            active[rid] = {"status": "finished", "exit_code": poll}
-    return {"processes": active}

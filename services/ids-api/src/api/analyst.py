@@ -3,18 +3,23 @@ Conversational Security Analyst API with Tool Calling
 Enables natural language interaction with the IDS system
 """
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any, Callable
 import json
 import asyncio
+import inspect
+import threading
 import logging
+import time
 from datetime import datetime
 from enum import Enum
+from uuid import uuid4
 
 # Use absolute imports if this file is in services/ids-api/src/api/
 from llm_manager_enhanced import EnhancedLLMManager
 from llm_credit_checker import check_all_credits
+from config import Config
 
 # Define status constants to replace missing Enum
 class ProviderStatus:
@@ -27,6 +32,45 @@ class ProviderStatus:
 # Create a local instance of the enhanced manager for analyst operations
 # This ensures we have access to analyze_security_alert and other enhanced features
 analyst_llm = EnhancedLLMManager()
+
+
+class PerUserTokenBucket:
+    """Simple per-user/session token bucket limiter for analyst chat."""
+
+    def __init__(self, requests_per_minute: int, burst_size: int):
+        self.requests_per_minute = max(1, int(requests_per_minute))
+        self.burst_size = max(1, int(burst_size))
+        self._state: Dict[str, Dict[str, float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def acquire(self, user_key: str) -> tuple[bool, str]:
+        key = str(user_key or "anonymous").strip().lower() or "anonymous"
+        now = time.time()
+        async with self._lock:
+            row = self._state.get(key)
+            if not row:
+                row = {"tokens": float(self.burst_size), "last_refill": now}
+                self._state[key] = row
+
+            elapsed = now - float(row.get("last_refill", now))
+            refill = elapsed * (self.requests_per_minute / 60.0)
+            row["tokens"] = min(float(self.burst_size), float(row.get("tokens", 0.0)) + refill)
+            row["last_refill"] = now
+
+            if row["tokens"] >= 1.0:
+                row["tokens"] -= 1.0
+                return True, "OK"
+
+            return False, (
+                f"Chat rate limit exceeded for {key}. "
+                f"Max {self.requests_per_minute}/min, burst {self.burst_size}."
+            )
+
+
+chat_rate_limiter = PerUserTokenBucket(
+    Config.ANALYST_CHAT_RATE_LIMIT_PER_MINUTE,
+    Config.ANALYST_CHAT_RATE_LIMIT_BURST,
+)
 
 async def analyze_alert(alert_data: Dict) -> Dict:
     """Wrapper for alert analysis"""
@@ -216,6 +260,151 @@ class ConversationResponse(BaseModel):
     tool_results: Optional[List[Dict]] = None
     credits_used: Optional[float] = None
     provider_used: str = "unknown"
+    intent: Optional[str] = None
+    trace_id: Optional[str] = None
+    action_selector: Optional[List[Dict[str, Any]]] = None
+    confirmation_required: bool = False
+
+
+class SessionBootstrapResponse(BaseModel):
+    session_id: str
+    available_tools: List[str]
+    available_providers: List[str]
+    timestamp: str
+
+
+class AnalystActionRequest(BaseModel):
+    session_id: str
+    action_type: str
+    target: str
+    severity: int = 7
+    reason: Optional[str] = None
+    confirm: bool = False
+
+
+class AnalystPendingDecisionRequest(BaseModel):
+    action_id: str
+    decision: str
+    operator: str = "operator"
+    comment: Optional[str] = None
+
+
+def _extract_action_selector(analysis: Any, user_prompt: str) -> List[Dict[str, Any]]:
+    """Build actionable suggestions for chat Action-Selector UI."""
+    if not isinstance(analysis, dict):
+        return []
+
+    suggested = []
+    automated_actions = analysis.get("automated_actions") or []
+    output_fields = analysis.get("output_fields") or {}
+    prompt_text = (user_prompt or "").strip()
+
+    def add_action(action_type: str, target: str, reason: str, severity: int):
+        if not target:
+            return
+        suggested.append({
+            "action_type": action_type,
+            "target": target,
+            "reason": reason,
+            "severity": max(1, min(10, int(severity or 7))),
+        })
+
+    primary_target = (
+        output_fields.get("container.name")
+        or output_fields.get("k8s.pod.name")
+        or output_fields.get("k8s.pod")
+        or analysis.get("target")
+    )
+
+    severity = int(analysis.get("severity", 7) or 7)
+    summary = str(analysis.get("summary") or "Analyst recommendation")
+
+    for action in automated_actions:
+        action_name = str(action or "").strip().lower()
+        if action_name == "isolate_pod":
+            add_action("isolate_pod", primary_target or "unknown-pod", summary, severity)
+        elif action_name == "scale_up":
+            add_action("scale_up", primary_target or "unknown-service", summary, severity)
+        elif action_name == "block_ip":
+            ip_target = output_fields.get("fd.sip") or output_fields.get("src.ip")
+            add_action("block_ip", ip_target or "unknown-ip", summary, severity)
+
+    if not suggested and prompt_text:
+        lower = prompt_text.lower()
+        if "isolate" in lower:
+            add_action("isolate_pod", primary_target or "unknown-pod", "User requested isolation", severity)
+        if "scale" in lower:
+            add_action("scale_up", primary_target or "unknown-service", "User requested scaling", severity)
+        if "block" in lower and "ip" in lower:
+            add_action("block_ip", output_fields.get("fd.sip") or "unknown-ip", "User requested IP block", severity)
+
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for item in suggested:
+        key = (item["action_type"], item["target"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    return deduped[:5]
+
+
+def _execute_security_action(action_type: str, target: str):
+    """Execute a selected security action via k8s automation when available."""
+    from api._state import k8s_automation
+
+    def normalize_result(result):
+        if inspect.isawaitable(result):
+            box = {"value": None, "error": None}
+
+            def _runner(awaitable):
+                try:
+                    box["value"] = asyncio.run(awaitable)
+                except Exception as exc:
+                    box["error"] = str(exc)
+
+            worker = threading.Thread(target=_runner, args=(result,), daemon=True)
+            worker.start()
+            worker.join(timeout=20)
+
+            if worker.is_alive():
+                return {"success": False, "error": "async action execution timeout"}
+            if box["error"] is not None:
+                return {"success": False, "error": box["error"]}
+            return box["value"]
+        return result
+
+    if action_type == "isolate_pod":
+        if k8s_automation and hasattr(k8s_automation, "isolate_pod"):
+            try:
+                return normalize_result(k8s_automation.isolate_pod(target))
+            except TypeError:
+                return normalize_result(k8s_automation.isolate_pod(target, "smart-city"))
+        return {"success": False, "error": "k8s isolate_pod unavailable"}
+
+    if action_type == "scale_up":
+        if k8s_automation and hasattr(k8s_automation, "scale_deployment"):
+            try:
+                return normalize_result(k8s_automation.scale_deployment(target, "smart-city", 3))
+            except TypeError:
+                return normalize_result(k8s_automation.scale_deployment(target, 3))
+        return {"success": False, "error": "k8s scale_deployment unavailable"}
+
+    if action_type == "block_ip":
+        return {"success": False, "error": "block_ip execution backend not configured"}
+
+    return {"success": False, "error": f"unsupported action_type: {action_type}"}
+
+
+def classify_intent(text: str) -> str:
+    """Lightweight intent classification for chat UX routing hints."""
+    txt = (text or "").lower()
+    if any(k in txt for k in ["isolate", "block", "scale", "quarantine", "contain", "evict"]):
+        return "action"
+    if any(k in txt for k in ["why", "explain", "summary", "analyze", "analysis", "root cause"]):
+        return "analysis"
+    if any(k in txt for k in ["status", "health", "uptime", "credits", "provider", "metrics"]):
+        return "status"
+    return "general"
 
 class ToolExecutor:
     """Executes tools on behalf of the AI analyst"""
@@ -337,8 +526,30 @@ class ToolExecutor:
 # Initialize tool executor
 tool_executor = ToolExecutor()
 
+
+@router.post("/session", response_model=SessionBootstrapResponse)
+async def start_chat_session():
+    """Bootstrap a new analyst chat session with tool/provider visibility."""
+    session_id = f"chat_{uuid4().hex[:12]}"
+    providers: List[str] = []
+    try:
+        credits = await check_all_credits()
+        providers = [
+            p for p, c in credits.items()
+            if c.status in [ProviderStatus.HEALTHY, ProviderStatus.LOW_CREDIT]
+        ]
+    except Exception:
+        providers = ["xai", "openai", "gemini", "kimi"]
+
+    return SessionBootstrapResponse(
+        session_id=session_id,
+        available_tools=list(tool_executor.tools.keys()),
+        available_providers=providers,
+        timestamp=datetime.utcnow().isoformat(),
+    )
+
 @router.post("/chat", response_model=ConversationResponse)
-async def chat_with_analyst(request: ConversationRequest):
+async def chat_with_analyst(request: ConversationRequest, http_request: Request):
     """
     Have a conversation with the AI security analyst.
     
@@ -349,6 +560,26 @@ async def chat_with_analyst(request: ConversationRequest):
     - Check system status and credits
     """
     try:
+        session_key = (request.session_id or "").strip()
+        client_host = (http_request.client.host if http_request and http_request.client else "anonymous") or "anonymous"
+        user_key = session_key or f"ip:{client_host}"
+
+        allowed, limit_reason = await chat_rate_limiter.acquire(user_key)
+        if not allowed:
+            try:
+                from api._state import add_audit_event
+                add_audit_event(
+                    "CHAT_RATE_LIMITED",
+                    trace_id=f"chat-{session_key or client_host}",
+                    user=user_key,
+                    status="blocked",
+                    payload={"reason": limit_reason},
+                )
+            except Exception:
+                pass
+            raise HTTPException(status_code=429, detail=limit_reason)
+
+        started = datetime.utcnow()
         # Build system prompt with current context
         try:
             credits = await check_all_credits()
@@ -358,10 +589,11 @@ async def chat_with_analyst(request: ConversationRequest):
             logger.warning(f"Credit check failed: {e}")
             providers = ["xai", "openai"] # Fallback
         
-        system_prompt = SECURITY_ANALYST_SYSTEM_PROMPT.format(
-            current_time=datetime.utcnow().isoformat(),
-            session_id=request.session_id or "anonymous",
-            providers=", ".join(providers) if providers else "none available"
+        system_prompt = (
+            SECURITY_ANALYST_SYSTEM_PROMPT
+            .replace("{current_time}", datetime.utcnow().isoformat())
+            .replace("{session_id}", request.session_id or "anonymous")
+            .replace("{providers}", ", ".join(providers) if providers else "none available")
         )
         
         # Prepare messages for LLM
@@ -384,9 +616,42 @@ async def chat_with_analyst(request: ConversationRequest):
         )
         
         # Parse response for tool calls
-        content = response.get('analysis', {}).get('raw_analysis', '')
-        if isinstance(response.get('analysis'), dict):
-            content = json.dumps(response['analysis'])
+        analysis = response.get("analysis")
+        content = ""
+        if isinstance(analysis, dict):
+            content = (
+                str(
+                    analysis.get("raw_analysis")
+                    or analysis.get("summary")
+                    or analysis.get("message")
+                    or ""
+                ).strip()
+            )
+            if not content:
+                severity = analysis.get("severity")
+                threat_type = analysis.get("threat_type") or "Unknown"
+                recommendations = analysis.get("recommendations") or []
+                rec_line = ""
+                if isinstance(recommendations, list) and recommendations:
+                    rec_line = f" Recommended actions: {', '.join(map(str, recommendations[:3]))}."
+                sev_line = f" Severity: {severity}/10." if severity is not None else ""
+                content = f"Threat analysis complete. Type: {threat_type}.{sev_line}{rec_line}".strip()
+        elif isinstance(analysis, str):
+            content = analysis.strip()
+
+        if not content:
+            content = str(
+                response.get("message")
+                or response.get("summary")
+                or response.get("detail")
+                or ""
+            ).strip()
+
+        if not content:
+            content = (
+                "Analysis service returned an empty response. "
+                "Please retry. If this persists, verify provider status and API keys."
+            )
         
         # Check for tool calls in response (if model supports it)
         tool_results = []
@@ -415,7 +680,32 @@ async def chat_with_analyst(request: ConversationRequest):
                 except json.JSONDecodeError:
                     tool_results.append({"error": "Invalid tool call format", "raw": match})
         
-        return ConversationResponse(
+        user_intent = classify_intent(request.messages[-1].content if request.messages else "")
+        trace_id = f"chat-{request.session_id or uuid4().hex[:8]}"
+        action_selector = _extract_action_selector(
+            analysis if isinstance(analysis, dict) else {},
+            request.messages[-1].content if request.messages else "",
+        )
+
+        try:
+            from api._state import add_audit_event
+            add_audit_event(
+                "CHAT_ANALYSIS",
+                trace_id=trace_id,
+                severity=(analysis or {}).get("severity") if isinstance(analysis, dict) else None,
+                user="analyst-chat",
+                status="ok",
+                payload={
+                    "intent": user_intent,
+                    "provider": response.get("provider", "unknown"),
+                    "session_id": request.session_id,
+                    "action_suggestions": action_selector,
+                },
+            )
+        except Exception as audit_error:
+            logger.debug(f"Skipped chat audit event: {audit_error}")
+
+        response_obj = ConversationResponse(
             message=ChatMessage(
                 role="assistant",
                 content=content,
@@ -423,9 +713,36 @@ async def chat_with_analyst(request: ConversationRequest):
             ),
             tool_results=tool_results if tool_results else None,
             credits_used=response.get('credit_info', {}).get('estimated_cost_usd'),
-            provider_used=response.get('provider', 'unknown')
+            provider_used=response.get('provider', 'unknown'),
+            intent=user_intent,
+            trace_id=trace_id,
+            action_selector=action_selector if action_selector else None,
+            confirmation_required=bool(action_selector),
         )
+
+        try:
+            from api._state import record_llm_usage, set_llm_last_provider_used
+            provider = response_obj.provider_used or "unknown"
+            latency_s = max(0.0, (datetime.utcnow() - started).total_seconds())
+            ok = response.get("status") in ("success", "fallback")
+            record_llm_usage(
+                provider,
+                latency_s=latency_s,
+                success=ok,
+                prompt_payload=messages,
+                completion_payload=content,
+                usage=response.get("usage"),
+                purpose="analyst_chat",
+                model=response.get("model"),
+            )
+            set_llm_last_provider_used(provider)
+        except Exception as metrics_error:
+            logger.debug(f"Skipped chat metrics tracking: {metrics_error}")
+
+        return response_obj
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -476,6 +793,111 @@ async def analyst_websocket(websocket: WebSocket):
 async def list_available_tools():
     """List all available tools the analyst can use"""
     return {"tools": AVAILABLE_TOOLS}
+
+
+@router.post("/action/submit")
+async def submit_analyst_action(payload: AnalystActionRequest):
+    """Submit a selected chat action with an explicit HITL confirmation gate."""
+    from governance import request_automated_action
+    from api._state import add_audit_event
+
+    trace_id = f"chat-{payload.session_id}"
+
+    if not payload.confirm:
+        add_audit_event(
+            "HITL_CONFIRMATION_REQUIRED",
+            trace_id=trace_id,
+            severity=payload.severity,
+            user="analyst-chat",
+            status="pending",
+            payload={
+                "action_type": payload.action_type,
+                "target": payload.target,
+                "reason": payload.reason,
+            },
+        )
+        return {
+            "status": "confirmation_required",
+            "trace_id": trace_id,
+            "action": payload.model_dump(),
+            "message": "Confirm this action to submit it through governance controls.",
+        }
+
+    governance_result = request_automated_action(
+        action_type=payload.action_type,
+        target=payload.target,
+        severity=payload.severity,
+        reason=payload.reason or "Requested by analyst chat action-selector",
+        execute_fn=lambda: _execute_security_action(payload.action_type, payload.target),
+    )
+
+    add_audit_event(
+        "GOVERNANCE_DECISION",
+        trace_id=trace_id,
+        severity=payload.severity,
+        user="analyst-chat",
+        status="ok" if governance_result.get("status") in ("executed", "approved_and_executed") else "pending",
+        payload={
+            "decision": governance_result.get("status"),
+            "action": payload.action_type,
+            "target": payload.target,
+            "governance_action": (governance_result.get("action") or {}).get("id"),
+            "reason": payload.reason,
+        },
+    )
+
+    return {
+        "status": governance_result.get("status"),
+        "trace_id": trace_id,
+        "governance": governance_result,
+    }
+
+
+@router.post("/action/pending-decision")
+async def decide_pending_action(payload: AnalystPendingDecisionRequest):
+    """Approve or reject a governance-pending action from chat UI."""
+    from governance import approve_pending_action, reject_pending_action, governance
+    from api._state import add_audit_event
+
+    decision = (payload.decision or "").strip().lower()
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="decision must be 'approve' or 'reject'")
+
+    if decision == "approve":
+        pending = governance._pending_actions.get(payload.action_id)
+        execute_fn = None
+        if pending:
+            execute_fn = lambda: _execute_security_action(pending.action_type, pending.target)
+        result = approve_pending_action(
+            payload.action_id,
+            operator=payload.operator,
+            execute_fn=execute_fn,
+            operator_comment=payload.comment,
+        )
+    else:
+        result = reject_pending_action(
+            payload.action_id,
+            operator=payload.operator,
+            reason=payload.comment,
+        )
+
+    action = result.get("action") or {}
+    trace_id = f"chat-{action.get('alert_id') or payload.action_id}"
+    add_audit_event(
+        "HITL_DECISION",
+        trace_id=trace_id,
+        severity=action.get("severity"),
+        user=payload.operator,
+        status="ok" if result.get("status") in ("approved_and_executed", "rejected") else "error",
+        payload={
+            "decision": decision,
+            "action_id": payload.action_id,
+            "result": result.get("status"),
+            "comment": payload.comment,
+        },
+    )
+
+    return {"status": result.get("status"), "result": result, "trace_id": trace_id}
 
 @router.post("/quick-analyze")
 async def quick_analyze_alert(alert_id: str):

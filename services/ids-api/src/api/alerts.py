@@ -9,7 +9,7 @@ finally trigger automated Kubernetes remediation actions when thresholds are met
 
 Architecture overview (request flow)::
 
-    Falco / Suricata  ──►  POST /api/alerts  or  /api/alerts/internal
+    Falco / Suricata  ──►  POST /api/alerts  or  /api/alerts/internal (token)
                                      │
                            ┌─────────▼──────────┐
                            │  Rate-limit check   │  token-bucket flood protection
@@ -41,9 +41,9 @@ Endpoints exposed by this router:
   Requires a valid bearer token (``verify_token`` dependency).  Used by Falco
   forwarders running outside the cluster or by manual/test submissions.
 
-- **POST /api/alerts/internal** — Unauthenticated endpoint restricted to
-  cluster-internal traffic (Kubernetes NetworkPolicy enforced).  Used by
-  in-cluster Falco/Suricata sidecars that already share the trust boundary.
+- **POST /api/alerts/internal** — Cluster-internal endpoint protected by a
+    shared secret header (``X-IDS-Internal-Token``). Used by Falco/Suricata
+    forwarders.
 
   Both POST routes delegate to ``_process_alert_core()`` which contains the
   shared processing pipeline, eliminating ~400 lines of previously duplicated
@@ -78,7 +78,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from fastapi.responses import StreamingResponse
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -158,6 +158,7 @@ def _deps():
     from api._state import (
         alert_trace_id,              # generates a deterministic trace ID for an alert
         analyze_with_fallback,       # calls primary LLM, falls back to secondary
+        add_audit_event,             # enterprise timeline/audit log helper
         can_execute_action,          # governance check: mode + protected-service guard
         classify_decision_outcome,   # maps severity int → outcome label for metrics
         compute_human_review_required,  # threshold check: does a human need to approve?
@@ -183,6 +184,7 @@ def _deps():
         # Helper functions
         "trace_id": alert_trace_id,
         "analyze": analyze_with_fallback,
+        "audit": add_audit_event,
         "can_execute": can_execute_action,
         "classify_outcome": classify_decision_outcome,
         "human_review": compute_human_review_required,
@@ -317,45 +319,21 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     # Identify whether this alert came from Falco (container runtime),
     # Suricata (network IDS), or an unknown/manual source.
     source = d["detect_source"](alert)
+    request_trace_id = d["trace_id"](f"pre-{int(time.time() * 1000)}")
     d["metrics"]["total_alerts"] += 1
     d["metrics"]["alerts_by_source"][source] += 1
     PROM_ALERTS_RECEIVED_TOTAL.labels(source=source, priority=alert.priority).inc()
     PROM_ALERTS_RAW_TOTAL.labels(source=source).inc()
     d["fatigue"]["raw_total"] += 1
+    d["audit"](
+        "ALERT_RECEIVED",
+        trace_id=request_trace_id,
+        payload={"rule": alert.rule, "source": source, "priority": alert.priority},
+    )
 
     # ===================================================================
-    # Stage 2: Per-rule alert rate limiting (flood prevention)
-    # ===================================================================
-    # The alert rate limiter is separate from the global request rate
-    # limiter checked in the endpoint handlers.  It operates on *alert
-    # content* (rule name + source) and suppresses repeated firings of
-    # the same Falco/Suricata rule within a short window.  This prevents
-    # a single noisy rule from consuming all LLM quota.
-    if d["alert_rate_limiter"]:
-        should_process, throttle_reason = d["alert_rate_limiter"].should_process(
-            {"rule": alert.rule, "source": source}
-        )
-        if not should_process:
-            logger.warning(f"Alert throttled: {alert.rule} (reason: {throttle_reason.value})")
-            PROM_ALERTS_PROCESSED_TOTAL.labels(result="throttled").inc()
-            PROM_ALERTS_THROTTLED_TOTAL.labels(reason=throttle_reason.value).inc()
-            # Persist the throttled alert for auditability (the operator can
-            # review how many alerts were suppressed per rule)
-            d["db"].add_throttled_alert(alert={**alert.dict(), "source": source}, throttle_reason=throttle_reason.value)
-            await d["request_queue"].dequeue()  # release the queue slot
-            return AlertResponse(
-                status="throttled",
-                alert_id=f"throttled-{int(time.time()*1000)}",
-                severity=0,
-                summary=f"Alert throttled: {throttle_reason.value}",
-                threat_type="Throttled",
-                automated_actions=[],
-                processing_time_ms=int((time.perf_counter() - started) * 1000),
-                llm_engine="none",
-            )
-
-    # ===================================================================
-    # Stage 3: Deduplication (LLM cost reduction)
+    # Stage 2: Deduplication (LLM cost reduction) — rate limiting removed;
+    # dedup cache (300s TTL) is the sole flood-protection mechanism.
     # ===================================================================
     # The deduplicator computes a content hash over the alert payload and
     # checks whether an identical alert was analyzed within a configurable
@@ -368,14 +346,28 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     analysis_cached = False  # flag for metrics: was the result from cache?
     llm_latency = 0.0      # wall-clock seconds spent in the LLM call
 
-    if d["deduplicator"]:
+    # Only Falco and Suricata alerts are deduplicated (these are the only
+    # sources that consume LLM credits. Manual/test alerts bypass dedup.)
+    is_security_source = source in ("falco", "suricata")
+    
+    if d["deduplicator"] and is_security_source:
         should_analyze, cached_analysis = d["deduplicator"].should_analyze(alert.dict())
+        d["audit"](
+            "DEDUP_CHECK",
+            trace_id=request_trace_id,
+            status="hit" if (not should_analyze and cached_analysis) else "miss",
+            payload={
+                "cache_hit": bool(not should_analyze and cached_analysis),
+                "source": source,
+                "is_security_source": is_security_source,
+            },
+        )
         if not should_analyze and cached_analysis:
             # Cache HIT — reuse the previously computed LLM analysis
             analysis = cached_analysis
             llm_used = "cached"
             analysis_cached = True
-            logger.info(f"✓ Alert dedup HIT: severity={analysis.get('severity')}")
+            logger.info(f"✓ Alert dedup HIT [{source}]: severity={analysis.get('severity')}")
 
     # ===================================================================
     # Stage 4: LLM-based threat analysis
@@ -385,25 +377,55 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     # failure, falls back to OpenAI or a conservative static analysis object
     # to ensure the pipeline never stalls on an LLM outage.
     if analysis is None:
+        # Always use cloud LLM — no cost ceiling bypass, no local fallback
         logger.info("Analyzing alert with LLM...")
+        d["audit"]("LLM_ANALYSIS_START", trace_id=request_trace_id, payload={"rule": alert.rule})
         analysis, llm_used, llm_latency = await d["analyze"](alert.dict())
+
+        # Update cost tracking
+        if llm_used not in ("none", "cached"):
+            from api._state import update_cost_tracking, _estimate_engine_call_cost
+            cost = _estimate_engine_call_cost(llm_used)
+            update_cost_tracking(cost)
+
+        d["audit"](
+            "LLM_ANALYSIS_END",
+            trace_id=request_trace_id,
+            severity=analysis.get("severity") if isinstance(analysis, dict) else None,
+            payload={"engine": llm_used, "latency_ms": int(llm_latency * 1000)},
+        )
         # Update dedup-related metrics (this alert was *not* a duplicate)
         PROM_ALERTS_AFTER_DEDUP_TOTAL.inc()
         PROM_LLM_TRIAGED_ALERTS_TOTAL.inc()
         d["fatigue"]["after_dedup_total"] += 1
         d["fatigue"]["llm_triaged_total"] += 1
         # Cache the fresh analysis so future duplicates skip the LLM
-        if d["deduplicator"]:
+        if d["deduplicator"] and is_security_source:
             d["deduplicator"].cache_analysis(alert.dict(), analysis)
+            logger.debug(f"Cached analysis for {source} alert: {alert.rule}")
 
     # --- Extract key fields from the LLM analysis for downstream logic ---
     severity = analysis.get("severity", 5)        # 1–10 scale; default 5 (medium)
     threat_type = analysis.get("threat_type", "Unknown")
+    try:
+        confidence = float(analysis.get("confidence", 0.0) if isinstance(analysis, dict) else 0.0)
+    except Exception:
+        confidence = 0.0
 
     # Determine whether a human operator must review this alert before
     # any (further) automated action is taken.  The threshold is
     # configurable and depends on the current governance mode.
-    requires_review = d["human_review"](int(severity))
+    requires_review = d["human_review"](int(severity), confidence)
+    d["audit"](
+        "GOVERNANCE_DECISION",
+        trace_id=request_trace_id,
+        severity=int(severity),
+        payload={
+            "mode": d["get_mode"](),
+            "requires_review": requires_review,
+            "threat_type": threat_type,
+        },
+    )
     if requires_review:
         PROM_HUMAN_REVIEW_REQUIRED_TOTAL.inc()
         d["fatigue"]["human_review_required_total"] += 1
@@ -434,18 +456,22 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     action_records = []  # structured dicts persisted to the database
 
     # Extract target identifiers from alert (works for any pod/device)
-    container_name = alert.output_fields.get("container.name", "")
+    container_name = (
+        alert.output_fields.get("container.name")
+        or alert.output_fields.get("k8s.pod.name")
+        or alert.output_fields.get("k8s.pod")
+        or ""
+    )
     # Derive service name: strip hash suffix (e.g., "traffic-camera-abc123" → "traffic-camera")
     service_name = "-".join(container_name.split("-")[:-2]) if container_name.count("-") >= 2 else container_name.split("-")[0] if container_name else ""
     src_ip = alert.output_fields.get("fd.sip", alert.output_fields.get("src.ip", ""))
 
     # Get LLM-recommended actions
     llm_recommended_actions = analysis.get("automated_actions", []) if isinstance(analysis, dict) else []
-
     def _try_action(action_type, target, action_label=None):
         """Try to execute a K8s action with governance checks and verbose logging."""
         label = action_label or f"{action_type}({target})"
-        can_exec, reason = d["can_execute"](action_type, target)
+        can_exec, reason = d["can_execute"](action_type, target, severity, confidence)
         if can_exec:
             actions_taken.append(label)
             d["metrics"]["automated_actions"] += 1
@@ -467,6 +493,12 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
                 "severity": severity,
                 "reason": f"LLM recommended '{action_type}' | Severity {severity}/10 | Threat: {threat_type}",
             })
+            d["audit"](
+                "ACTION_EXECUTED",
+                trace_id=request_trace_id,
+                severity=int(severity),
+                payload={"action": action_type, "target": target, "mode": d["get_mode"]()},
+            )
             logger.info(
                 f"✅ ACTION EXECUTED: {action_type} → {target} "
                 f"(severity={severity}, threat={threat_type}, engine={llm_used}, "
@@ -487,6 +519,13 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
                 "severity": severity,
                 "reason": f"Governance blocked: {reason}",
             })
+            d["audit"](
+                "ACTION_EXECUTED",
+                trace_id=request_trace_id,
+                severity=int(severity),
+                status="blocked",
+                payload={"action": action_type, "target": target, "reason": reason},
+            )
             logger.warning(
                 f"🚫 ACTION BLOCKED: {action_type} → {target} "
                 f"(reason={reason}, severity={severity}, mode={d['get_mode']()})"
@@ -600,6 +639,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         "source": source,
         "rule": alert.rule,
         "priority": alert.priority,
+        "container_name": container_name,
         "severity": severity,
         "summary": analysis.get("summary", ""),
         "threat_type": analysis.get("threat_type", ""),
@@ -613,6 +653,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     # Generate a deterministic trace ID for cross-referencing this alert
     # across the pipeline (logs, metrics, operator dashboard)
     trace_id = d["trace_id"](alert_id)
+    request_trace_id = trace_id
     alert_record["trace_id"] = trace_id
 
     # Persist the LLM analysis result as a separate record linked to the
@@ -632,6 +673,37 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     for action in action_records:
         action["alert_id"] = alert_id
         d["db"].add_automation_action(action)
+
+    if d["k8s"] and hasattr(d["k8s"], "create_threat_response"):
+        for action in action_records:
+            if action.get("status") != "executed":
+                continue
+            action_type = str(action.get("action_type") or "")
+            if action_type not in {"isolate_pod", "scale_up", "block_ip", "cordon_node", "restart_pod"}:
+                continue
+            try:
+                tr_result = await d["k8s"].create_threat_response(
+                    alert_id=str(alert_id),
+                    target_resource=str(action.get("target_resource") or ""),
+                    severity=int(severity),
+                    actions=[action_type],
+                    namespace=Config.K8S_NAMESPACE,
+                    trace_id=trace_id,
+                )
+                action["threatresponse"] = tr_result
+                d["audit"](
+                    "THREATRESPONSE_CREATED",
+                    trace_id=trace_id,
+                    severity=int(severity),
+                    status="ok" if tr_result.get("success") else "error",
+                    payload={
+                        "action": action_type,
+                        "target": action.get("target_resource"),
+                        "result": tr_result,
+                    },
+                )
+            except Exception as tr_exc:
+                logger.warning(f"ThreatResponse creation failed for alert {alert_id}: {tr_exc}")
 
     # ===================================================================
     # Stage 7: Operator incident view
@@ -665,6 +737,12 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     PROM_ALERTS_PROCESSED_TOTAL.labels(result="success").inc()
     PROM_API_REQUESTS_TOTAL.labels(endpoint=endpoint, method="POST", status="success").inc()
     PROM_ALERT_PROCESSING_SECONDS.observe(time.perf_counter() - started)
+    d["audit"](
+        "ALERT_PROCESSED",
+        trace_id=trace_id,
+        severity=int(severity),
+        payload={"llm_engine": llm_used, "actions_count": len(actions_taken)},
+    )
 
     # ===================================================================
     # Stage 8: Construct and return the AlertResponse
@@ -816,17 +894,18 @@ async def process_alert(alert: Alert, request: Request, token=Depends(verify_tok
         PROM_REQUEST_QUEUE_SIZE.set(d["request_queue"].queue_size)
 
 
-# ─── POST /api/alerts/internal (cluster-internal, no auth) ────────────────
+# ─── POST /api/alerts/internal (cluster-internal, token-gated) ─────────────
 
 @router.post("/api/alerts/internal")
-async def process_alert_internal(alert: Alert) -> AlertResponse:
-    """Process a security alert through the IDS pipeline (cluster-internal, no auth).
+async def process_alert_internal(
+    alert: Alert,
+    x_ids_internal_token: Optional[str] = Header(default=None, alias="X-IDS-Internal-Token"),
+) -> AlertResponse:
+    """Process a security alert through the IDS pipeline (cluster-internal, token-gated).
 
-    This endpoint mirrors ``process_alert()`` but omits the bearer-token
-    authentication requirement.  It is intended for in-cluster Falco/Suricata
-    forwarders that already operate within the Kubernetes trust boundary and
-    are protected by NetworkPolicy rules restricting access to the IDS API
-    pod.
+    This endpoint mirrors ``process_alert()`` but uses a shared secret header
+    (``X-IDS-Internal-Token``) instead of Bearer auth. It is intended for
+    in-cluster Falco/Suricata forwarders.
 
     The SSE broadcast for this endpoint includes additional raw alert fields
     (``rule``, ``priority``, ``output``, ``output_fields``, ``container_name``)
@@ -847,6 +926,12 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         HTTPException(429): Rate limit exceeded.
         HTTPException(503): Request queue full.
     """
+    # Prevent synthetic injection: forwarders must include a shared secret.
+    if not Config.IDS_INTERNAL_ALERT_TOKEN:
+        raise HTTPException(status_code=503, detail="Internal ingest disabled (IDS_INTERNAL_ALERT_TOKEN not set)")
+    if not x_ids_internal_token or x_ids_internal_token != Config.IDS_INTERNAL_ALERT_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized internal ingest")
+
     d = _deps()
 
     # --- Admission control: rate limiting (same logic as authenticated route) ---
@@ -888,7 +973,14 @@ async def process_alert_internal(alert: Alert) -> AlertResponse:
         source = d["detect_source"](alert)
         alert_record = {
             "timestamp": alert.time, "source": source, "rule": alert.rule,
-            "priority": alert.priority, "severity": 0,
+            "priority": alert.priority,
+            "container_name": (
+                alert.output_fields.get("container.name")
+                or alert.output_fields.get("k8s.pod.name")
+                or alert.output_fields.get("k8s.pod")
+                or ""
+            ),
+            "severity": 0,
             "summary": f"Error: {str(e)}", "threat_type": "unknown",
             "recommendations": [], "automated_actions": [],
             "raw_alert": alert.dict(), "analysis": {"error": str(e)},

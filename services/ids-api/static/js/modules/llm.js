@@ -174,21 +174,64 @@ function renderProviderCards(configured, engines, diags) {
     const lastErr = d.last_error || '';
     const latency = d.last_latency_ms ? d.last_latency_ms + 'ms' : '-';
 
+    // Token usage from engine stats
+    const e = info || {};
+    const ptok = e.prompt_tokens_total || 0;
+    const ctok = e.completion_tokens_total || 0;
+    const tokTotal = e.tokens_total || (ptok + ctok);
+    const cost = e.total_estimated_cost_usd != null ? '$' + Number(e.total_estimated_cost_usd).toFixed(4) : '-';
+    const calls = e.total_requests || 0;
+
+    // Button styles
+    const btnStyle = 'font-size:11px;padding:3px 10px;border-radius:4px;border:1px solid;cursor:pointer;background:transparent;';
+    const retryBtn = '<button style="' + btnStyle + 'color:var(--green);border-color:var(--green)" ' +
+      'onclick="window.llmRetryProvider(\'' + p.id + '\')" title="Force a test call on this provider">&#8635; Retry</button>';
+    const resetBtn = '<button style="' + btnStyle + 'color:var(--yellow);border-color:var(--yellow)" ' +
+      'onclick="window.llmResetProvider(\'' + p.id + '\')" title="Clear cooldown / circuit breaker">&#8635; Reset</button>';
+    const enabledDisabled = d.enabled === false
+      ? '<button style="' + btnStyle + 'color:var(--text3);border-color:var(--text3)" onclick="window.llmEnableProvider(\'' + p.id + '\')" title="Enable this provider">Enable</button>'
+      : '';
+
     html += '<div class="provider-card" style="margin-bottom:12px;border-left:3px solid ' + color + ';' + (isConfigured ? '' : 'opacity:.6') + '">' +
       '<div class="provider-icon" style="color:' + p.color + '">' + p.icon + '</div>' +
       '<div class="provider-info" style="flex:1">' +
       '<div class="provider-name">' + p.name + ' <span style="font-size:11px;color:var(--text3);font-weight:400">' + (d.model || p.model) + '</span></div>' +
       '<div class="provider-detail" style="margin:2px 0">Status: <strong style="color:' + color + '">' + statusLabel + '</strong>' + (d.attempts > 0 ? ' | ' + d.successes + ' ok / ' + d.failures + ' fail | Latency: ' + latency : '') + '</div>' +
+      // Usage mini-row
+      (calls > 0 ? '<div style="font-size:11px;color:var(--text3);margin:2px 0">Calls: <strong style="color:var(--text)">' + calls + '</strong> &nbsp;|&nbsp; Tokens in: <strong style="color:var(--text)">' + ptok.toLocaleString() + '</strong> &nbsp;|&nbsp; Out: <strong style="color:var(--text)">' + ctok.toLocaleString() + '</strong> &nbsp;|&nbsp; Cost: <strong style="color:var(--green)">' + cost + '</strong></div>' : '') +
       '<div style="font-size:11px;margin:4px 0;padding:6px 8px;border-radius:4px;background:' + (ds === 'operational' ? 'rgba(34,197,94,.08)' : ds === 'not_configured' ? 'rgba(148,163,184,.08)' : 'rgba(239,68,68,.08)') + ';color:' + (ds === 'operational' ? 'var(--green)' : ds === 'not_configured' ? 'var(--text3)' : '#ef4444') + ';line-height:1.4">' +
       '<strong>Why:</strong> ' + esc(reason) +
       (lastErr && ds !== 'operational' && ds !== 'not_configured' ? '<br><strong>Raw error:</strong> <span style="opacity:.7">' + esc(lastErr) + '</span>' : '') +
       (!d.key_format_valid && ds === 'not_configured' && p.id !== 'local' ? '<br><strong>Fix:</strong> Set <code style="background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px">' + p.id.toUpperCase() + '_API_KEY</code> environment variable' : '') +
       '</div>' +
       '<div class="progress"><div class="progress-fill" style="width:' + (isConfigured ? Math.max(pct, 5) : 0) + '%;background:' + color + '"></div></div>' +
+      // Action buttons
+      '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">' + retryBtn + resetBtn + enabledDisabled + '</div>' +
       '</div></div>';
   });
   pc.innerHTML = html;
 }
+
+// ── Button handlers exposed on window ───────────────────────────────────
+
+window.llmRetryProvider = function(providerId) {
+  api.retryAllProviders()
+    .then(() => { window._llmRefresh && window._llmRefresh(); })
+    .catch(e => console.warn('retry failed', e));
+};
+
+window.llmResetProvider = function(providerId) {
+  api.resetLLMCooldown()
+    .then(() => { window._llmRefresh && window._llmRefresh(); })
+    .catch(e => console.warn('reset failed', e));
+};
+
+window.llmEnableProvider = function(providerId) {
+  api.enableLLMProvider(providerId, true)
+    .then(() => { window._llmRefresh && window._llmRefresh(); })
+    .catch(e => console.warn('enable failed', e));
+};
+
 
 function renderCircuitBreakerDetail(cb, configured, diags) {
   let html = '<div style="font-size:13px;color:var(--text2)">' +

@@ -696,6 +696,38 @@ class LLMEngineManager:
         """Return list of initialized engine names"""
         return list(self.engines.keys())
 
+    def get_priority_order(self) -> List[str]:
+        """Return current effective priority order limited to configured engines."""
+        return self.config.get_priority_order()
+
+    def set_priority_order(self, providers: List[str]) -> List[str]:
+        """Update runtime provider priority order.
+
+        Accepts a list of provider names, removes duplicates while preserving
+        order, and keeps only known provider identifiers.
+        """
+        known = set(ENGINE_CLASSES.keys())
+        cleaned: List[str] = []
+        seen = set()
+
+        for name in providers or []:
+            provider_name = (name or "").strip().lower()
+            if provider_name and provider_name in known and provider_name not in seen:
+                cleaned.append(provider_name)
+                seen.add(provider_name)
+
+        # Keep existing providers that were omitted so failover remains complete.
+        for name in self.config.priority:
+            provider_name = (name or "").strip().lower()
+            if provider_name in known and provider_name not in seen:
+                cleaned.append(provider_name)
+                seen.add(provider_name)
+
+        if cleaned:
+            self.config.priority = cleaned
+
+        return self.get_priority_order()
+
     # ---- Provider cooldown (prevents retrying quota-exhausted / bad-auth providers) ----
 
     def _is_provider_in_cooldown(self, engine_name: str) -> bool:

@@ -6,6 +6,7 @@ metadata:
 data:
   forwarder.py: |
     #!/usr/bin/env python3
+    import os
     import json
     import hashlib
     import requests
@@ -18,9 +19,15 @@ data:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
     
-    IDS_API = "http://ids-api-service.smart-city:8000/api/alerts/internal"
+    IDS_API = os.getenv("IDS_API_URL", "http://ids-api-service.smart-city:8000/api/alerts/internal")
+    IDS_INTERNAL_ALERT_TOKEN = os.getenv("IDS_INTERNAL_ALERT_TOKEN", "")
     METRICS_PORT = 8080
     ALLOWED_NAMESPACES = {"smart-city", "monitoring", "falco-system"}
+    SUPPRESSED_RULES = {
+      "Contact K8S API Server From Container": {
+        "containers": {"forwarder", "falco", "falco-forwarder", "falco-metacollector", "ids-api"}
+      }
+    }
     
     # Metrics
     alerts_forwarded = 0
@@ -39,8 +46,8 @@ data:
         output_fields = alert.get("output_fields", {}) or {}
         key = "|".join([
             str(alert.get("rule", "")),
-            str(alert.get("time", "")),
             str(output_fields.get("container.name", "")),
+          str(output_fields.get("k8s.pod.name", "")),
             str(output_fields.get("proc.name", "")),
             str(output_fields.get("fd.name", "")),
             str(alert.get("output", ""))[:120],
@@ -139,13 +146,24 @@ data:
                             ):
                                 continue
 
+                            # Suppress known benign control-plane access from internal infra pods.
+                            rule_name = alert.get("rule", "")
+                            suppress = SUPPRESSED_RULES.get(rule_name)
+                            if suppress:
+                              c_lower = container_name.lower()
+                              if any(token in c_lower for token in suppress.get("containers", set())):
+                                continue
+
                             # Prevent replay storms after pod/forwarder restarts.
                             if is_duplicate_alert(alert):
                                 continue
 
                             logger.info(f"🚨 Alert: {alert.get('rule')}")
                             
-                            response = requests.post(IDS_API, json=alert, timeout=5)
+                            headers = {}
+                            if IDS_INTERNAL_ALERT_TOKEN:
+                              headers["X-IDS-Internal-Token"] = IDS_INTERNAL_ALERT_TOKEN
+                            response = requests.post(IDS_API, json=alert, headers=headers, timeout=5)
                             if response.status_code == 200:
                                 alerts_forwarded += 1
                                 logger.info(f"✅ Forwarded to IDS (total: {alerts_forwarded})")
@@ -246,6 +264,9 @@ spec:
         - containerPort: 8080
           name: metrics
           protocol: TCP
+        env:
+        - name: IDS_INTERNAL_ALERT_TOKEN
+          value: "change-me"
         livenessProbe:
           httpGet:
             path: /health

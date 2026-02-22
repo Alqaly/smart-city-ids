@@ -64,4 +64,4 @@ This upgrade improves research-grade observability and analyst UX across IDS API
 - Targeted tests:
   - `test_internal_alert_controls.py` ✅
   - `test_llm_provider_manager.py` ✅
-  - `test_operator_contracts.py` failed due environment auth credentials mismatch (`operator/operator` rejected), not due compile/runtime syntax.
+  - `test_operator_contracts.py` failed due environment auth credentials mismatch (configured credentials rejected), not due compile/runtime syntax.

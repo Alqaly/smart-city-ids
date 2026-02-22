@@ -3,10 +3,9 @@
 Date: 2026-02-11
 
 Summary
-- Added a `Pending Approvals` panel to the operator UI.
-- Implemented an Approval Details modal that shows action metadata before approve/reject.
-- Replaced alert() flows with small toast notifications for success/error/info.
-- Wired UI buttons to real governance endpoints (`/api/governance/pending`, `/api/governance/approve/{id}`, `/api/governance/reject/{id}`, `/api/governance/mode`).
+- Added a dedicated `Governance` tab in the dashboard UI.
+- Exposes the Human-in-the-Loop (HITL) automation modes and the pending approval queue.
+- Uses real governance endpoints (`/api/governance/status`, `/api/governance/pending`, `/api/governance/mode`).
 
 Planning note (2026-02-16)
 - Next-phase stakeholder and presentation improvements are tracked in:
@@ -14,27 +13,22 @@ Planning note (2026-02-16)
 
 Files changed
 - services/ids-api/static/index.html
-  - Added: Approvals nav item and `#approvals` section
-  - Added: Modal HTML for approval detail (`#approvalModalBackdrop`, `#approvalModal`)
-  - Added: Toast container (`#toastContainer`) and CSS
-  - Added JS helpers: `loadPendingApprovals()`, `renderPendingApprovals()`, `openApprovalModal()`, `approveActionById()`, `rejectActionById()`, `showToast()`
+  - Added: Governance nav item and `#tab-governance` section
+  - Added: Mode buttons (manual/assisted/autonomous/emergency)
+  - Added: Pending queue renderer for actions awaiting approval
 
 Backend / API notes (no code changes required)
 - The UI expects the following endpoints (already provided by the IDS API):
-  - `GET /api/governance/pending` — returns `{"pending_count": N, "actions": [...]}`
-  - `POST /api/governance/approve/{action_id}` — approve and execute action
-  - `POST /api/governance/reject/{action_id}` — reject action (optional `reason` query param)
-  - `POST /api/governance/mode?mode=assisted|manual|autopilot` — change automation mode
-  - `GET /api/operator/incident/{id}` — incident details used by detail view
-  - `GET /api/operator/evidence/{id}` — evidence (opens in new tab from UI)
+  - `GET /api/governance/status` — overall governance state (mode + counters)
+  - `GET /api/governance/pending` — returns `{ "pending_count": N, "actions": [...] }`
+  - `POST /api/governance/mode?mode=manual|assisted|autonomous|emergency` — change automation mode
 
 How the new UI flow works
-1. Operator logs in (demo credentials `operator/operator`).
-2. Click **Approvals** in the left nav to open the Pending Approvals panel.
-3. UI calls `GET /api/governance/pending` and lists pending actions.
-4. Click **Details** to open the modal — this shows `action_type`, `target`, `severity`, `reason`, `recommended_by`, and timestamps.
-5. Click **Approve** or **Reject** in the modal. Approve calls `POST /api/governance/approve/{id}`; reject calls `POST /api/governance/reject/{id}`.
-6. Toast notifications display success or error and the lists reload.
+1. Operator logs in (credentials configured via `IDS_USER_*` / `IDS_PASS_*`).
+2. Click **Governance** tab.
+3. UI loads `GET /api/governance/status` and `GET /api/governance/pending`.
+4. Operator selects the automation mode (manual/assisted/autonomous/emergency).
+5. Pending actions remain visible so the operator can review what the system is waiting on.
 
 Testing steps (local)
 1. Start the IDS API locally (see project README). Example quick start:
@@ -46,7 +40,7 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-2. Open UI in browser: `http://localhost:8000/ui` and log in with `operator` / `operator`.
+2. Open UI in browser: `http://localhost:8000/ui` and log in with configured credentials.
 
 3. Ensure automation mode is `assisted` (or `manual`) to create pending approval entries for critical alerts:
 

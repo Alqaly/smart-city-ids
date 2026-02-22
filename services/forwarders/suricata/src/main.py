@@ -49,8 +49,9 @@ from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATE
 # Configuration
 # ============================================================================
 
-IDS_API_URL = "http://ids-api:8000/api/alerts"  # K8s service DNS
-IDS_API_TOKEN = "suricata-forwarder-token"  # Bearer token for IDS API
+IDS_API_URL = os.getenv("IDS_API_URL", "http://ids-api:8000/api/alerts")  # K8s service DNS
+IDS_API_TOKEN = os.getenv("IDS_API_TOKEN", "")  # Bearer token (only used for /api/alerts)
+IDS_INTERNAL_ALERT_TOKEN = os.getenv("IDS_INTERNAL_ALERT_TOKEN", "")  # Shared secret for /api/alerts/internal
 LISTEN_PORT = 514
 LISTEN_HOST = "0.0.0.0"
 SYSLOG_BUFFER = 4096
@@ -306,10 +307,16 @@ async def forward_to_ids_api(alert: IDSAlert) -> bool:
     """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            headers = {
-                "Authorization": f"Bearer {IDS_API_TOKEN}",
-                "Content-Type": "application/json"
-            }
+            headers = {"Content-Type": "application/json"}
+
+            # If we're using the hardened internal endpoint, use shared-secret header.
+            if IDS_API_URL.rstrip("/").endswith("/api/alerts/internal"):
+                if IDS_INTERNAL_ALERT_TOKEN:
+                    headers["X-IDS-Internal-Token"] = IDS_INTERNAL_ALERT_TOKEN
+            else:
+                # Public ingest endpoint requires Bearer auth.
+                if IDS_API_TOKEN:
+                    headers["Authorization"] = f"Bearer {IDS_API_TOKEN}"
             
             response = await client.post(
                 IDS_API_URL,

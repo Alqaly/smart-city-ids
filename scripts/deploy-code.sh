@@ -1,133 +1,132 @@
 #!/bin/bash
 # =============================================================================
-# Smart City IDS — Quick Code Deploy (NO Docker required)
-# Updates ConfigMaps from source and restarts pods.
-# Only rebuilds Docker image when requirements.txt changes.
-#
-# Usage:
-#   ./scripts/deploy-code.sh              # Code-only update (fast, no Docker)
-#   ./scripts/deploy-code.sh --full       # Full rebuild with Docker image
-#   ./scripts/deploy-code.sh --status     # Show current pod status
+# Smart City IDS — Code Deploy (SIMPLE)
 # =============================================================================
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
 PROJECT_ROOT="$(pwd)"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
-log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
-warn() { echo -e "${YELLOW}[deploy]${NC} $*"; }
-err()  { echo -e "${RED}[deploy]${NC} $*"; }
+# Load library
+source "$SCRIPT_DIR/lib/llm-control.sh"
+
+# Colors
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
+log()  { echo -e "${GREEN}✓${NC} $*"; }
+warn() { echo -e "${YELLOW}!${NC} $*"; }
+err()  { echo -e "${RED}✗${NC} $*"; }
 
 NAMESPACE="smart-city"
-DEPLOYMENT="ids-api"
-SRC_DIR="$PROJECT_ROOT/services/ids-api/src"
-STATIC_DIR="$PROJECT_ROOT/services/ids-api/static"
-IDS_API_URL="${IDS_API_URL:-http://localhost:30800}"
 
-check_llm_health() {
-    log "Checking LLM provider status..."
-    local llm_status providers_count
-    llm_status="$(curl -s "${IDS_API_URL}/api/llm/status" 2>/dev/null || echo "{}")"
-
-    if command -v jq >/dev/null 2>&1; then
-        providers_count="$(echo "$llm_status" | jq -r '.providers | length // 0' 2>/dev/null || echo "0")"
-    else
-        providers_count="$(python3 -c 'import json,sys
-try:
-    d=json.loads(sys.stdin.read() or "{}")
-    p=d.get("providers", [])
-    print(len(p) if isinstance(p, list) else 0)
-except Exception:
-    print(0)' <<<"$llm_status")"
-    fi
-
-    if [[ "${providers_count:-0}" -le 0 ]]; then
-        warn "⚠️  No LLM providers detected from ${IDS_API_URL}/api/llm/status"
-        warn "   Ensure API keys exist in ids-secrets and pods have env vars."
-        read -r -p "   Continue deployment? (y/N) " -n 1 REPLY
-        echo
-        if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
-            err "Deployment cancelled."
-            exit 1
+# Check what user wants
+case "${1:-}" in
+    --status)
+        echo ""
+        log "Pod Status:"
+        kubectl get pods -n "$NAMESPACE" -l app=ids-api -o wide 2>/dev/null || echo "  No pods found"
+        echo ""
+        log "Service:"
+        kubectl get svc -n "$NAMESPACE" ids-api-service 2>/dev/null || echo "  Service not found"
+        echo ""
+        
+        # Quick health check
+        echo -n "Health check: "
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
+        if [[ "$HTTP" == "200" ]]; then
+            echo -e "${GREEN}OK${NC} (localhost:8000)"
+        else
+            echo -e "${YELLOW}Not ready${NC} (HTTP $HTTP)"
         fi
-    else
-        log "✓ LLM providers configured: ${providers_count}"
-    fi
-}
+        exit 0
+        ;;
+    
+    --llm-status)
+        llm_show_status
+        exit 0
+        ;;
+    
+    --help|-h)
+        echo "Usage: deploy-code.sh [--status|--llm-status]"
+        echo ""
+        echo "Builds and deploys the IDS API Docker image."
+        echo ""
+        echo "Options:"
+        echo "  --status       Show current pod status"
+        echo "  --llm-status   Show LLM provider status"
+        exit 0
+        ;;
+esac
 
-# ─── Status check ───────────────────────────────────────────────────────
-if [[ "${1:-}" == "--status" ]]; then
-    echo ""
-    log "Pod status:"
-    kubectl get pods -n "$NAMESPACE" -l app=ids-api -o wide
-    echo ""
-    log "Service:"
-    kubectl get svc -n "$NAMESPACE" ids-api-service
-    echo ""
-    log "Quick test:"
-    HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:30800/health 2>/dev/null || echo "000")
-    if [[ "$HTTP" == "200" ]]; then
-        echo -e "  ${GREEN}✓${NC} http://localhost:30800/health → 200 OK"
-        echo -e "  ${GREEN}✓${NC} Dashboard: http://localhost:30800/ui"
-    else
-        echo -e "  ${RED}✗${NC} http://localhost:30800/health → $HTTP"
-    fi
-    exit 0
-fi
-
-# ─── Validate source ────────────────────────────────────────────────────
-[[ -f "$SRC_DIR/main.py" ]]        || { err "Missing $SRC_DIR/main.py"; exit 1; }
-[[ -f "$STATIC_DIR/index.html" ]]  || { err "Missing $STATIC_DIR/index.html"; exit 1; }
-check_llm_health
-
-log "Deploying from: $PROJECT_ROOT"
+# Main deploy
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}Smart City IDS — Code Deploy${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# ─── Full rebuild (always — Docker image is the deployment unit) ────────
-log "Building Docker image (includes all source + static files)..."
-if command -v docker &>/dev/null; then
-    docker build -t ids-api:latest -f docker/ids-api/Dockerfile . 2>&1 | tail -5
-    docker save ids-api:latest -o /tmp/ids-api.tar
-    sudo k3s ctr images import /tmp/ids-api.tar
-    rm -f /tmp/ids-api.tar
-    log "Docker image rebuilt and imported"
-else
-    err "Docker not found — required for deployment"
-    err "Install Docker to deploy: sudo apt install docker.io"
+# Check LLM status first
+llm_check_env_keys || true
+echo ""
+
+# Validate source
+[[ -f "services/ids-api/src/main.py" ]] || { err "Missing main.py"; exit 1; }
+
+log "Building Docker image..."
+if ! command -v docker &>/dev/null; then
+    err "Docker not found"
     exit 1
 fi
-echo ""
 
-# ─── Restart pods ───────────────────────────────────────────────────────
+docker build -t ids-api:latest -f docker/ids-api/Dockerfile . 2>&1 | tail -5 || {
+    err "Docker build failed"
+    exit 1
+}
+
+log "Image built successfully"
+
+log "Importing to k3s..."
+docker save ids-api:latest -o /tmp/ids-api.tar
+sudo k3s ctr images import /tmp/ids-api.tar
+rm -f /tmp/ids-api.tar
+
+# If the live deployment overlays /app/static via ConfigMaps, the UI will NOT
+# come from the container image. Refresh the mounted index.html so /ui reflects
+# the latest workspace changes (e.g., registry-backed attack scenarios).
+if kubectl get deploy -n "$NAMESPACE" ids-api -o jsonpath='{..volumeMounts[*].mountPath}' 2>/dev/null | grep -q '/app/static'; then
+    log "Refreshing UI ConfigMap (ids-app-static)..."
+    kubectl create configmap ids-app-static -n "$NAMESPACE" \
+        --from-file=index.html=services/ids-api/static/index.html \
+        --dry-run=client -o yaml \
+        | kubectl apply --server-side --force-conflicts -f - >/dev/null
+fi
+
 log "Restarting pods..."
 kubectl delete pods -n "$NAMESPACE" -l app=ids-api --force --grace-period=0 2>/dev/null || true
-echo ""
 
-# ─── Wait for ready ────────────────────────────────────────────────────
-log "Waiting for pods..."
-for i in $(seq 1 30); do
-    READY=$(kubectl get pods -n "$NAMESPACE" -l app=ids-api --no-headers 2>/dev/null | grep -c "1/1.*Running" || true)
-    TOTAL=$(kubectl get pods -n "$NAMESPACE" -l app=ids-api --no-headers 2>/dev/null | wc -l)
+log "Waiting for ready..."
+for i in {1..30}; do
+    READY=$(kubectl get pods -n "$NAMESPACE" -l app=ids-api --no-headers 2>/dev/null | grep -c "Running" || true)
     if [[ "$READY" -ge 1 ]]; then
         echo ""
-        log "✓ $READY/$TOTAL pods ready"
+        log "$READY pod(s) ready"
         break
     fi
-    printf "."
+    echo -n "."
     sleep 2
 done
 echo ""
 
-# ─── Verify ─────────────────────────────────────────────────────────────
-sleep 3
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:30800/health 2>/dev/null || echo "000")
+# Verify
+sleep 2
+HTTP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health 2>/dev/null || echo "000")
 if [[ "$HTTP" == "200" ]]; then
-    log "✓ Health check passed (200 OK)"
-    log "✓ Dashboard: http://localhost:30800/ui"
-    echo ""
-    echo -e "${GREEN}Deploy complete!${NC}"
+    log "Health check passed"
+    log "Dashboard: http://localhost:8000/ui"
 else
-    warn "Health check returned $HTTP — pods may still be starting"
-    warn "Run: kubectl get pods -n $NAMESPACE -l app=ids-api -w"
+    warn "Health check: HTTP $HTTP"
+    warn "Pods may still be starting..."
 fi
+
+echo ""

@@ -71,6 +71,7 @@ client = TestClient(main.app)
 def test_internal_alerts_use_dedup_to_avoid_repeat_llm_calls():
     calls = {"count": 0}
 
+        os.environ.setdefault("IDS_INTERNAL_ALERT_TOKEN", "test-token")
     async def fake_analyze(alert_dict):
         calls["count"] += 1
         return (
@@ -104,8 +105,9 @@ def test_internal_alerts_use_dedup_to_avoid_repeat_llm_calls():
         }
 
         r1 = client.post("/api/alerts/internal", json=payload)
-        r2 = client.post("/api/alerts/internal", json=payload)
-
+            headers = {"X-IDS-Internal-Token": "test-token"}
+            r1 = client.post("/api/alerts/internal", json=payload, headers=headers)
+            r2 = client.post("/api/alerts/internal", json=payload, headers=headers)
         assert r1.status_code == 200, r1.text
         assert r2.status_code == 200, r2.text
         assert calls["count"] == 1, "LLM should only be called once for duplicate internal alerts"

@@ -2,11 +2,25 @@
 Configuration Management for Smart City IDS
 Loads settings from environment variables
 """
+import logging
 import os
 from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+logger = logging.getLogger(__name__)
+
+def _normalize_automation_mode(mode: str) -> str:
+    """Normalize legacy mode names to SOAR mode vocabulary."""
+    normalized = (mode or "").strip().lower()
+    mode_map = {
+        "live": "autonomous",
+        "autopilot": "autonomous",
+        "active": "assisted",
+        "approval-required": "assisted",
+        "dry-run": "manual",
+    }
+    return mode_map.get(normalized, normalized or "assisted")
 
 class Config:
     """Application configuration"""
@@ -25,8 +39,11 @@ class Config:
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshot-v1-8k")
     
-    # LLM Fallback Priority (comma-separated list of engines to try in order)
-    LLM_PRIORITY: str = os.getenv("LLM_PRIORITY", "kimi,xai,anthropic,openai,gemini")
+    # LLM provider failover chain (cloud providers only)
+    LLM_PRIORITY: str = os.getenv(
+        "LLM_PRIORITY",
+        os.getenv("LLM_PROVIDER_CHAIN", "kimi,xai,anthropic,openai"),
+    )
     
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
     LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1000"))
@@ -43,9 +60,27 @@ class Config:
     # Thresholds
     CRITICAL_SEVERITY_THRESHOLD: int = int(os.getenv("CRITICAL_SEVERITY_THRESHOLD", "8"))
     HIGH_SEVERITY_THRESHOLD: int = int(os.getenv("HIGH_SEVERITY_THRESHOLD", "6"))
+
+    # LLM provider orchestration (cloud-only; no local fallback analyzer)
+    LLM_PROVIDER_CHAIN: str = os.getenv("LLM_PROVIDER_CHAIN", "kimi,xai,anthropic,openai")
+    MAX_RETRY_ATTEMPTS: int = int(os.getenv("MAX_RETRY_ATTEMPTS", "3"))
+    BACKOFF_STRATEGY: str = os.getenv("BACKOFF_STRATEGY", "exponential")
+    BACKOFF_BASE_SECONDS: float = float(os.getenv("BACKOFF_BASE_SECONDS", "1.0"))
+
+    # Analyst chat abuse controls (per-user/session token bucket)
+    ANALYST_CHAT_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("ANALYST_CHAT_RATE_LIMIT_PER_MINUTE", "30"))
+    ANALYST_CHAT_RATE_LIMIT_BURST: int = int(os.getenv("ANALYST_CHAT_RATE_LIMIT_BURST", "10"))
+
+    # Kubernetes action path control
+    K8S_USE_THREATRESPONSE_CRD: bool = os.getenv("K8S_USE_THREATRESPONSE_CRD", "true").lower() == "true"
     
-    # Safety Controls
-    AUTOMATION_MODE: str = os.getenv("AUTOMATION_MODE", "live")  # "live" | "dry-run" | "approval-required"
+    # SOAR-style automation controls
+    # Modes: autonomous | assisted | manual | emergency
+    AUTOMATION_MODE: str = _normalize_automation_mode(os.getenv("AUTOMATION_MODE", "assisted"))
+    AUTONOMOUS_MIN_CONFIDENCE: float = float(os.getenv("AUTONOMOUS_MIN_CONFIDENCE", "0.90"))
+    ASSISTED_MIN_CONFIDENCE: float = float(os.getenv("ASSISTED_MIN_CONFIDENCE", "0.70"))
+    EMERGENCY_MIN_CONFIDENCE: float = float(os.getenv("EMERGENCY_MIN_CONFIDENCE", "0.85"))
+    EMERGENCY_SEVERITY_THRESHOLD: int = int(os.getenv("EMERGENCY_SEVERITY_THRESHOLD", "10"))
     PROTECTED_SERVICES: list = os.getenv("PROTECTED_SERVICES", "healthcare-api,ids-api,postgres").split(",")
     ALERT_CACHE_TTL_SECONDS: int = int(os.getenv("ALERT_CACHE_TTL_SECONDS", "60"))
     ALERT_CACHE_MAX_SIZE: int = int(os.getenv("ALERT_CACHE_MAX_SIZE", "100"))
@@ -57,6 +92,13 @@ class Config:
         "SECRET_KEY",
         os.getenv("JWT_SECRET_KEY", ""),
     ) or __import__("secrets").token_urlsafe(32)
+
+    # Internal ingest (Falco/Suricata forwarders → IDS API)
+    # This must be set in-cluster; otherwise /api/alerts/internal is disabled.
+    IDS_INTERNAL_ALERT_TOKEN: str = os.getenv(
+        "IDS_INTERNAL_ALERT_TOKEN",
+        os.getenv("INTERNAL_ALERT_TOKEN", ""),
+    )
     
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:idspassword@postgres:5432/smartcity_ids")
@@ -77,7 +119,12 @@ class Config:
             cls.KIMI_API_KEY
         ]
         if not any(available_keys):
-            raise ValueError("At least one LLM API key must be configured (XAI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or KIMI_API_KEY)")
+            logger.warning(
+                "No cloud LLM API keys configured. "
+                "Starting in degraded mode: auth/UI/API remain available, "
+                "LLM analysis will fail until a provider key is configured."
+            )
+            return False
         return True
     
     @classmethod

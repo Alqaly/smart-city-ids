@@ -24,7 +24,21 @@ There are **two integration paths**:
 | Path | Endpoint | Purpose | When to Use |
 |------|----------|---------|-------------|
 | **Telemetry** | `POST /api/iot/sensor` | Send device data + anomaly events | Normal sensor data; alerts generated on threshold |
-| **Alert** | `POST /api/alerts/internal` | Inject a security alert directly | Device-side anomaly detection already done |
+| **Alert (Cluster-Internal)** | `POST /api/alerts/internal` | Forwarder-only ingest to IDS pipeline | Falco/Suricata forwarders running *inside* the cluster |
+
+Important:
+- For a conference/public demo where **anyone can connect their own device**, the supported path is **Telemetry** (`/api/iot/sensor`).
+- `/api/alerts/internal` requires the shared secret header `X-IDS-Internal-Token` and is intended for **in-cluster** forwarders (Falco/Suricata), not arbitrary external devices.
+
+### Base URL (how to reach the IDS API)
+
+The IDS API is exposed via Kubernetes NodePort by default:
+
+- NodePort base URL: `http://<NODE_IP>:30800`
+
+Optionally, scripts may also start a local port-forward:
+
+- Port-forward base URL: `http://localhost:8000`
 
 ---
 
@@ -86,6 +100,8 @@ Use this when your device has already determined something is wrong:
 ```
 
 This enters the **full IDS pipeline**: Dedup → LLM Analysis → Governance → K8s Automation.
+
+**Auth requirement:** You must include `X-IDS-Internal-Token` and the token must match the IDS API’s `IDS_INTERNAL_ALERT_TOKEN` setting.
 
 ---
 

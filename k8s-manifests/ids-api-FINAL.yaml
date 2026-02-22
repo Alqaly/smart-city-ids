@@ -60,6 +60,8 @@ spec:
               name: ids-secrets
               key: kimi-api-key
               optional: true
+        - name: IDS_INTERNAL_ALERT_TOKEN
+          value: "change-me"
         envFrom:
         - configMapRef:
             name: ids-config
@@ -72,24 +74,27 @@ spec:
             cpu: "750m"
         startupProbe:
           httpGet:
-            path: /health
+            path: /
             port: 8000
-          failureThreshold: 30
+          failureThreshold: 180
           periodSeconds: 5
+          timeoutSeconds: 3
         livenessProbe:
           httpGet:
-            path: /health
+            path: /
             port: 8000
-          initialDelaySeconds: 15
-          periodSeconds: 30
-          timeoutSeconds: 3
+          initialDelaySeconds: 45
+          periodSeconds: 20
+          timeoutSeconds: 8
+          failureThreshold: 6
         readinessProbe:
           httpGet:
-            path: /health
+            path: /
             port: 8000
-          initialDelaySeconds: 10
+          initialDelaySeconds: 15
           periodSeconds: 10
-          timeoutSeconds: 3
+          timeoutSeconds: 8
+          failureThreshold: 10
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -113,8 +118,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: ids-api
-  minReplicas: 2
-  maxReplicas: 8
+  minReplicas: 1
+  maxReplicas: 4
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 30

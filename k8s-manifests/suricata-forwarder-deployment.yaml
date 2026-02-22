@@ -6,6 +6,7 @@ metadata:
 data:
   ids-api-url: "http://ids-api-service.smart-city:8000/api/alerts/internal"
   ids-api-token: "suricata-forwarder-token"
+  ids-internal-alert-token: "change-me"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,6 +59,13 @@ spec:
             configMapKeyRef:
               name: suricata-forwarder-config
               key: ids-api-token
+        - name: IDS_INTERNAL_ALERT_TOKEN
+          valueFrom:
+            configMapKeyRef:
+              name: suricata-forwarder-config
+              key: ids-internal-alert-token
+        - name: EVE_FILE
+          value: /var/log/suricata/eve.json
         livenessProbe:
           httpGet:
             path: /health
@@ -94,6 +102,9 @@ spec:
           mountPath: /app
         - name: tmp
           mountPath: /tmp
+        - name: suricata-logs
+          mountPath: /var/log/suricata
+          readOnly: true
       volumes:
       - name: app-code
         configMap:
@@ -101,6 +112,10 @@ spec:
           defaultMode: 0555
       - name: tmp
         emptyDir: {}
+      - name: suricata-logs
+        hostPath:
+          path: /var/log/suricata
+          type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: Service
@@ -180,6 +195,8 @@ data:
     import hashlib
     import logging
     import socket
+    import asyncio
+    import threading
     import sys
     import os
     import time
@@ -194,11 +211,14 @@ data:
     
     # Configuration
     IDS_API_URL = os.getenv("IDS_API_URL", "http://ids-api:8000/api/alerts")
-    IDS_API_TOKEN = os.getenv("IDS_API_TOKEN", "suricata-forwarder-token")
+    IDS_API_TOKEN = os.getenv("IDS_API_TOKEN", "")
+    IDS_INTERNAL_ALERT_TOKEN = os.getenv("IDS_INTERNAL_ALERT_TOKEN", "")
     LISTEN_PORT = 514
     LISTEN_HOST = "0.0.0.0"
     SYSLOG_BUFFER = 4096
     DEDUP_TTL_SECONDS = int(os.getenv("DEDUP_TTL_SECONDS", "120"))
+    EVE_FILE = os.getenv("EVE_FILE", "/var/log/suricata/eve.json")
+    EVE_POLL_SECONDS = float(os.getenv("EVE_POLL_SECONDS", "0.2"))
     
     # Logging
     logging.basicConfig(
@@ -228,7 +248,6 @@ data:
         output_fields = alert_dict.get("output_fields", {}) or {}
         composite = "|".join([
             str(alert_dict.get("rule", "")),
-            str(alert_dict.get("time", "")),
             str(output_fields.get("src_ip", "")),
             str(output_fields.get("dest_ip", "")),
             str(output_fields.get("proto", "")),
@@ -252,6 +271,29 @@ data:
     app = FastAPI(title="Suricata Forwarder", version="1.1.0")
     alerts_forwarded = 0
     alerts_deduped = 0
+
+    @app.on_event("startup")
+    async def _startup():
+      """Start background ingestion threads when running under uvicorn."""
+      def _run():
+        try:
+          asyncio.run(udp_listener())
+        except Exception as e:
+          logger.error(f"UDP listener thread crashed: {e}")
+
+      t = threading.Thread(target=_run, daemon=True)
+      t.start()
+      logger.info("📡 UDP listener thread started")
+
+      def _tail_run():
+        try:
+          asyncio.run(tail_eve_file())
+        except Exception as e:
+          logger.error(f"EVE tail thread crashed: {e}")
+
+      t2 = threading.Thread(target=_tail_run, daemon=True)
+      t2.start()
+      logger.info(f"📄 EVE tail thread started (file={EVE_FILE})")
     
     @app.get("/health")
     async def health():
@@ -320,25 +362,41 @@ data:
             return True  # silently succeed
     
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    IDS_API_URL,
-                    json=alert_dict,
-                    headers={"Authorization": f"Bearer {IDS_API_TOKEN}", "Content-Type": "application/json"}
-                )
-                if response.status_code == 200:
-                    alerts_forwarded += 1
-                    suricata_alerts_forwarded_total.inc()
-                    logger.info(f"✅ Forwarded: {alert.rule}")
-                    return True
-                else:
-                    suricata_alerts_errors_total.inc()
-                    logger.error(f"❌ IDS API error {response.status_code}")
-                    return False
+          # pydantic v2 uses model_dump(); keep compatibility.
+          try:
+            alert_dict = alert.model_dump()
+          except AttributeError:
+            alert_dict = alert.dict()
+
+          headers = {"Content-Type": "application/json"}
+          if IDS_API_URL.rstrip("/").endswith("/api/alerts/internal"):
+            if IDS_INTERNAL_ALERT_TOKEN:
+              headers["X-IDS-Internal-Token"] = IDS_INTERNAL_ALERT_TOKEN
+          else:
+            if IDS_API_TOKEN:
+              headers["Authorization"] = f"Bearer {IDS_API_TOKEN}"
+
+          async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+              IDS_API_URL,
+              json=alert_dict,
+              headers=headers,
+            )
+
+          if response.status_code == 200:
+            alerts_forwarded += 1
+            suricata_alerts_forwarded_total.inc()
+            logger.info(f"✅ Forwarded: {alert.rule}")
+            return True
+
+          suricata_alerts_errors_total.inc()
+          logger.error(f"❌ IDS API error {response.status_code}: {response.text[:200]}")
+          return False
+
         except Exception as e:
-            suricata_alerts_errors_total.inc()
-            logger.error(f"Forward error: {e}")
-            return False
+          suricata_alerts_errors_total.inc()
+          logger.error(f"Forward error: {e}")
+          return False
     
     async def udp_listener():
         logger.info(f"📡 Listening on {LISTEN_HOST}:{LISTEN_PORT}/UDP (dedup TTL={DEDUP_TTL_SECONDS}s)")
@@ -363,6 +421,40 @@ data:
                     logger.error(f"Error: {e}")
         finally:
             sock.close()
+
+    async def tail_eve_file():
+        """Tail Suricata EVE JSON (one JSON object per line) and forward alerts."""
+        logger.info(f"📄 Tailing EVE file: {EVE_FILE}")
+        position = 0
+        while True:
+            try:
+                with open(EVE_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(position)
+                    while True:
+                        line = f.readline()
+                        if not line:
+                            position = f.tell()
+                            break
+
+                        line = line.strip()
+                        if not line or not line.startswith("{"):
+                            continue
+
+                        try:
+                            eve_json = json.loads(line)
+                        except Exception:
+                            continue
+
+                        alert = convert_eve_to_alert(eve_json)
+                        if alert:
+                            await forward_to_ids_api(alert)
+            except FileNotFoundError:
+                # Suricata might not have created the file yet.
+                pass
+            except Exception as e:
+                logger.error(f"EVE tail error: {e}")
+
+            await asyncio.sleep(EVE_POLL_SECONDS)
     
     if __name__ == "__main__":
         import threading

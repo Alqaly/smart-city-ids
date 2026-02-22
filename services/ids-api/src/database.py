@@ -6,8 +6,10 @@ Falls back to in-memory storage if database is unavailable.
 
 import os
 import logging
+import contextlib
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+import time
 import json
 
 logger = logging.getLogger(__name__)
@@ -22,18 +24,28 @@ DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
 # Try to import psycopg2
 try:
     import psycopg2
+    import psycopg2.pool
     from psycopg2.extras import RealDictCursor
     PSYCOPG2_AVAILABLE = True
 except ImportError:
     PSYCOPG2_AVAILABLE = False
     logger.warning("psycopg2 not available, using in-memory storage")
 
+# Connection pool size — small pool is enough for this workload
+_DB_MIN_CONN = 2
+_DB_MAX_CONN = 8
+
 
 class Database:
-    """PostgreSQL database handler with fallback to memory."""
-    
+    """PostgreSQL database handler with connection pool and fallback to memory.
+
+    Uses a ThreadedConnectionPool so concurrent FastAPI handler threads get
+    their own connection without blocking each other.  Each query checks out
+    a connection, runs, and returns it to the pool in a finally block.
+    """
+
     def __init__(self):
-        self.conn = None
+        self._pool: Optional["psycopg2.pool.ThreadedConnectionPool"] = None
         self.use_memory = not PSYCOPG2_AVAILABLE
         self._memory_alerts: List[Dict[str, Any]] = []
         self._memory_iot_events: List[Dict[str, Any]] = []
@@ -43,48 +55,117 @@ class Database:
         self._memory_audit_logs: List[Dict[str, Any]] = []
         self._memory_system_logs: List[Dict[str, Any]] = []
         self._memory_throttled_alerts: List[Dict[str, Any]] = []
-        
+        self._memory_llm_api_calls: List[Dict[str, Any]] = []
+        self._memory_llm_provider_health: Dict[str, Dict[str, Any]] = {}
+
         if PSYCOPG2_AVAILABLE:
             self._connect()
-    
+
     def _connect(self):
-        """Establish database connection."""
+        """Create the connection pool and initialise tables."""
         try:
-            self.conn = psycopg2.connect(
+            self._pool = psycopg2.pool.ThreadedConnectionPool(
+                minconn=_DB_MIN_CONN,
+                maxconn=_DB_MAX_CONN,
                 host=DB_HOST,
                 port=DB_PORT,
                 dbname=DB_NAME,
                 user=DB_USER,
                 password=DB_PASSWORD,
-                connect_timeout=5
+                connect_timeout=5,
             )
-            self.conn.autocommit = True
-            self._init_tables()
+            # Init tables using one pooled connection
+            conn = self._pool.getconn()
+            try:
+                conn.autocommit = True
+            finally:
+                self._pool.putconn(conn)
             self.use_memory = False
-            logger.info(f"✅ Connected to PostgreSQL at {DB_HOST}:{DB_PORT}/{DB_NAME}")
+            self._init_tables()
+            logger.info(f"✅ PostgreSQL pool ready ({_DB_MIN_CONN}-{_DB_MAX_CONN} conns) at {DB_HOST}:{DB_PORT}/{DB_NAME}")
         except Exception as e:
             logger.warning(f"⚠️ Could not connect to PostgreSQL: {e}. Using in-memory storage.")
             self.use_memory = True
-    
+
+    # ── Connection helpers ────────────────────────────────────────────
+
+    def _get_conn(self):
+        """Check out a connection from the pool, reconnecting if needed."""
+        if self._pool is None or self._pool.closed:
+            self._connect()
+        try:
+            conn = self._pool.getconn()
+            conn.autocommit = True
+            return conn
+        except Exception as e:
+            logger.error(f"Failed to get connection from pool: {e}")
+            raise
+
+    def _put_conn(self, conn):
+        """Return a connection to the pool."""
+        if self._pool and not self._pool.closed:
+            try:
+                self._pool.putconn(conn)
+            except Exception as e:
+                logger.warning(f"Failed to return connection to pool: {e}")
+
     def _ensure_connection(self):
-        """Ensure database connection is active."""
+        """Check pool is live; try to reconnect once if not.  Returns bool."""
         if self.use_memory:
             return False
         try:
-            if self.conn is None or self.conn.closed:
-                self._connect()
-            # Test connection
-            with self.conn.cursor() as cur:
-                cur.execute("SELECT 1")
+            conn = self._get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            finally:
+                self._put_conn(conn)
             return True
         except Exception as e:
-            logger.warning(f"Database connection lost: {e}")
+            logger.warning(f"Database pool check failed: {e} — attempting reconnect")
             self._connect()
             return not self.use_memory
-    
+
+    # Legacy single-conn attribute kept for backward compat (some code uses self.conn)
+    @property
+    def conn(self):
+        """Return a pooled connection.  Callers that used self.conn directly
+        should migrate to the _get_conn()/_put_conn() pattern, but this
+        shim prevents AttributeError in legacy code paths."""
+        if self.use_memory or self._pool is None:
+            return None
+        try:
+            return self._get_conn()
+        except Exception:
+            return None
+
+    @conn.setter
+    def conn(self, value):
+        # Accept but ignore direct assignments (legacy __init__ pattern)
+        pass
+
+    @contextlib.contextmanager
+    def _cursor(self, cursor_factory=None):
+        """Context manager: check out a pooled connection, yield a cursor, return connection.
+
+        Usage (replaces all `with self._cursor() as cur:` patterns)::
+
+            with self._cursor() as cur:
+                cur.execute(...)
+        """
+        if self.use_memory or self._pool is None:
+            raise RuntimeError("Database not available")
+        conn = self._get_conn()
+        try:
+            kwargs = {"cursor_factory": cursor_factory} if cursor_factory else {}
+            with conn.cursor(**kwargs) as cur:
+                yield cur
+        finally:
+            self._put_conn(conn)
+
     def _init_tables(self):
         """Create tables if they don't exist. Handles schema migration from older versions."""
-        with self.conn.cursor() as cur:
+        with self._cursor() as cur:
             # ── Schema migration: detect old schema and drop stale tables ──
             # Old schema had 'created_at' instead of 'timestamp', 'encrypted_alert_data' etc.
             # Since this is a demo, safe to drop and recreate with correct schema.
@@ -220,6 +301,56 @@ class Database:
                 )
             """)
             
+            # System config table (for LLM priority and cost ceilings)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS system_config (
+                    key VARCHAR(255) PRIMARY KEY,
+                    value JSONB NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # LLM API call log (cost/tokens observability, persistent across restarts)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS llm_api_calls (
+                    id SERIAL PRIMARY KEY,
+                    provider_name VARCHAR(50) NOT NULL,
+                    purpose VARCHAR(50),
+                    model VARCHAR(255),
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    success BOOLEAN DEFAULT TRUE,
+                    latency_ms INTEGER,
+                    error_message TEXT,
+                    meta JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Provider health snapshot (optional periodic monitoring)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS llm_provider_health (
+                    provider_name VARCHAR(50) PRIMARY KEY,
+                    status VARCHAR(50) NOT NULL,
+                    checked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    details JSONB
+                )
+            """)
+            
+            # Initialize default LLM priority if not exists
+            cur.execute("""
+                INSERT INTO system_config (key, value)
+                VALUES ('llm_priority', '["kimi", "gemini", "openai", "anthropic", "xai"]')
+                ON CONFLICT (key) DO NOTHING
+            """)
+            
+            # Initialize default cost ceiling if not exists
+            cur.execute("""
+                INSERT INTO system_config (key, value)
+                VALUES ('llm_cost_ceiling', '{"max_daily_usd": 10.0, "current_daily_usd": 0.0, "last_reset": null}')
+                ON CONFLICT (key) DO NOTHING
+            """)
+            
             # Create indexes
             cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_source ON alerts(source)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp)")
@@ -235,9 +366,59 @@ class Database:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_system_logs_created ON system_logs(created_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_throttled_rule ON throttled_alerts(rule)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_throttled_created ON throttled_alerts(created_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_api_calls(created_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_created ON llm_api_calls(provider_name, created_at)")
             
             logger.info("✅ Database tables initialized")
     
+    # ============== SYSTEM CONFIG ==============
+    
+    def get_system_config(self, key: str, default: Any = None) -> Any:
+        """Get a system configuration value."""
+        if self.use_memory or not self._ensure_connection():
+            # Fallback to memory
+            if not hasattr(self, '_memory_system_config'):
+                self._memory_system_config = {
+                    'llm_priority': ["kimi", "gemini", "openai", "anthropic", "xai"],
+                    'llm_cost_ceiling': {"max_daily_usd": 10.0, "current_daily_usd": 0.0, "last_reset": None}
+                }
+            return self._memory_system_config.get(key, default)
+
+        try:
+            with self._cursor() as cur:
+                cur.execute("SELECT value FROM system_config WHERE key = %s", (key,))
+                row = cur.fetchone()
+                if row:
+                    return row[0]
+                return default
+        except Exception as e:
+            logger.error(f"Error getting system config {key}: {e}")
+            return default
+
+    def set_system_config(self, key: str, value: Any) -> bool:
+        """Set a system configuration value."""
+        if self.use_memory or not self._ensure_connection():
+            # Fallback to memory
+            if not hasattr(self, '_memory_system_config'):
+                self._memory_system_config = {
+                    'llm_priority': ["kimi", "gemini", "openai", "anthropic", "xai"],
+                    'llm_cost_ceiling': {"max_daily_usd": 10.0, "current_daily_usd": 0.0, "last_reset": None}
+                }
+            self._memory_system_config[key] = value
+            return True
+
+        try:
+            with self._cursor() as cur:
+                cur.execute("""
+                    INSERT INTO system_config (key, value, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                """, (key, json.dumps(value)))
+                return True
+        except Exception as e:
+            logger.error(f"Error setting system config {key}: {e}")
+            return False
+
     # ============== ALERTS ==============
     
     def add_alert(self, alert: Dict[str, Any]) -> int:
@@ -248,7 +429,7 @@ class Database:
             return alert["id"]
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO alerts (source, rule, priority, severity, summary, threat_type,
                                         recommendations, automated_actions, raw_alert, analysis, timestamp)
@@ -294,7 +475,7 @@ class Database:
             return record["id"]
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO analysis_results (alert_id, model, analysis, analysis_time_ms,
                                                   confidence_score, analyzed_at)
@@ -323,7 +504,7 @@ class Database:
             return action["id"]
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO automation_actions (
                         alert_id, action_type, target_resource, target_namespace, status,
@@ -359,7 +540,7 @@ class Database:
             return log_entry["id"]
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO audit_logs (action, resource_type, resource_id, details,
                                            status, error_message, actor, created_at)
@@ -398,7 +579,7 @@ class Database:
             return log_entry["id"]
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO system_logs (level, component, message, details, created_at)
                     VALUES (%s, %s, %s, %s, %s)
@@ -434,7 +615,7 @@ class Database:
             return record["id"]
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO throttled_alerts (source, rule, priority, throttle_reason, raw_alert, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
@@ -465,7 +646,7 @@ class Database:
             return list(reversed(logs[-limit:]))
         
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with self._cursor(RealDictCursor) as cur:
                 query = "SELECT * FROM system_logs WHERE 1=1"
                 params = []
                 if level:
@@ -491,7 +672,7 @@ class Database:
             return list(reversed(alerts[-limit:]))
         
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with self._cursor(RealDictCursor) as cur:
                 if rule:
                     cur.execute("""
                         SELECT * FROM throttled_alerts WHERE rule = %s
@@ -517,7 +698,7 @@ class Database:
             }
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM throttled_alerts")
                 total = cur.fetchone()[0]
                 
@@ -551,7 +732,7 @@ class Database:
             return list(reversed(filtered[-limit:]))
         
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with self._cursor(RealDictCursor) as cur:
                 if source:
                     cur.execute("""
                         SELECT * FROM alerts WHERE source = %s 
@@ -574,7 +755,7 @@ class Database:
             return len(self._memory_alerts)
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 if source:
                     cur.execute("SELECT COUNT(*) FROM alerts WHERE source = %s", (source,))
                 else:
@@ -600,7 +781,7 @@ class Database:
             return None
 
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with self._cursor(RealDictCursor) as cur:
                 cur.execute("SELECT * FROM alerts WHERE id = %s", (alert_id,))
                 row = cur.fetchone()
                 return dict(row) if row else None
@@ -636,7 +817,7 @@ class Database:
             return False
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     UPDATE alerts
                     SET analysis = %s, severity = %s, summary = %s, threat_type = %s
@@ -662,7 +843,7 @@ class Database:
             return counts
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     SELECT severity, COUNT(*) FROM alerts 
                     GROUP BY severity ORDER BY severity
@@ -695,7 +876,7 @@ class Database:
                 return False  # Existing device
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO iot_devices (device_id, device_type, metadata)
                     VALUES (%s, %s, %s)
@@ -716,7 +897,7 @@ class Database:
             return list(self._memory_iot_devices.values())
         
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with self._cursor(RealDictCursor) as cur:
                 cur.execute("SELECT * FROM iot_devices ORDER BY last_seen DESC")
                 return cur.fetchall()
         except Exception as e:
@@ -729,7 +910,7 @@ class Database:
             return len(self._memory_iot_devices)
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM iot_devices")
                 return cur.fetchone()[0]
         except Exception as e:
@@ -746,7 +927,7 @@ class Database:
             return event["id"]
         
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("""
                     INSERT INTO iot_events (device_id, device_type, event_type, 
                                            value, timestamp, metadata)
@@ -776,7 +957,7 @@ class Database:
             return list(reversed(filtered[-limit:]))
         
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            with self._cursor(RealDictCursor) as cur:
                 if device_id:
                     cur.execute("""
                         SELECT * FROM iot_events WHERE device_id = %s 
@@ -831,7 +1012,7 @@ class Database:
             return deleted
 
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("DELETE FROM alerts WHERE timestamp < %s", (cutoffs["alerts"],))
                 deleted["alerts"] = cur.rowcount
                 cur.execute("DELETE FROM iot_events WHERE timestamp < %s", (cutoffs["iot_events"],))
@@ -862,7 +1043,7 @@ class Database:
     def _get_iot_event_count(self) -> int:
         """Get IoT event count from database."""
         try:
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM iot_events")
                 return cur.fetchone()[0]
         except:
@@ -873,6 +1054,15 @@ class Database:
         
         This ensures Grafana shows historical data even after pod restarts.
         """
+        # Cache to avoid expensive aggregation + noisy logs during dashboard polling.
+        # /api/metrics is polled frequently; this should not hit PostgreSQL every time.
+        cache_ttl = 300  # seconds
+        now = time.time() if 'time' in globals() else __import__('time').time()
+        if getattr(self, "_prom_restore_cache", None) is not None and getattr(self, "_prom_restore_cache_ts", 0):
+            age = now - float(getattr(self, "_prom_restore_cache_ts", 0))
+            if age < cache_ttl:
+                return self._prom_restore_cache
+
         if self.use_memory or not self._ensure_connection():
             alerts_by_source_priority = {}
             alerts_by_severity = {}
@@ -903,7 +1093,7 @@ class Database:
                 count for sev, count in alerts_by_severity.items() if sev and sev.isdigit() and int(sev) >= 8
             )
 
-            return {
+            data_out = {
                 "alerts_by_source_priority": alerts_by_source_priority,
                 "alerts_by_severity": alerts_by_severity,
                 "alerts_by_threat_type": alerts_by_threat_type,
@@ -912,10 +1102,13 @@ class Database:
                 "critical_alerts": critical_alerts,
                 "iot_events_by_type": iot_events_by_type,
             }
+            self._prom_restore_cache = data_out
+            self._prom_restore_cache_ts = now
+            return data_out
         
         try:
             data = {}
-            with self.conn.cursor() as cur:
+            with self._cursor() as cur:
                 # Alerts by source and priority
                 cur.execute("""
                     SELECT source, priority, COUNT(*) 
@@ -965,15 +1158,198 @@ class Database:
                     f"{row[0]}:{row[1]}": row[2] for row in cur.fetchall()
                 }
                 
-                logger.info(f"📊 Prometheus restore data: {data['total_processed']} alerts, "
-                           f"{len(data['actions_executed'])} action types, "
-                           f"{data['critical_alerts']} critical")
-                
+                # Keep this at debug to avoid spam (dashboard polls /api/metrics).
+                logger.debug(
+                    f"📊 Prometheus restore data: {data['total_processed']} alerts, "
+                    f"{len(data['actions_executed'])} action types, "
+                    f"{data['critical_alerts']} critical"
+                )
+            self._prom_restore_cache = data
+            self._prom_restore_cache_ts = now
             return data
         except Exception as e:
             logger.error(f"Error getting Prometheus restore data: {e}")
             return {"alerts_by_source_priority": {}, "alerts_by_severity": {}, 
                     "alerts_by_threat_type": {}, "total_processed": 0, "actions_executed": {}}
+
+    # ─────────────────────────────────────────────────────────────────────
+    # LLM usage logging (DB-backed) — powers /api/metrics/llm-usage
+    # ─────────────────────────────────────────────────────────────────────
+
+    def log_llm_api_call(
+        self,
+        provider_name: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        *,
+        purpose: Optional[str] = None,
+        model: Optional[str] = None,
+        success: bool = True,
+        latency_ms: Optional[int] = None,
+        error_message: Optional[str] = None,
+        meta: Optional[Dict[str, Any]] = None,
+        created_at: Optional[datetime] = None,
+    ) -> None:
+        provider = (provider_name or "").strip().lower()
+        if not provider:
+            return
+
+        row = {
+            "provider_name": provider,
+            "purpose": (purpose or None),
+            "model": (model or None),
+            "prompt_tokens": max(0, int(prompt_tokens or 0)),
+            "completion_tokens": max(0, int(completion_tokens or 0)),
+            "success": bool(success),
+            "latency_ms": int(latency_ms) if latency_ms is not None else None,
+            "error_message": error_message,
+            "meta": meta or {},
+            "created_at": created_at or datetime.utcnow(),
+        }
+
+        if self.use_memory or not self._ensure_connection():
+            self._memory_llm_api_calls.append(row)
+            return
+
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO llm_api_calls
+                        (provider_name, purpose, model, prompt_tokens, completion_tokens, success, latency_ms, error_message, meta, created_at)
+                    VALUES
+                        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        row["provider_name"],
+                        row["purpose"],
+                        row["model"],
+                        row["prompt_tokens"],
+                        row["completion_tokens"],
+                        row["success"],
+                        row["latency_ms"],
+                        row["error_message"],
+                        json.dumps(row["meta"]),
+                        row["created_at"],
+                    ),
+                )
+        except Exception as e:
+            logger.debug(f"Failed to log LLM API call (non-fatal): {e}")
+
+    def upsert_llm_provider_health(
+        self,
+        provider_name: str,
+        status: str,
+        *,
+        checked_at: Optional[datetime] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        provider = (provider_name or "").strip().lower()
+        if not provider:
+            return
+
+        row = {
+            "provider_name": provider,
+            "status": (status or "unknown").strip().lower() or "unknown",
+            "checked_at": checked_at or datetime.utcnow(),
+            "details": details or {},
+        }
+
+        if self.use_memory or not self._ensure_connection():
+            self._memory_llm_provider_health[provider] = row
+            return
+
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO llm_provider_health (provider_name, status, checked_at, details)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (provider_name)
+                    DO UPDATE SET status=EXCLUDED.status, checked_at=EXCLUDED.checked_at, details=EXCLUDED.details
+                    """,
+                    (row["provider_name"], row["status"], row["checked_at"], json.dumps(row["details"])),
+                )
+        except Exception as e:
+            logger.debug(f"Failed to upsert provider health (non-fatal): {e}")
+
+    def get_llm_usage_window(self, start_utc: datetime, end_utc: datetime) -> Dict[str, Any]:
+        start_utc = start_utc or datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        end_utc = end_utc or datetime.utcnow()
+        if end_utc < start_utc:
+            start_utc, end_utc = end_utc, start_utc
+
+        if self.use_memory or not self._ensure_connection():
+            rows = [
+                r for r in self._memory_llm_api_calls
+                if (r.get("created_at") or datetime.utcnow()) >= start_utc and (r.get("created_at") or datetime.utcnow()) <= end_utc
+            ]
+            by_provider: Dict[str, Dict[str, Any]] = {}
+            for r in rows:
+                p = (r.get("provider_name") or "unknown").strip().lower() or "unknown"
+                agg = by_provider.setdefault(p, {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0})
+                agg["calls"] += 1
+                agg["prompt_tokens"] += int(r.get("prompt_tokens") or 0)
+                agg["completion_tokens"] += int(r.get("completion_tokens") or 0)
+
+            providers_out = []
+            for p, agg in sorted(by_provider.items()):
+                providers_out.append({
+                    "provider": p,
+                    "calls": int(agg["calls"]),
+                    "prompt_tokens": int(agg["prompt_tokens"]),
+                    "completion_tokens": int(agg["completion_tokens"]),
+                })
+
+            totals = {
+                "calls": sum(p["calls"] for p in providers_out),
+                "prompt_tokens": sum(p["prompt_tokens"] for p in providers_out),
+                "completion_tokens": sum(p["completion_tokens"] for p in providers_out),
+            }
+            totals["tokens"] = totals["prompt_tokens"] + totals["completion_tokens"]
+            return {"start_utc": start_utc.isoformat() + "Z", "end_utc": end_utc.isoformat() + "Z", "totals": totals, "providers": providers_out}
+
+        try:
+            with self._cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT provider_name,
+                           COUNT(*) AS calls,
+                           COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                           COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+                    FROM llm_api_calls
+                    WHERE created_at >= %s AND created_at <= %s
+                    GROUP BY provider_name
+                    ORDER BY provider_name
+                    """,
+                    (start_utc, end_utc),
+                )
+                rows = cur.fetchall()
+        except Exception as e:
+            logger.debug(f"Failed to read llm_api_calls (non-fatal): {e}")
+            return {"start_utc": start_utc.isoformat() + "Z", "end_utc": end_utc.isoformat() + "Z", "totals": {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "tokens": 0}, "providers": []}
+
+        providers_out = []
+        for provider_name, calls, prompt_tokens, completion_tokens in rows:
+            providers_out.append({
+                "provider": (provider_name or "unknown"),
+                "calls": int(calls or 0),
+                "prompt_tokens": int(prompt_tokens or 0),
+                "completion_tokens": int(completion_tokens or 0),
+            })
+
+        totals = {
+            "calls": sum(p["calls"] for p in providers_out),
+            "prompt_tokens": sum(p["prompt_tokens"] for p in providers_out),
+            "completion_tokens": sum(p["completion_tokens"] for p in providers_out),
+        }
+        totals["tokens"] = totals["prompt_tokens"] + totals["completion_tokens"]
+        return {"start_utc": start_utc.isoformat() + "Z", "end_utc": end_utc.isoformat() + "Z", "totals": totals, "providers": providers_out}
+
+    def get_llm_usage_today(self) -> Dict[str, Any]:
+        now = datetime.utcnow()
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return self.get_llm_usage_window(start, now)
 
 
 # Global database instance

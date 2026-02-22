@@ -22,6 +22,26 @@ from .registry import ProviderRegistry
 logger = logging.getLogger(__name__)
 
 
+def _normalize_usage(prompt_tokens=None, completion_tokens=None, total_tokens=None):
+    prompt = int(prompt_tokens or 0)
+    completion = int(completion_tokens or 0)
+    total = int(total_tokens or (prompt + completion))
+    return {
+        "prompt_tokens": max(0, prompt),
+        "completion_tokens": max(0, completion),
+        "total_tokens": max(0, total),
+    }
+
+
+def _extract_openai_usage(body):
+    usage = body.get("usage") or {}
+    return _normalize_usage(
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
+    )
+
+
 # =============================================================================
 # OpenAI-compatible providers (most common API format)
 # =============================================================================
@@ -55,7 +75,9 @@ class OpenAIProvider(BaseProvider):
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
-            return response.json()["choices"][0]["message"]["content"]
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            return content, _extract_openai_usage(body)
 
 
 @ProviderRegistry.register("xai")
@@ -86,7 +108,9 @@ class XAIProvider(BaseProvider):
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
-            return response.json()["choices"][0]["message"]["content"]
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            return content, _extract_openai_usage(body)
 
 
 @ProviderRegistry.register("kimi")
@@ -117,7 +141,9 @@ class KimiProvider(BaseProvider):
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
-            return response.json()["choices"][0]["message"]["content"]
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            return content, _extract_openai_usage(body)
 
 
 # =============================================================================
@@ -150,7 +176,14 @@ class AnthropicProvider(BaseProvider):
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
-            return response.json()["content"][0]["text"]
+            body = response.json()
+            content = body["content"][0]["text"]
+            usage = body.get("usage") or {}
+            return content, _normalize_usage(
+                prompt_tokens=usage.get("input_tokens"),
+                completion_tokens=usage.get("output_tokens"),
+                total_tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+            )
 
 
 # =============================================================================
@@ -183,7 +216,14 @@ class GeminiProvider(BaseProvider):
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
-            return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            body = response.json()
+            content = body["candidates"][0]["content"]["parts"][0]["text"]
+            usage = body.get("usageMetadata") or {}
+            return content, _normalize_usage(
+                prompt_tokens=usage.get("promptTokenCount"),
+                completion_tokens=usage.get("candidatesTokenCount"),
+                total_tokens=usage.get("totalTokenCount"),
+            )
 
 
 # =============================================================================
@@ -225,4 +265,6 @@ class CustomOpenAIProvider(BaseProvider):
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
-            return response.json()["choices"][0]["message"]["content"]
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            return content, _extract_openai_usage(body)

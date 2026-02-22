@@ -25,13 +25,15 @@ data:
     outputs:
       - eve-log:
           enabled: yes
-          filetype: syslog
-          syslog:
-            server: suricata-forwarder.monitoring.svc.cluster.local
-            port: 514
-            protocol: udp
+          filetype: regular
+          filename: /var/log/suricata/eve.json
           types:
             - alert
+
+    # Load local rules (keeps this demo self-contained)
+    default-rule-path: /etc/suricata/rules
+    rule-files:
+      - local.rules
 
     app-layer:
       protocols:
@@ -39,6 +41,68 @@ data:
           enabled: yes
         dns:
           enabled: yes
+
+  local.rules: |
+    # =========================================================================
+    # Smart City IDS - Suricata Detection Ruleset
+    # Covers: SQLi, Command Injection, Path Traversal, XSS, Auth Brute-Force,
+    #         Data Exfiltration, IoT API Abuse, MQTT Auth, Crypto Mining,
+    #         DNS Tunneling, HTTP Flood
+    # =========================================================================
+
+    # --- Whitelists (must come first) ---
+    # Pass internal alert forwarding traffic to IDS API to prevent self-referential loops.
+    # Without these, forwarder JSON payloads (containing rule names like "DROP TABLE") trigger rules.
+    pass http any any -> any any (msg:"PASS IDS API alert ingestion"; http.uri; content:"/api/alerts"; sid:1000001; rev:1;)
+    pass http any any -> any any (msg:"PASS IDS API health check"; http.uri; content:"/health"; sid:1000002; rev:1;)
+
+    # --- SQL Injection ---
+    alert http any any -> any any (msg:"SMARTCITY SQLi DROP TABLE"; flow:to_server,established; content:"DROP TABLE"; http_client_body; nocase; classtype:web-application-attack; sid:9000001; rev:2;)
+    alert http any any -> any any (msg:"SMARTCITY SQLi UNION SELECT"; flow:to_server,established; content:"UNION SELECT"; http_client_body; nocase; classtype:web-application-attack; sid:9000002; rev:2;)
+    alert http any any -> any any (msg:"SMARTCITY SQLi OR 1=1"; flow:to_server,established; content:"OR 1=1"; http_client_body; nocase; classtype:web-application-attack; sid:9000010; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY SQLi single-quote probe"; flow:to_server,established; content:"'--"; http_uri; classtype:web-application-attack; sid:9000011; rev:1;)
+
+    # --- Command Injection ---
+    alert http any any -> any any (msg:"SMARTCITY Command Injection wget"; flow:to_server,established; content:"; wget "; http_client_body; nocase; classtype:web-application-attack; sid:9000020; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Command Injection curl"; flow:to_server,established; content:"; curl "; http_client_body; nocase; classtype:web-application-attack; sid:9000021; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Command Injection bash"; flow:to_server,established; content:"| bash"; http_client_body; nocase; classtype:web-application-attack; sid:9000022; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Command Injection /etc/passwd read"; flow:to_server,established; content:"/etc/passwd"; http_client_body; nocase; classtype:web-application-attack; sid:9000023; rev:1;)
+
+    # --- Path Traversal ---
+    alert http any any -> any any (msg:"SMARTCITY Path Traversal ../.."; flow:to_server,established; content:"../../"; http_uri; nocase; classtype:web-application-attack; sid:9000030; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Path Traversal URL-encoded"; flow:to_server,established; content:"%2e%2e%2f"; http_uri; nocase; classtype:web-application-attack; sid:9000031; rev:1;)
+
+    # --- Cross-Site Scripting (XSS) ---
+    alert http any any -> any any (msg:"SMARTCITY XSS script tag in URI"; flow:to_server,established; content:"<script"; http_uri; nocase; classtype:web-application-attack; sid:9000040; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY XSS script tag in body"; flow:to_server,established; content:"<script"; http_client_body; nocase; classtype:web-application-attack; sid:9000041; rev:1;)
+
+    # --- Remote File Inclusion ---
+    alert http any any -> any any (msg:"SMARTCITY RFI http:// in parameter"; flow:to_server,established; content:"http://"; http_client_body; nocase; content:"=http"; nocase; classtype:web-application-attack; sid:9000050; rev:1;)
+
+    # --- Auth Brute Force ---
+    alert http any any -> $HTTP_PORTS any (msg:"SMARTCITY Auth brute force on /auth"; flow:to_server,established; content:"/auth"; http_uri; nocase; detection_filter:track by_src, count 20, seconds 10; classtype:attempted-admin; sid:9000060; rev:1;)
+    alert http any any -> $HTTP_PORTS any (msg:"SMARTCITY Auth brute force on /login"; flow:to_server,established; content:"/login"; http_uri; nocase; detection_filter:track by_src, count 20, seconds 10; classtype:attempted-admin; sid:9000061; rev:1;)
+
+    # --- DoS / HTTP Flood ---
+    alert http any any -> any any (msg:"SMARTCITY HTTP flood"; flow:to_server,established; detection_filter:track by_src, count 300, seconds 10; classtype:attempted-dos; sid:9000003; rev:2;)
+
+    # --- IoT API Abuse ---
+    alert http any any -> any any (msg:"SMARTCITY IoT sensor API flood"; flow:to_server,established; content:"/api/iot/sensor"; http_uri; nocase; detection_filter:track by_src, count 100, seconds 5; classtype:attempted-dos; sid:9000070; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Oversized IoT payload (potential exfil)"; flow:to_server,established; content:"/api/iot"; http_uri; nocase; dsize:>8192; classtype:policy-violation; sid:9000071; rev:1;)
+
+    # --- MQTT Unauthorized Connection ---
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT cleartext connection"; flow:to_server,established; dsize:>2; classtype:policy-violation; sid:9000080; rev:1;)
+
+    # --- Crypto Mining (Stratum Protocol) ---
+    alert tcp any any -> any 3333 (msg:"SMARTCITY Possible crypto miner port 3333"; flow:to_server,established; classtype:policy-violation; sid:9000090; rev:1;)
+    alert tcp any any -> any 4444 (msg:"SMARTCITY Possible crypto miner port 4444"; flow:to_server,established; classtype:policy-violation; sid:9000091; rev:1;)
+    alert tcp any any -> any 14444 (msg:"SMARTCITY Possible stratum mining port 14444"; flow:to_server,established; classtype:policy-violation; sid:9000092; rev:1;)
+
+    # --- DNS Tunneling / Exfiltration ---
+    alert dns any any -> any 53 (msg:"SMARTCITY Suspiciously long DNS query (tunneling?)"; dns.query; content:"."; pcre:"/^[a-zA-Z0-9\-]{50,}\./"; classtype:policy-violation; sid:9000100; rev:1;)
+
+    # --- Data Exfiltration ---
+    alert http any any -> !$HOME_NET any (msg:"SMARTCITY Large outbound HTTP POST (data exfil?)"; flow:from_server,established; dsize:>65535; classtype:policy-violation; sid:9000110; rev:1;)
 
 ---
 # Suricata Deployment
@@ -59,6 +123,8 @@ spec:
       labels:
         app: suricata
     spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       containers:
       - name: suricata
         image: jasonish/suricata:6.0.13
@@ -69,7 +135,8 @@ spec:
           - |
             # Suricata running in network monitoring mode
             # In K8s, we monitor the loopback and any captured traffic
-            exec suricata -c /etc/suricata/suricata.yaml -i eth0
+            # cni0 sees pod/service traffic on this host (K3s default networking).
+            exec suricata -c /etc/suricata/suricata.yaml -i cni0
         securityContext:
           runAsUser: 0
           privileged: false
@@ -79,7 +146,13 @@ spec:
               - NET_RAW
         volumeMounts:
         - name: config
-          mountPath: /etc/suricata
+          mountPath: /etc/suricata/suricata.yaml
+          subPath: suricata.yaml
+        - name: config
+          mountPath: /etc/suricata/rules/local.rules
+          subPath: local.rules
+        - name: suricata-logs
+          mountPath: /var/log/suricata
         resources:
           requests:
             cpu: 100m
@@ -100,6 +173,11 @@ spec:
         configMap:
           name: suricata-config
       # No log volume needed when using syslog output
+
+      - name: suricata-logs
+        hostPath:
+          path: /var/log/suricata
+          type: DirectoryOrCreate
 
 ---
 # No Service required for syslog-only output

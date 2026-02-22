@@ -109,6 +109,16 @@ PROM_LLM_COST_USD = Counter(
     "Estimated LLM API cost in USD by engine.",
     ["engine"],
 )
+# Daily budget gauge: remaining USD before the cost ceiling triggers.
+# Set to (max_daily_usd - current_daily_usd) on each cost update.
+PROM_LLM_BUDGET_REMAINING_USD = Gauge(
+    "smartcity_ids_llm_budget_remaining_usd",
+    "Remaining LLM daily budget in USD before cost ceiling is hit.",
+)
+PROM_LLM_BUDGET_CEILING_USD = Gauge(
+    "smartcity_ids_llm_budget_ceiling_usd",
+    "Configured LLM daily cost ceiling in USD.",
+)
 # Token usage per engine (prompt / completion).
 PROM_LLM_TOKENS_TOTAL = Counter(
     "smartcity_ids_llm_tokens_total",

@@ -9,10 +9,10 @@ Three automation modes are supported:
     ┌─────────────┬──────────────────────────────────────────────────────────┐
     │ Mode        │ Behaviour                                                │
     ├─────────────┼──────────────────────────────────────────────────────────┤
-    │ autopilot   │ All LLM-recommended actions execute automatically.       │
-    │ assisted    │ High-severity actions (≥ threshold) require approval;    │
-    │             │ lower-severity actions auto-execute.                     │
-    │ manual      │ Every recommended action is queued for human review.     │
+    │ autonomous  │ High-confidence actions execute automatically.            │
+    │ assisted    │ Medium-confidence actions require one-click approval.     │
+    │ manual      │ Every recommended action is queued for human review.      │
+    │ emergency   │ Severity+confidence threshold bypasses normal gates.      │
     └─────────────┴──────────────────────────────────────────────────────────┘
 
 Endpoints (all require JWT authentication):
@@ -61,7 +61,7 @@ def _gov():
     """
     from governance import (
         governance,               # GovernanceEngine singleton
-        get_automation_mode,      # → str: "autopilot" | "assisted" | "manual"
+        get_automation_mode,      # → str: "autonomous" | "assisted" | "manual" | "emergency"
         set_automation_mode,      # (mode) → dict with status
         get_pending_actions,      # → list of PendingAction objects
         get_governance_status,    # → dict with full dashboard data
@@ -102,7 +102,7 @@ async def get_mode(user: str = Depends(verify_token)):
     """Get current automation mode.
 
     Returns:
-        {"mode": "autopilot" | "assisted" | "manual"}
+        {"mode": "autonomous" | "assisted" | "manual" | "emergency"}
     """
     return {"mode": _gov()["get_mode"]()}
 
@@ -112,7 +112,7 @@ async def change_mode(mode: str = "assisted", user: str = Depends(verify_token))
     """Change the IDS automation mode.
 
     Args:
-        mode: One of ``"autopilot"``, ``"assisted"``, or ``"manual"``.
+        mode: One of ``"autonomous"``, ``"assisted"``, ``"manual"``, ``"emergency"``.
               Defaults to ``"assisted"`` (the safest production-ready mode).
 
     Side effects:
@@ -127,7 +127,7 @@ async def change_mode(mode: str = "assisted", user: str = Depends(verify_token))
     # Update Prometheus gauge — exactly one label gets value 1, rest get 0.
     if result["status"] == "success":
         from infrastructure.metrics import PROM_AUTOMATION_MODE
-        for m in ["autopilot", "assisted", "manual"]:
+        for m in ["autonomous", "assisted", "manual", "emergency"]:
             PROM_AUTOMATION_MODE.labels(mode=m).set(1 if m == mode else 0)
     return result
 

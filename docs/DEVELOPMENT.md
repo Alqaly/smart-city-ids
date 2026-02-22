@@ -8,7 +8,7 @@ How to modify, test, and deploy code changes.
 
 - **K3s** running on the node (`/etc/rancher/k3s/k3s.yaml` accessible)
 - **Python 3.10+** with pip
-- At least one LLM API key (`XAI_API_KEY`, `OPENAI_API_KEY`, etc.) — or use the local fallback engine with no key
+- At least one LLM API key (`XAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `KIMI_API_KEY`)
 - `kubectl` configured (`export KUBECONFIG=/etc/rancher/k3s/k3s.yaml`)
 - `jq` for JSON processing in scripts
 
@@ -36,7 +36,7 @@ infrastructure/             Database and monitoring configs
 ## Running Locally (Outside K8s)
 
 ```bash
-# Set at least one LLM key (or skip for local-only mode)
+# Set at least one LLM key
 export XAI_API_KEY="xai-..."
 
 # Create virtualenv and install dependencies
@@ -51,7 +51,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 # Health:    http://localhost:8000/health
 ```
 
-Without any API key, the system uses only the local fallback engine (11 rule patterns, zero cost).
+If no LLM API key is set, startup validation fails (`Config.validate()`), and the API process exits.
 
 ---
 
@@ -119,7 +119,7 @@ The FastAPI app initializes on startup:
 7. Restore Prometheus counters from database
 8. Register all route handlers
 
-**Key entry point for alerts:** the `process_alert_pipeline()` function (called by both `/api/alerts` and `/api/alerts/internal`) handles the full flow: rate limit → dedup → LLM → governance → K8s action → persist.
+**Key entry point for alerts:** `api/alerts.py` routes (`/api/alerts` and `/api/alerts/internal`) delegate to a shared core handler (`_process_alert_core`) for the full flow: rate limit → dedup → LLM → governance → K8s action → persist.
 
 ### Adding a New LLM Provider
 
@@ -230,7 +230,7 @@ curl -s http://localhost:30800/health | jq .
 # Check LLM providers (needs auth)
 TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"operator","password":"operator"}' | jq -r .access_token)
+  -d '{"username":"<username>","password":"<password>"}' | jq -r .access_token)
 curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/llm/status | jq .
 
 # Check rate limiter
@@ -243,7 +243,10 @@ curl -s http://localhost:30800/api/circuit-breaker/status | jq .
 ### Smoke Test
 
 ```bash
-# Send a test alert and verify full pipeline
+# 1) Health endpoint
+curl -s http://localhost:30800/health | jq .
+
+# 2) Alert ingestion (internal path)
 curl -s -X POST http://localhost:30800/api/alerts/internal \
   -H "Content-Type: application/json" \
   -d '{
@@ -252,6 +255,16 @@ curl -s -X POST http://localhost:30800/api/alerts/internal \
     "rule": "Terminal shell in container",
     "time": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
     "output_fields": {"container.name": "traffic-camera-test", "proc.cmdline": "/bin/bash"}
+  }' | jq .
+
+# 3) Analyst chat endpoint (expects 200, or 429 if chat limiter is saturated)
+curl -s -X POST http://localhost:30800/api/analyst/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "docs-smoke",
+    "messages": [{"role": "user", "content": "Summarize the current threat posture in one line."}],
+    "use_tools": false,
+    "stream": false
   }' | jq .
 ```
 

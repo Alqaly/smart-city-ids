@@ -24,7 +24,7 @@ import os
 import time
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
@@ -88,7 +88,7 @@ def _get_app_deps():
 
 
 @router.get("/")
-async def root():
+async def root(request: Request):
     """Return a JSON service manifest for automated discovery.
 
     This is the default landing page of the IDS API.  It enumerates all
@@ -100,6 +100,7 @@ async def root():
         dict: Service name, version, operational status, LLM backend
         summary, and a list of principal endpoint paths.
     """
+    base_url = str(request.base_url).rstrip("/")
     return {
         "service": "Smart City IDS",
         "version": "1.0.0",
@@ -112,8 +113,9 @@ async def root():
             "/metrics",
             "/api/auth/login",
             "/api/operator/*",
+            "/ui",
         ],
-        "ui": "http://localhost:8000/ui",
+        "ui": f"{base_url}/ui",
     }
 
 

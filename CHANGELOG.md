@@ -4,6 +4,301 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [v3.0.0] Attack Simulation Engine v2 — 67 Scenarios + 5 Campaigns
+
+### Summary
+
+Massive expansion of the attack simulation framework from 12 hardcoded client-side
+scenarios to 67 backend-driven scenarios across 8 MITRE ATT&CK categories, plus
+5 multi-stage campaign chains. Full IoT fleet scaling controls integrated into the
+dashboard. New v3 attack pipeline replaces the legacy 13-scenario bash script.
+
+### New files
+
+| File | Purpose |
+|------|---------|
+| `attack-simulator/scenario_registry.py` | Single source of truth: 67 scenarios + 5 campaigns with full MITRE ATT&CK metadata |
+| `attack-simulator/attack_runner.py` | Python CLI runner with phase/category/campaign/random modes |
+| `scripts/attack-iot-pipeline-v3.sh` | Bash wrapper delegating to Python runner, fallback to legacy |
+
+### Attack categories (67 scenarios)
+
+| Category | Count | Examples |
+|----------|-------|---------|
+| Network | 15 | SYN flood, port scan, DNS amplification, ARP spoofing, VLAN hopping |
+| Application | 12 | SQL injection, XSS, SSRF, command injection, path traversal |
+| Authentication | 8 | Credential stuffing, brute force, token forgery, session hijack |
+| Data | 8 | Exfiltration, DNS tunneling, steganography, clipboard hijack |
+| Container | 8 | Escape, privileged exec, image backdoor, resource abuse |
+| Lateral Movement | 6 | Service discovery, pod-to-pod pivot, ConfigMap theft |
+| IoT Protocol | 10 | Modbus write, OPC-UA injection, MQTT poisoning, DALI override |
+
+### Multi-stage campaigns (5)
+
+| ID | Name | Stages | Duration |
+|----|------|--------|----------|
+| M1 | APT IoT Infrastructure Takeover | 5 | ~5 min |
+| M2 | Healthcare Data Breach Chain | 4 | ~4 min |
+| M3 | Ransomware City-Wide Shutdown | 5 | ~6 min |
+| M4 | Supply-Chain Firmware Attack | 4 | ~5 min |
+| M5 | Insider Threat Escalation | 4 | ~3 min |
+
+### Backend changes
+
+- **`services/ids-api/src/api/demo.py`**: Added `GET /api/attacks/registry` (returns full 67+5 registry as JSON) and `POST /api/attacks/run` (background execution).
+- **`services/ids-api/static/js/api.js`**: Added `getAttackRegistry()` and `runAttackScenario()` API client methods.
+
+### Frontend changes (Attack Simulation tab)
+
+- **Dynamic registry loading**: Scenarios now fetched from backend on tab switch via `/api/attacks/registry` instead of hardcoded client-side array.
+- **Category filter chips**: 8 color-coded category buttons with counts (Network, Application, Auth, Data, Container, Lateral, IoT Protocol, Campaigns).
+- **Phase filter chips**: Phase 1 (20 core), Phase 2 (45 extended), Phase 3 (all 67).
+- **Campaign cards**: 5 multi-stage campaign cards with stage visualization, sequential execution, and inter-stage delays.
+- **IoT Fleet Scaling panel**: Per-service replica controls (1/3/5/10) and scale-all buttons, integrated with `GET/POST /api/iot/scale`.
+- **MITRE ATT&CK coverage table**: Sortable table showing all covered techniques with category badges.
+- **Enhanced injection log**: Rich box-drawing output with LLM analysis details (engine, severity, confidence, reasoning, recommendations).
+- **Stats row**: 5 stat cards (Scenarios, MITRE Techniques, Target Services, Runs, Categories).
+- **State**: Added `activePhase` to observable store.
+
+### Script improvements
+
+- **`scripts/demo-day.sh`**: Updated to use v3 pipeline with phase-based profiles (minimal→phase 1, standard→phase 2, full→phase 3).
+- **`scripts/scale-iot.sh`**: Added `notify_dashboard()` to notify the web dashboard after kubectl scale operations.
+- **`scripts/README.md`**: Added full v3 pipeline documentation with all CLI options and campaign descriptions.
+
+### Architecture decision
+
+Moved scenario definitions from client-side JavaScript to a Python registry module (`scenario_registry.py`) that serves as the single source of truth. This enables:
+- Backend API consumption (registry endpoint)
+- CLI consumption (attack_runner.py imports directly)
+- Frontend consumption (fetched via HTTP on tab switch)
+- JSON export for documentation/tooling
+
+---
+
+## [v2.6.5] P0 Safety + Governance Wiring — 2026-02-20
+
+### Summary
+
+Implemented the three highest-priority P0 production fixes: no-LLM safe mode, per-user analyst chat rate limiting, and automatic ThreatResponse CRD creation from IDS automated actions.
+
+### New features
+
+- Added no-LLM safe-mode fallback analysis with deterministic severity mapping and conservative recommendations.
+- Added per-user/session token-bucket limiter for `POST /api/analyst/chat`.
+- Added `K8sAutomation.create_threat_response(...)` and wired automated-action pipeline to emit `ThreatResponse` resources.
+
+### Safety improvements
+
+- Added `NO_LLM_SAFE_MODE_NOTIFY_ONLY` guard to block destructive actions while in degraded no-LLM mode.
+- Added audit events for safe-mode operation (`SAFE_MODE_NOTIFY_ONLY`) and chat throttling (`CHAT_RATE_LIMITED`).
+
+### Configuration
+
+- Added `NO_LLM_SAFE_MODE_ENABLED` (default: `true`).
+- Added `NO_LLM_SAFE_MODE_NOTIFY_ONLY` (default: `true`).
+- Added `ANALYST_CHAT_RATE_LIMIT_PER_MINUTE` (default: `30`).
+- Added `ANALYST_CHAT_RATE_LIMIT_BURST` (default: `10`).
+- Added `K8S_USE_THREATRESPONSE_CRD` (default: `true`).
+
+### Files changed
+
+- `services/ids-api/src/config.py`
+- `services/ids-api/src/api/_state.py`
+- `services/ids-api/src/api/alerts.py`
+- `services/ids-api/src/api/analyst.py`
+- `services/ids-api/src/k8s_automation.py`
+- `docs/FORCED_ARCHITECTURE_50Q.md`
+- `CHANGELOG.md`
+
+---
+
+## [v2.6.3] LLM Control Center Production Trust Pass — 2026-02-20
+
+### Summary
+
+Delivered a production-hardening pass for the LLM Control Center to eliminate operator confusion and make provider state/actioning trustworthy in real time.
+
+### New features
+
+- Added `GET /api/llm/providers` real-time provider matrix endpoint for card rendering and active/effective provider context.
+- Added `POST /api/llm/test/{provider}` for direct provider testing from UI controls.
+- Added `POST /api/llm/force/{provider}` path-style override endpoint for immediate routing control.
+- Added `GET /api/llm/metrics/24h` comparison payload schema for dashboard/provider benchmarking.
+
+### Improvements
+
+- LLM header health pill now uses healthy-or-high-success logic (`healthy` or `success_rate > 80%`) and renders as `LLM: X/5`.
+- Active provider card now shows context metadata (`p95` and success rate) instead of blank/`NONE` ambiguity.
+- Provider cards now include cooldown countdown text (`cooldown (Ns remaining)`), ETA-to-next-probe, per-card `PROBE NOW`, and clearer credit semantics.
+- Interactive console now supports **Test Provider** and **Test All** workflows with concise result lines (latency, tokens, cost).
+- Fallback chain visualization now uses state-colored nodes (healthy/cooldown/degraded) with cooldown pulse emphasis.
+- Added 30-second automatic live probe refresh cycle and live feed lines for probe/route events.
+
+### Fixes
+
+- Resolved backend/frontend mismatch where new control endpoint routes were absent from live pod image.
+- Refreshed static UI ConfigMap mount to ensure updated `index.html` is served at `/ui`.
+
+### Files changed
+
+- `services/ids-api/src/api/llm.py`
+- `services/ids-api/static/index.html`
+- `CHANGELOG.md`
+
+---
+
+## [v2.6.4] Forced Architecture Documentation (50Q) — 2026-02-20
+
+### Summary
+
+Added a code-grounded architecture reference that answers 50 operational questions across core pipeline, LLM routing, Kubernetes, dashboard UX, and security operations, with explicit improvement actions for every gap.
+
+### Documentation
+
+- Added [docs/FORCED_ARCHITECTURE_50Q.md](docs/FORCED_ARCHITECTURE_50Q.md):
+  - 50 direct Q&A items mapped to current implementation.
+  - Clear distinction between implemented behavior vs missing capability.
+  - Prioritized improvement backlog (P0-P3) for production hardening.
+
+### Notes
+
+- This pass is documentation-focused and intentionally does not change runtime logic.
+
+---
+
+## [v2.6.2] LLM Routing Intelligence, HITL Action Selector & Stability Hardening — 2026-02-20
+
+### Summary
+
+Completed the next implementation wave after SOC control rollout: accurate provider-usage tracking, normalized provider comparison APIs, chat Action-Selector with explicit HITL confirmation/approval flow, routing strategy controls (A/B and cost-optimized), predictive risk signals, and post-smoke-test runtime hardening for governance action execution.
+
+### New features
+
+- **Real token usage propagation (manager path)**:
+  - Provider responses now extract and propagate usage metadata where available (OpenAI/xAI/Kimi/custom, Anthropic, Gemini).
+  - Shared metrics recording now prefers provider-reported token counts and falls back to heuristic estimates only when usage is unavailable.
+- **Provider comparison and health APIs**:
+  - Added `GET /api/llm/providers/comparison` with normalized per-provider rows (health, calls, tokens, cost, latency, success).
+  - Added `GET /api/llm/providers/health-summary` for compact dashboard KPI cards.
+- **Chat Action-Selector + HITL controls**:
+  - Analyst chat now returns actionable suggestions (`action_selector`) and a trace identifier for audit correlation.
+  - Added `POST /api/analyst/action/submit` with explicit confirmation gate (`confirmation_required` when `confirm=false`).
+  - Added `POST /api/analyst/action/pending-decision` for approve/reject of pending governance actions.
+- **Routing strategy and predictive analysis**:
+  - Added runtime routing modes: `priority`, `cost_optimized`, `ab_test`, `severity_adaptive`.
+  - Added deterministic A/B bucketing with configurable split and providers.
+  - Added `GET/POST /api/llm/routing/strategy` and `GET /api/llm/predictive-risk`.
+
+### Improvements
+
+- **Audit correlation expanded**:
+  - Added correlated audit events for chat+HITL lifecycle (`CHAT_ANALYSIS`, `HITL_CONFIRMATION_REQUIRED`, `HITL_DECISION`, governance-linked decisions).
+  - Trace IDs now connect chat suggestion → governance queue → approval decision for operator forensics.
+- **LLM Control tab redesign**:
+  - Added provider comparison rendering from normalized endpoint payloads.
+  - Added routing strategy controls and predictive risk display directly in dashboard workflow.
+
+### Fixes
+
+- **Pending-decision runtime 500 during HITL approval**:
+  - Root cause: governance callback received async execution results that were not serializable in action history.
+  - Fix: added async-to-sync execution adapter in analyst action executor, running awaitables safely in a short-lived thread event loop with timeout/error handling.
+- **Provider comparison noise (`unknown` / `none`)**:
+  - Root cause: unresolved pseudo-engine labels were being recorded in stats on failed paths.
+  - Fix: filter non-provider pseudo-engines from exported provider metrics and comparison payloads.
+- **Cost display credibility**:
+  - Moved cost aggregation from per-call flat estimate to token-based estimate (`per-1k` model) using provider usage when available, with fallback token estimation.
+- **False red database status in Overview**:
+  - UI now treats `postgresql` as healthy and `memory-fallback` as warning (not error).
+- **LLM Engines + Diagnostics duplication**:
+  - Overview merged into a single provider diagnostics panel to reduce confusion.
+
+### Documentation
+
+- Added [docs/LLM_CONTROL_AND_TROUBLESHOOTING.md](docs/LLM_CONTROL_AND_TROUBLESHOOTING.md) covering:
+  - cooldown semantics,
+  - active/fallback provider behavior,
+  - probe/credits/cost interpretation,
+  - recovery runbook,
+  - scalability guidance.
+
+### Files changed
+
+- `services/ids-api/src/llm_providers/base.py`
+- `services/ids-api/src/llm_providers/providers.py`
+- `services/ids-api/src/llm_providers/manager.py`
+- `services/ids-api/src/api/_state.py`
+- `services/ids-api/src/api/llm.py`
+- `services/ids-api/src/api/analyst.py`
+- `services/ids-api/static/index.html`
+- `CHANGELOG.md`
+
+---
+
+## [v2.6.1] Enterprise SOC Control, Audit Traceability & IoT Risk Visibility — 2026-02-19
+
+### Summary
+
+Completed the enterprise SOC phase rollout across backend and dashboard: actionable LLM control replaced passive credits-only UX, end-to-end audit timeline APIs were added, IoT discovery/vulnerability visibility was introduced, and live feed/status semantics were hardened to reflect real system state.
+
+### New features
+
+- **LLM Control Center (backend + UI)**:
+  - Added `GET /api/llm/control/status?probe=true|false` for provider diagnostics, active/forced provider visibility, fallback chain, optional live probes, and credits.
+  - Added `POST /api/llm/control/force` to switch between auto-failover and forced-provider routing.
+  - Added `POST /api/llm/control/test` for interactive prompt testing against selected provider or auto router.
+  - Dashboard tab **LLM Control** now includes force/apply workflow, probe action, provider cards, and test output panel.
+- **SOC audit trail API**:
+  - Added `GET /api/audit/events`, `GET /api/audit/trace/{trace_id}`, and `GET /api/audit/export?format=json|csv`.
+  - Added in-memory audit ring buffer and filter helpers in shared state.
+  - Included new audit router in FastAPI startup.
+- **IoT runtime readiness and risk endpoints**:
+  - Added `GET /api/iot/discover` for dynamic pod workload discovery.
+  - Added `GET /api/iot/vulnerabilities` for lightweight severity-bucketed findings.
+  - Dashboard IoT tab now renders vulnerability summary and findings panel.
+
+### Improvements
+
+- **End-to-end pipeline instrumentation** in alert processing:
+  - Emits audit events for `ALERT_RECEIVED`, `DEDUP_CHECK`, `LLM_ANALYSIS_START`, `LLM_ANALYSIS_END`, `GOVERNANCE_DECISION`, `ACTION_EXECUTED`, and `ALERT_PROCESSED`.
+  - Added auth audit events for login success/failure.
+- **Truthful operational semantics in UI**:
+  - Top pills now reflect operational provider counts from control diagnostics and governance mode icons (`🛡️ assisted`, `⚡ autopilot`, `🔒 blocked`).
+  - Overview dedup metric now prioritizes `/api/deduplicator-stats` hit-rate.
+  - Attack simulation log wording explicitly reports LLM severity and concrete action results.
+- **Live feed robustness**:
+  - Added SSE fallback handling for `message` and `data` events.
+  - Added connected-idle indicator when no alert events arrive for a period.
+
+### Files changed
+
+- `services/ids-api/src/api/_state.py`
+- `services/ids-api/src/api/audit.py` (new)
+- `services/ids-api/src/api/alerts.py`
+- `services/ids-api/src/api/auth.py`
+- `services/ids-api/src/api/iot.py`
+- `services/ids-api/src/api/llm.py`
+- `services/ids-api/src/main.py`
+- `services/ids-api/static/index.html`
+
+---
+
+## [v2.6.0] Enhanced Dashboard & Credit Monitoring — 2026-02-19
+
+### Summary
+
+Introduced a comprehensive dashboard overhaul with real-time LLM credit monitoring and an interactive security analyst chat interface. Added backend support for multi-provider API credit checking and cost estimation.
+
+### New Features
+
+- **Enhanced Dashboard**: Complete frontend rewrite with glassmorphism UI, real-time stats, and integrated chat.
+- **Credit Management API**: New `/llm/credits` endpoints to track API usage and costs across OpenAI, Anthropic, xAI, Gemini, and Moonshot.
+- **Interactive Analyst**: Conversational interface with tool-calling capabilities for pod isolation and IP blocking.
+- **System Prompts**: updated `security_analyst_prompts.py` for context-aware threat analysis.
+
+---
+
 ## [v2.5.0] LLM Transparency, SOC Overhaul & Severity-Aware Dedup — 2025-07-17
 
 ### Summary

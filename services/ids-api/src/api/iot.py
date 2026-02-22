@@ -33,7 +33,9 @@ Endpoints:
     GET  /api/iot/events     – query recent IoT events
 """
 
+import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -51,6 +53,14 @@ from models.iot import IoTSensorData
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["iot"])
+
+# Avoid blocking the FastAPI event loop on slow/unreachable Kubernetes API calls.
+# The dashboard polls IoT endpoints frequently; if the in-cluster API is down,
+# synchronous kubernetes-client calls can stall *all* HTTP handling and trip
+# liveness/readiness probes.
+_IOT_PODS_CACHE_TTL_SECONDS = 5
+_iot_pods_cache: dict = {"ts": 0.0, "value": None}
+_iot_pods_cache_lock = asyncio.Lock()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # IOT SERVICE REGISTRY
@@ -385,37 +395,64 @@ async def get_iot_pods():
     """
     _, _, _, k8s_automation = _deps()
     pods = []
+
+    # Fast path: short TTL cache to avoid hammering the K8s API when the UI polls.
+    now = time.time()
+    cached = _iot_pods_cache.get("value")
+    if cached is not None and (now - float(_iot_pods_cache.get("ts", 0.0))) < _IOT_PODS_CACHE_TTL_SECONDS:
+        return cached
+
     if k8s_automation:
-        try:
-            pod_list = k8s_automation.core_v1.list_namespaced_pod(
-                namespace="smart-city", timeout_seconds=5
-            )
-            for p in pod_list.items:
-                name = p.metadata.name
-                # Match pod name against known IoT prefixes.
-                device_type = None
-                for prefix, dtype in _IOT_POD_PREFIXES:
-                    if name.startswith(prefix):
-                        device_type = dtype
-                        break
-                if not device_type:
-                    continue  # Not an IoT pod — skip.
-                phase = p.status.phase or "Unknown"
-                pod_ip = p.status.pod_ip or "-"
-                node = p.spec.node_name or "-"
-                ready = False
-                restarts = 0
-                if p.status.container_statuses:
-                    for cs in p.status.container_statuses:
-                        ready = ready or cs.ready
-                        restarts += cs.restart_count or 0
-                pods.append({
-                    "name": name, "type": device_type, "status": phase,
-                    "ready": ready, "ip": pod_ip, "node": node,
-                    "restarts": restarts, "namespace": "smart-city",
-                })
-        except Exception as e:
-            logger.warning(f"Could not list IoT pods: {e}")
+        async with _iot_pods_cache_lock:
+            # Re-check cache after acquiring the lock.
+            now = time.time()
+            cached = _iot_pods_cache.get("value")
+            if cached is not None and (now - float(_iot_pods_cache.get("ts", 0.0))) < _IOT_PODS_CACHE_TTL_SECONDS:
+                return cached
+
+            def _list_iot_pods_sync():
+                return k8s_automation.core_v1.list_namespaced_pod(
+                    namespace="smart-city",
+                    timeout_seconds=5,
+                    _request_timeout=(1, 2),
+                )
+
+            try:
+                # Run the synchronous Kubernetes client call off the event loop.
+                pod_list = await asyncio.wait_for(asyncio.to_thread(_list_iot_pods_sync), timeout=2.5)
+                for p in getattr(pod_list, "items", []) or []:
+                    name = p.metadata.name
+                    # Match pod name against known IoT prefixes.
+                    device_type = None
+                    for prefix, dtype in _IOT_POD_PREFIXES:
+                        if name.startswith(prefix):
+                            device_type = dtype
+                            break
+                    if not device_type:
+                        continue  # Not an IoT pod — skip.
+                    phase = p.status.phase or "Unknown"
+                    pod_ip = p.status.pod_ip or "-"
+                    node = p.spec.node_name or "-"
+                    ready = False
+                    restarts = 0
+                    if p.status.container_statuses:
+                        for cs in p.status.container_statuses:
+                            ready = ready or cs.ready
+                            restarts += cs.restart_count or 0
+                    pods.append({
+                        "name": name,
+                        "type": device_type,
+                        "status": phase,
+                        "ready": ready,
+                        "ip": pod_ip,
+                        "node": node,
+                        "restarts": restarts,
+                        "namespace": "smart-city",
+                    })
+            except asyncio.TimeoutError:
+                logger.warning("Could not list IoT pods: Kubernetes API timeout")
+            except Exception as e:
+                logger.warning(f"Could not list IoT pods: {e}")
 
     # Count pods by device type for the summary.
     type_counts = {}
@@ -423,12 +460,17 @@ async def get_iot_pods():
         t = pod["type"]
         type_counts[t] = type_counts.get(t, 0) + 1
 
-    return {
+    result = {
         "total": len(pods),
         "pods": pods,
         "types": type_counts,
         "running": sum(1 for p in pods if p["status"] == "Running"),
     }
+
+    # Cache even empty results briefly to avoid tight retry loops when K8s is down.
+    _iot_pods_cache["ts"] = time.time()
+    _iot_pods_cache["value"] = result
+    return result
 
 
 @router.get("/api/iot/events")
@@ -447,3 +489,358 @@ async def get_iot_events(limit: int = 50, device_id: Optional[str] = None):
     if device_id:
         filtered = [e for e in iot_events if e["device_id"] == device_id]
     return {"total": len(filtered), "showing": min(limit, len(filtered)), "events": filtered[-limit:]}
+
+
+@router.get("/api/iot/discover")
+async def discover_iot_workloads():
+    """Discover IoT workloads dynamically from cluster pods and emit SOC-friendly summary."""
+    pods_info = await get_iot_pods()
+    discovered = []
+    for pod in pods_info.get("pods", []):
+        restarts = int(pod.get("restarts") or 0)
+        status = pod.get("status", "Unknown")
+        risk_flags = []
+        if status != "Running":
+            risk_flags.append("pod_not_running")
+        if restarts >= 3:
+            risk_flags.append("high_restart_rate")
+        discovered.append(
+            {
+                "device_id": pod.get("name"),
+                "device_type": pod.get("type"),
+                "namespace": pod.get("namespace", "smart-city"),
+                "node": pod.get("node"),
+                "pod_ip": pod.get("ip"),
+                "status": status,
+                "restarts": restarts,
+                "risk_flags": risk_flags,
+            }
+        )
+
+    return {
+        "total": len(discovered),
+        "running": sum(1 for d in discovered if d.get("status") == "Running"),
+        "discovered_at": datetime.now().isoformat(),
+        "devices": discovered,
+    }
+
+
+@router.get("/api/iot/vulnerabilities")
+async def iot_vulnerability_assessment():
+    """Comprehensive vulnerability/risk assessment for discovered IoT workloads.
+    
+    Performs multi-layer security analysis:
+    1. Infrastructure health (pod status, restarts)
+    2. Network exposure (service types, ports)
+    3. Protocol security (known insecure protocols)
+    4. CVE-based risk scoring (protocol-based)
+    5. Device posture (missing security features)
+    6. Compliance mapping (OWASP IoT Top 10)
+    """
+    data = await discover_iot_workloads()
+    findings = []
+    severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    
+    # Risk aggregation for summary
+    risk_summary = {
+        "infrastructure_issues": 0,
+        "security_exposures": 0,
+        "protocol_vulnerabilities": 0,
+        "compliance_gaps": 0,
+    }
+    
+    # Known vulnerable protocols and their CVE mappings
+    PROTOCOL_RISKS = {
+        "Modbus TCP": {
+            "severity": "high",
+            "cwe": "CWE-319",
+            "description": "Modbus TCP lacks built-in encryption or authentication",
+            "mitigation": "Use Modbus TLS or VPN tunneling",
+            "cve_refs": ["CVE-2019-6800", "CVE-2021-22681"],
+        },
+        "OPC UA": {
+            "severity": "medium",
+            "cwe": "CWE-306",
+            "description": "OPC UA security mode may be disabled or misconfigured",
+            "mitigation": "Enable Sign&Encrypt security mode",
+            "cve_refs": ["CVE-2018-12085"],
+        },
+        "MQTT": {
+            "severity": "medium", 
+            "cwe": "CWE-287",
+            "description": "MQTT may lack authentication on broker connections",
+            "mitigation": "Enable TLS and client certificate authentication",
+            "cve_refs": ["CVE-2018-17614", "CVE-2020-13849"],
+        },
+        "CoAP": {
+            "severity": "medium",
+            "cwe": "CWE-319",
+            "description": "CoAP may transmit data unencrypted",
+            "mitigation": "Use CoAPs (DTLS) for all communications",
+            "cve_refs": ["CVE-2019-9750"],
+        },
+        "DALI-2": {
+            "severity": "low",
+            "cwe": "CWE-287",
+            "description": "DALI-2 has limited security controls",
+            "mitigation": "Implement gateway-level access control",
+            "cve_refs": [],
+        },
+        "ONVIF Profile S": {
+            "severity": "high",
+            "cwe": "CWE-287",
+            "description": "IP cameras often use default credentials or unencrypted streams",
+            "mitigation": "Change default passwords, enable RTSP over TLS",
+            "cve_refs": ["CVE-2018-19937", "CVE-2021-33044"],
+        },
+    }
+    
+    # Get telemetry data for security analysis
+    telemetry = {}
+    try:
+        telemetry = await iot_telemetry()
+    except Exception as e:
+        logger.warning(f"Could not fetch telemetry for vulnerability assessment: {e}")
+
+    for device in data.get("devices", []):
+        device_id = device.get("device_id")
+        device_type = device.get("device_type", "unknown")
+        risk_flags = device.get("risk_flags", [])
+        
+        # Find matching service in telemetry
+        service_id = None
+        for svc_id, svc in _IOT_SERVICES.items():
+            if svc["label"] in device_type or device_id.startswith(svc_id.replace("-service", "")):
+                service_id = svc_id
+                break
+        
+        service_protocol = ""
+        if service_id and service_id in _IOT_SERVICES:
+            service_protocol = _IOT_SERVICES[service_id].get("protocol", "")
+
+        # 1. Infrastructure Health Checks
+        if "pod_not_running" in risk_flags:
+            findings.append({
+                "device_id": device_id,
+                "category": "infrastructure",
+                "severity": "high",
+                "title": "IoT workload unavailable",
+                "description": "Pod is not in Running state; service may be impaired.",
+                "recommendation": "Inspect pod events/logs and recover workload.",
+                "owasp_iot": "I1: Weak, Guessable, or Hardcoded Passwords",
+            })
+            severity_counts["high"] += 1
+            risk_summary["infrastructure_issues"] += 1
+
+        if "high_restart_rate" in risk_flags:
+            findings.append({
+                "device_id": device_id,
+                "category": "infrastructure",
+                "severity": "medium",
+                "title": "Frequent container restarts",
+                "description": "Repeated restarts can indicate crash loops, resource exhaustion, or attacks (OOM exploitation).",
+                "recommendation": "Review deployment health probes, resource limits, and container logs.",
+                "owasp_iot": "I9: Insecure Update Mechanism",
+            })
+            severity_counts["medium"] += 1
+            risk_summary["infrastructure_issues"] += 1
+
+        # 2. Protocol Security Analysis
+        if service_protocol:
+            for protocol, risk in PROTOCOL_RISKS.items():
+                if protocol in service_protocol:
+                    findings.append({
+                        "device_id": device_id,
+                        "category": "protocol",
+                        "severity": risk["severity"],
+                        "title": f"{protocol} security considerations",
+                        "description": f"{risk['description']} (CWE: {risk['cwe']})",
+                        "recommendation": risk["mitigation"],
+                        "cve_references": risk["cve_refs"],
+                        "cwe": risk["cwe"],
+                        "owasp_iot": "I2: Insecure Network Services",
+                    })
+                    severity_counts[risk["severity"]] += 1
+                    risk_summary["protocol_vulnerabilities"] += 1
+
+        # 3. Device-Specific Security Checks
+        device_security_checks = {
+            "ONVIF Camera": [
+                ("high", "Default credentials risk", 
+                 "IP cameras frequently ship with default passwords that are not changed",
+                 "Enforce password policy and audit camera configurations", "I1"),
+                ("medium", "Unencrypted video stream",
+                 "RTSP streams may be unencrypted, allowing eavesdropping",
+                 "Enable SRTP or VPN tunneling for video streams", "I5"),
+            ],
+            "FHIR R4 Gateway": [
+                ("high", "PHI exposure risk",
+                 "Healthcare data requires HIPAA-compliant encryption and access controls",
+                 "Verify TLS 1.3, audit logging, and access controls", "I5"),
+            ],
+            "MQTT/CoAP Sensor": [
+                ("medium", "Broker authentication",
+                 "MQTT sensors may connect without client certificates",
+                 "Enable mutual TLS authentication for all broker connections", "I3"),
+                ("medium", "Topic enumeration",
+                 "Without proper ACLs, topics can be enumerated by attackers",
+                 "Implement strict topic ACLs and monitor for unauthorized subscriptions", "I2"),
+            ],
+            "Modbus/OPC UA Env": [
+                ("high", "Critical infrastructure exposure",
+                 "Industrial protocols may bridge IT/OT networks",
+                 "Implement network segmentation and ICS-specific IDS", "I4"),
+                ("high", "No encryption in transit",
+                 "Modbus TCP is plaintext and can be manipulated",
+                 "Deploy Modbus TLS or application-layer encryption", "I5"),
+            ],
+            "DALI-2 Luminaire": [
+                ("low", "Limited audit logging",
+                 "DALI-2 devices may not log security events",
+                 "Implement gateway-level logging for all control commands", "I8"),
+            ],
+        }
+        
+        for check_device_type, checks in device_security_checks.items():
+            if check_device_type in device_type:
+                for severity, title, description, recommendation, owasp_id in checks:
+                    findings.append({
+                        "device_id": device_id,
+                        "category": "security_posture",
+                        "severity": severity,
+                        "title": title,
+                        "description": description,
+                        "recommendation": recommendation,
+                        "owasp_iot": f"I{owasp_id}: {get_owasp_description(owasp_id)}",
+                    })
+                    severity_counts[severity] += 1
+                    risk_summary["security_exposures"] += 1
+
+        # 4. Telemetry-based Dynamic Risk Assessment
+        if service_id and service_id in telemetry:
+            svc_data = telemetry[service_id]
+            if not svc_data.get("online", False):
+                findings.append({
+                    "device_id": device_id,
+                    "category": "availability",
+                    "severity": "high",
+                    "title": "Service not responding to health checks",
+                    "description": "Device is not responding to telemetry queries, indicating potential compromise or failure.",
+                    "recommendation": "Investigate network connectivity and service health immediately.",
+                    "owasp_iot": "I9: Insecure Update Mechanism",
+                })
+                severity_counts["high"] += 1
+                risk_summary["infrastructure_issues"] += 1
+
+        # 5. Compliance/Configuration Checks
+        if not risk_flags and device.get("status") == "Running":
+            # Device is healthy but still check for compliance gaps
+            severity_counts["low"] += 1
+
+    # Calculate overall risk score
+    total_weight = (
+        severity_counts["critical"] * 10 +
+        severity_counts["high"] * 5 +
+        severity_counts["medium"] * 2 +
+        severity_counts["low"] * 0.5
+    )
+    max_possible = len(data.get("devices", [])) * 10
+    risk_score = min(100, int((total_weight / max(max_possible, 1)) * 100))
+    
+    # Risk level determination
+    if risk_score >= 70:
+        risk_level = "critical"
+    elif risk_score >= 40:
+        risk_level = "high"
+    elif risk_score >= 20:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
+
+    return {
+        "assessed_at": datetime.now().isoformat(),
+        "total_devices": data.get("total", 0),
+        "running_devices": data.get("running", 0),
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "severity_counts": severity_counts,
+        "risk_summary": risk_summary,
+        "findings": findings,
+        "recommendations_priority": generate_priority_recommendations(findings),
+        "compliance_frameworks": {
+            "owasp_iot_top_10": True,
+            "nist_cybersecurity_framework": "Partial",
+            "iso_27001": "Not Assessed",
+        },
+    }
+
+
+def get_owasp_description(id_num: str) -> str:
+    """Get OWASP IoT Top 10 description"""
+    descriptions = {
+        "1": "Weak, Guessable, or Hardcoded Passwords",
+        "2": "Insecure Network Services",
+        "3": "Insecure Ecosystem Interfaces",
+        "4": "Lack of Secure Update Mechanism",
+        "5": "Use of Insecure or Outdated Components",
+        "6": "Insufficient Privacy Protection",
+        "7": "Insecure Data Transfer and Storage",
+        "8": "Lack of Device Management",
+        "9": "Insecure Default Settings",
+        "10": "Lack of Physical Hardening",
+    }
+    return descriptions.get(id_num, "Unknown")
+
+
+def generate_priority_recommendations(findings: List[Dict]) -> List[Dict]:
+    """Generate prioritized remediation recommendations"""
+    if not findings:
+        return [{"priority": 1, "action": "Continue monitoring - no critical issues detected"}]
+    
+    # Group by severity and category
+    critical_infrastructure = [f for f in findings if f["severity"] == "critical" and f.get("category") == "infrastructure"]
+    critical_security = [f for f in findings if f["severity"] == "critical" and f.get("category") != "infrastructure"]
+    high_findings = [f for f in findings if f["severity"] == "high"]
+    protocol_issues = [f for f in findings if f.get("category") == "protocol"]
+    
+    recommendations = []
+    priority = 1
+    
+    if critical_infrastructure:
+        recommendations.append({
+            "priority": priority,
+            "action": "IMMEDIATE: Restore critical infrastructure services",
+            "affected_devices": list(set(f["device_id"] for f in critical_infrastructure)),
+            "count": len(critical_infrastructure),
+        })
+        priority += 1
+    
+    if critical_security:
+        recommendations.append({
+            "priority": priority,
+            "action": "URGENT: Address critical security exposures",
+            "affected_devices": list(set(f["device_id"] for f in critical_security)),
+            "count": len(critical_security),
+        })
+        priority += 1
+    
+    if protocol_issues:
+        high_protocol = [p for p in protocol_issues if p["severity"] in ("high", "critical")]
+        if high_protocol:
+            recommendations.append({
+                "priority": priority,
+                "action": "HIGH: Implement protocol encryption and authentication",
+                "protocols": list(set(p["title"].split(" ")[0] for p in high_protocol)),
+                "count": len(high_protocol),
+            })
+            priority += 1
+    
+    if high_findings:
+        recommendations.append({
+            "priority": priority,
+            "action": "Address high-severity findings",
+            "count": len(high_findings),
+        })
+        priority += 1
+    
+    return recommendations

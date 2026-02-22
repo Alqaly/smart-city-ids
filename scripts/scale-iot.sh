@@ -53,6 +53,15 @@ scale_service() {
     kubectl scale deployment "$svc" -n "$NAMESPACE" --replicas="$replicas"
 }
 
+# Notify dashboard API so the web UI reflects the change
+notify_dashboard() {
+    local api_url="${IDS_API_URL:-http://localhost:30800}"
+    curl -s -X POST "${api_url}/api/iot/scale" \
+        -H "Content-Type: application/json" \
+        -d '{"replicas": '"${1:-1}"'}' \
+        >/dev/null 2>&1 || true
+}
+
 # ── Main ──
 if [[ $# -eq 0 ]]; then
     show_status
@@ -111,3 +120,4 @@ esac
 echo ""
 sleep 2
 show_status
+notify_dashboard "${ARG1:-1}"

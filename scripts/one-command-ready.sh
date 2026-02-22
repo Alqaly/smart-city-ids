@@ -1,8 +1,15 @@
 #!/bin/bash
 # =============================================================================
 # Smart City IDS - One Command Ready Script
-# Bootstraps, validates, seeds demo data, and prints monitoring endpoints.
-# Usage: bash scripts/one-command-ready.sh [--monitor] [--skip-seed]
+# Bootstraps and validates the full stack, then prints monitoring endpoints.
+#
+# IMPORTANT:
+# - IoT emulation pods are OPTIONAL and are NOT deployed by default.
+# - Synthetic seed events (posting to /api/iot/sensor) are OPTIONAL and are NOT
+#   sent by default.
+#
+# Usage:
+#   bash scripts/one-command-ready.sh [--monitor] [--with-iot-emulation] [--allow-synthetic-seed]
 # =============================================================================
 
 set -euo pipefail
@@ -16,13 +23,17 @@ init_script "$0" "Smart City IDS One-Command Ready"
 MONITOR=0
 SKIP_SEED=0
 NO_PORT_FORWARD=0
+WITH_IOT_EMULATION=0
+ALLOW_SYNTHETIC_SEED=0
 while [[ $# -gt 0 ]]; do
     case $1 in
         --monitor) MONITOR=1; shift ;;
         --skip-seed) SKIP_SEED=1; shift ;;
+        --with-iot-emulation) WITH_IOT_EMULATION=1; shift ;;
+        --allow-synthetic-seed) ALLOW_SYNTHETIC_SEED=1; shift ;;
         --no-port-forward) NO_PORT_FORWARD=1; shift ;;
         --help)
-            print_help "one-command-ready.sh [--monitor] [--skip-seed] [--no-port-forward]"
+            print_help "one-command-ready.sh [--monitor] [--with-iot-emulation] [--allow-synthetic-seed] [--skip-seed] [--no-port-forward]"
             exit 0
             ;;
         *) die "Unknown option: $1" ;;
@@ -100,7 +111,7 @@ upsert_ids_secret_from_env() {
     fi
 
     kubectl create secret generic ids-secrets -n smart-city "${secret_args[@]}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        --dry-run=client -o yaml | kubectl apply --validate=false -f - >/dev/null
     log_info "Updated ids-secrets with available LLM keys"
     kubectl rollout restart deployment/ids-api -n smart-city >/dev/null || true
 }
@@ -148,10 +159,10 @@ sync_ids_code_configmaps() {
     kubectl create configmap ids-app-code -n smart-city \
         --from-file="$PROJECT_ROOT/services/ids-api/src" \
         --from-file="$PROJECT_ROOT/services/ids-api/src/llm_providers" \
-        --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - >/dev/null
+        --dry-run=client -o yaml | kubectl apply --validate=false --server-side --force-conflicts -f - >/dev/null
     kubectl create configmap ids-app-static -n smart-city \
         --from-file="$PROJECT_ROOT/services/ids-api/static" \
-        --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - >/dev/null
+        --dry-run=client -o yaml | kubectl apply --validate=false --server-side --force-conflicts -f - >/dev/null
     kubectl rollout restart deployment/ids-api -n smart-city >/dev/null || true
     log_info "Synced ids-app-code/ids-app-static and restarted ids-api"
 }
@@ -171,8 +182,34 @@ apply_iot_manifest() {
     fi
 }
 
+remove_iot_emulation_if_present() {
+    # Best-effort cleanup of emulator workloads so "no emulation" runs are truly no-emulation.
+    # Safe to call repeatedly.
+    local ns="smart-city"
+
+    # Common labels
+    kubectl -n "$ns" delete deploy,svc -l app=iot-device --ignore-not-found >/dev/null 2>&1 || true
+    kubectl -n "$ns" delete deploy,svc -l app=iot-mqtt --ignore-not-found >/dev/null 2>&1 || true
+
+    # Known deployment/service names across older/newer manifests
+    local names=(
+        iot-device-high iot-device-medium iot-device-burst
+        iot-devices-enhanced
+        iot-mqtt
+        iot-simulator-high iot-simulator-medium iot-simulator-burst
+        iot-device iot-device-metrics
+    )
+
+    local n
+    for n in "${names[@]}"; do
+        kubectl -n "$ns" delete deploy "$n" --ignore-not-found >/dev/null 2>&1 || true
+        kubectl -n "$ns" delete svc "$n" --ignore-not-found >/dev/null 2>&1 || true
+    done
+}
+
 seed_demo_data_if_needed() {
     [[ $SKIP_SEED -eq 1 ]] && return 0
+    [[ $ALLOW_SYNTHETIC_SEED -eq 1 ]] || return 0
     local exec_target
     exec_target="$(kubectl get pods -n smart-city -l app=ids-api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
     [[ -n "$exec_target" ]] || return 0
@@ -190,7 +227,7 @@ seed_demo_data_if_needed() {
     suricata_seen="$(kubectl exec -n smart-city "$exec_target" -- sh -lc "curl -s localhost:8000/metrics | awk '/^smartcity_ids_alerts_received_total\\{/ && /source=\"suricata\"/ {sum+=\$NF} END{print sum+0}'" 2>/dev/null || echo "0")"
     if [[ "${suricata_seen%.*}" -eq 0 ]]; then
         log_warn "Suricata alert metric is 0; injecting one Suricata-format internal alert for pipeline validation"
-        kubectl exec -n smart-city "$exec_target" -- sh -lc "curl -s -X POST localhost:8000/api/alerts/internal -H 'Content-Type: application/json' -d '{\"output\":\"Suricata Network Alert: Demo validation\",\"priority\":\"Warning\",\"rule\":\"ET DEMO SURICATA\",\"time\":\"2026-02-11T12:00:00Z\",\"output_fields\":{\"container.name\":\"suricata\",\"event_type\":\"alert\",\"src_ip\":\"10.0.0.2\",\"dest_ip\":\"10.0.0.3\"}}' >/dev/null" || true
+        echo "Skipping synthetic alert injection (live-only demo)." || true
     fi
 }
 
@@ -291,7 +328,15 @@ apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/grafana-deployment.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/suricata-fixed.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/suricata-forwarder-deployment.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/falco-forwarder.yaml"
-apply_iot_manifest
+
+if [[ $WITH_IOT_EMULATION -eq 1 ]]; then
+    log_info "IoT emulation enabled: applying iot-simulator manifests"
+    apply_iot_manifest
+else
+    log_warn "IoT emulation disabled (default): no iot-simulator pods will be deployed"
+    remove_iot_emulation_if_present
+fi
+
 sync_ids_code_configmaps
 upsert_ids_secret_from_env
 
@@ -302,10 +347,15 @@ kubectl wait --for=condition=ready pod -n monitoring -l app=suricata-forwarder -
 kubectl wait --for=condition=ready pod -n monitoring -l app=grafana --timeout=180s >/dev/null || true
 kubectl wait --for=condition=ready pod -n monitoring -l app=prometheus --timeout=180s >/dev/null || true
 
+if [[ $ALLOW_SYNTHETIC_SEED -eq 1 ]]; then
+    log_warn "Synthetic seed enabled: will post minimal /api/iot/sensor heartbeats if metrics show 0 devices"
+else
+    log_info "Synthetic seed disabled (default)"
+fi
 seed_demo_data_if_needed
 
 log_section "Phase 4 - Readiness Checks"
-bash "$SCRIPT_DIR/check-system.sh" || true
+bash "$SCRIPT_DIR/check-setup.sh" || true
 bash "$SCRIPT_DIR/demo-readiness.sh" --quick || true
 verify_api_key_consistency
 
@@ -318,7 +368,7 @@ if [[ $NO_PORT_FORWARD -eq 0 ]]; then
 fi
 
 if [[ $MONITOR -eq 1 ]]; then
-    bash "$SCRIPT_DIR/check-system.sh" --watch
+    bash "$SCRIPT_DIR/tail-pipeline-pods.sh"
 fi
 
 log_info "One-command ready flow complete"

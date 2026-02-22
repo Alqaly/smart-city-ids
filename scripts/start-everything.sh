@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
-# Smart City IDS - K3s Startup & Service Deployment
-# Professional-grade deployment script for GitHub & Conference
+# Smart City IDS - K3s Startup (SMART VERSION)
+# Only restarts K3s if needed. Shows clear status.
 # =============================================================================
 
 set -euo pipefail
@@ -9,439 +9,265 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Load LLM library
+source "$SCRIPT_DIR/lib/llm-control.sh"
+
 # Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-log_info() { echo -e "${GREEN}[✓]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-log_error() { echo -e "${RED}[✗]${NC} $1"; }
-log_section() { echo ""; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; echo -e "${BLUE}$1${NC}"; echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"; }
-
-INVOKING_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "$USER")}"
-INVOKING_HOME="$(getent passwd "$INVOKING_USER" | cut -d: -f6)"
-if [[ -z "$INVOKING_HOME" ]]; then
-    INVOKING_HOME="/home/$INVOKING_USER"
-fi
-USER_KUBECONFIG="${INVOKING_HOME}/.kube/config"
-
-# =============================================================================
-# KUBECONFIG Setup (Permanent)
-# =============================================================================
-export KUBECONFIG="${USER_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-
-# Make KUBECONFIG permanent in user's profile
-setup_kubeconfig_permanent() {
-    for profile in "$INVOKING_HOME/.bashrc" "$INVOKING_HOME/.zshrc" "$INVOKING_HOME/.profile"; do
-        if [ -f "$profile" ]; then
-            sed -i '/export KUBECONFIG=\/etc\/rancher\/k3s\/k3s.yaml/d' "$profile" || true
-            if ! grep -q "export KUBECONFIG=$USER_KUBECONFIG" "$profile"; then
-                echo "export KUBECONFIG=$USER_KUBECONFIG" >> "$profile"
-            fi
-        fi
-    done
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+log_ok() { echo -e "${GREEN}✓${NC} $1"; }
+log_warn() { echo -e "${YELLOW}!${NC} $1"; }
+log_err() { echo -e "${RED}✗${NC} $1"; }
+log_info() { echo -e "  $1"; }
+section() {
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}$1${RESET}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-sync_user_kubeconfig() {
-    mkdir -p "$(dirname "$USER_KUBECONFIG")"
-    cp /etc/rancher/k3s/k3s.yaml "$USER_KUBECONFIG"
-    chown "$INVOKING_USER:$INVOKING_USER" "$USER_KUBECONFIG" 2>/dev/null || true
-    chmod 600 "$USER_KUBECONFIG" 2>/dev/null || true
-    export KUBECONFIG="$USER_KUBECONFIG"
-    log_info "User kubeconfig synced: $USER_KUBECONFIG"
-}
-
-# Ensure we're running as root
+# Check if root
 if [[ $EUID -ne 0 ]]; then
-    log_warn "This script requires root privileges. Re-invoking with sudo..."
+    echo "This script requires root. Re-invoking with sudo..."
     exec sudo "$0" "$@"
 fi
 
 cd "$PROJECT_ROOT"
-setup_kubeconfig_permanent
 
-log_section "🚀 Smart City IDS - Complete System Deployment"
-
-# =============================================================================
-# Phase 1: Verify K3s Installation
-# =============================================================================
-log_section "PHASE 1: K3s Installation & Setup"
-
-if ! command -v k3s &> /dev/null; then
-    log_warn "K3s not found. Installing..."
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v1.33.5+k3s1" sh -s - \
-        --write-kubeconfig-mode 644 \
-        --disable traefik 2>&1 | grep -E "(Installing|Installed)" || true
-    log_info "K3s installed successfully"
-else
-    log_info "K3s is installed"
-fi
+section "Smart City IDS - System Startup"
 
 # =============================================================================
-# Phase 2: Clean Shutdown of Existing K3s
+# Phase 1: Check K3s Status (Smart)
 # =============================================================================
-log_section "PHASE 2: Cleanup (Stopping Previous K3s)"
+section "Phase 1: K3s Status Check"
 
-# Try systemctl first
-if systemctl list-unit-files 2>/dev/null | grep -q "k3s.service"; then
-    log_info "Stopping K3s service via systemctl..."
-    systemctl stop k3s 2>/dev/null || true
-    sleep 2
-fi
+NEEDS_RESTART=false
+K3S_RUNNING=false
 
-# Kill any remaining K3s processes
-if pgrep -f "k3s server" > /dev/null; then
-    log_info "Killing remaining K3s processes..."
-    pkill -15 -f "k3s server" || true
-    sleep 3
-    pkill -9 -f "k3s server" 2>/dev/null || true
-fi
-
-log_info "Old K3s processes cleaned up"
-
-# =============================================================================
-# Phase 3: Start Fresh K3s Cluster
-# =============================================================================
-log_section "PHASE 3: Starting K3s Cluster"
-
-export KUBECONFIG="${USER_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
-
-# Verify port 6443 is free
-if lsof -Pi :6443 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    log_error "Port 6443 already in use!"
-    exit 1
-fi
-
-# Start K3s in background
-log_info "Starting K3s server..."
-k3s server \
-    --write-kubeconfig-mode=644 \
-    --write-kubeconfig=/etc/rancher/k3s/k3s.yaml \
-    --disable=traefik \
-    --disable=servicelb \
-    > /tmp/k3s.log 2>&1 &
-
-K3S_PID=$!
-log_info "K3s PID: $K3S_PID"
-
-# Wait for K3s to be ready
-log_info "Waiting for K3s cluster to become ready..."
-RETRY=0
-MAX_RETRIES=60
-
-while [ $RETRY -lt $MAX_RETRIES ]; do
+if pgrep -f "k3s server" > /dev/null 2>&1; then
+    log_ok "K3s process found"
+    
+    # Test if cluster is responsive
+    export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
     if kubectl cluster-info &>/dev/null 2>&1; then
-        log_info "K3s cluster is ready!"
-        break
+        log_ok "K3s cluster is responsive"
+        K3S_RUNNING=true
+        
+        # Check if all namespaces exist
+        MISSING=0
+        for ns in smart-city monitoring falco-system; do
+            if kubectl get ns "$ns" &>/dev/null 2>&1; then
+                log_ok "Namespace '$ns' exists"
+            else
+                log_warn "Namespace '$ns' missing"
+                ((MISSING++))
+            fi
+        done
+        
+        if [[ $MISSING -eq 0 ]]; then
+            log_ok "All required namespaces present"
+        else
+            log_warn "Some namespaces missing - will create them"
+        fi
+    else
+        log_warn "K3s process exists but not responsive - will restart"
+        NEEDS_RESTART=true
     fi
-    RETRY=$((RETRY + 1))
-    echo -ne "\r  ⏳ Attempt $RETRY/$MAX_RETRIES..."
-    sleep 2
+else
+    log_info "K3s not running - will start fresh"
+    NEEDS_RESTART=true
+fi
+
+# =============================================================================
+# Phase 2: Start/Use K3s
+# =============================================================================
+section "Phase 2: K3s Cluster"
+
+export KUBECONFIG="/etc/rancher/k3s/k3s.yaml"
+
+if [[ "$K3S_RUNNING" == "true" && "$NEEDS_RESTART" == "false" ]]; then
+    log_ok "Using existing K3s cluster (no restart needed)"
+    log_info "To force restart: sudo systemctl stop k3s && sudo $0"
+else
+    # Stop any existing K3s
+    if pgrep -f "k3s server" > /dev/null 2>&1; then
+        log_info "Stopping existing K3s..."
+        systemctl stop k3s 2>/dev/null || true
+        pkill -f "k3s server" 2>/dev/null || true
+        sleep 3
+    fi
+    
+    # Check port
+    if lsof -Pi :6443 -sTCP:LISTEN -t >/dev/null 2>&1; then
+        log_err "Port 6443 already in use!"
+        exit 1
+    fi
+    
+    # Start K3s
+    log_info "Starting K3s server..."
+    k3s server \
+        --write-kubeconfig-mode=644 \
+        --write-kubeconfig=/etc/rancher/k3s/k3s.yaml \
+        --disable=traefik \
+        --disable=servicelb \
+        > /tmp/k3s.log 2>&1 &
+    
+    # Wait for ready
+    log_info "Waiting for K3s to be ready..."
+    for i in {1..60}; do
+        if kubectl cluster-info &>/dev/null 2>&1; then
+            log_ok "K3s is ready!"
+            break
+        fi
+        echo -ne "\r  Attempt $i/60..."
+        sleep 2
+    done
+    
+    if ! kubectl cluster-info &>/dev/null 2>&1; then
+        log_err "K3s failed to start"
+        tail -20 /tmp/k3s.log
+        exit 1
+    fi
+fi
+
+# Copy kubeconfig for user
+mkdir -p ~/.kube
+cp /etc/rancher/k3s/k3s.yaml ~/.kube/config 2>/dev/null || true
+chmod 600 ~/.kube/config 2>/dev/null || true
+
+log_ok "K3s ready: $(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
+
+# =============================================================================
+# Phase 3: LLM Configuration Check
+# =============================================================================
+section "Phase 3: LLM Configuration"
+
+# Load .env
+if [[ -f "$PROJECT_ROOT/.env" ]]; then
+    set -a
+    source "$PROJECT_ROOT/.env"
+    set +a
+fi
+
+# Check API keys
+CONFIGURED=0
+for provider in xai anthropic openai gemini kimi; do
+    var_name="${provider^^}_API_KEY"
+    if [[ -n "${!var_name:-}" ]]; then
+        log_ok "${LLM_NAMES[$provider]:-$provider}: API key configured"
+        ((CONFIGURED++))
+    else
+        log_info "${LLM_NAMES[$provider]:-$provider}: No API key"
+    fi
 done
 
-if [ $RETRY -ge $MAX_RETRIES ]; then
-    log_error "K3s failed to start within ${MAX_RETRIES}s"
-    log_error "K3s log output:"
-    tail -30 /tmp/k3s.log
-    exit 1
+if [[ $CONFIGURED -eq 0 ]]; then
+    log_warn "No LLM providers configured!"
+    log_info "Set at least one API key in .env file:"
+    log_info "  XAI_API_KEY=your-key"
+    log_info "  OPENAI_API_KEY=your-key"
+else
+    log_ok "$CONFIGURED provider(s) configured"
 fi
 
-echo ""
-log_info "K3s cluster status:"
-kubectl get nodes 2>/dev/null | tail -1
-sync_user_kubeconfig
+log_info "Priority: ${CYAN}${LLM_PRIORITY:-kimi,xai,anthropic,openai,gemini}${NC}"
 
 # =============================================================================
-# Phase 4: Deploy Smart City Namespaces & Services
+# Phase 4: Deploy Services
 # =============================================================================
-log_section "PHASE 4: Deploying Kubernetes Manifests"
+section "Phase 4: Deploying Services"
 
-# Create namespaces (idempotent — skips if already exist)
 log_info "Creating namespaces..."
 for ns in smart-city monitoring falco-system; do
-    if kubectl get namespace "$ns" &>/dev/null 2>&1; then
-        log_info "Namespace $ns already exists — skipping"
-    else
-        kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
-        log_info "Created namespace: $ns"
+    kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+done
+
+log_info "Applying manifests..."
+MANIFESTS=(
+    "k8s-manifests/postgres-deployment.yaml"
+    "k8s-manifests/mqtt-broker.yaml"
+    "k8s-manifests/ids-api-FINAL.yaml"
+    "k8s-manifests/services-no-build.yaml"
+    "k8s-manifests/prometheus-deployment.yaml"
+    "k8s-manifests/grafana-deployment.yaml"
+)
+
+for m in "${MANIFESTS[@]}"; do
+    if [[ -f "$m" ]]; then
+        kubectl apply -f "$m" 2>/dev/null && log_ok "Applied $(basename $m)" || log_warn "Failed: $(basename $m)"
     fi
 done
 
 # =============================================================================
-# Setup Persistent Storage for Prometheus and Grafana (AUTOMATIC)
+# Phase 5: Wait for Ready
 # =============================================================================
-log_info "Setting up persistent storage directories..."
-sudo mkdir -p /mnt/smart-city/prometheus
-sudo mkdir -p /mnt/smart-city/grafana
-sudo chmod -R 777 /mnt/smart-city/
+section "Phase 5: Waiting for Services"
 
-# Verify K3s storage class exists
-if ! kubectl get storageclass local-path &>/dev/null 2>&1; then
-    log_info "Creating K3s local-path storage class..."
-    kubectl apply -f - <<'STORAGEEOF'
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: local-path
-provisioner: rancher.io/local-path
-allowVolumeExpansion: true
-STORAGEEOF
-fi
-log_info "Persistent storage configured (Prometheus: 50Gi, Grafana: 10Gi)"
-
-# Apply core manifests
-MANIFEST_DIR="$PROJECT_ROOT/k8s-manifests"
-
-log_info "Applying Kubernetes manifests (idempotent — unchanged resources are skipped)..."
-APPLIED=0; SKIPPED=0
-
-for manifest in \
-    "$MANIFEST_DIR/namespace.yaml" \
-    "$MANIFEST_DIR/rbac.yaml" \
-    "$MANIFEST_DIR/postgres-deployment.yaml" \
-    "$MANIFEST_DIR/mqtt-broker.yaml" \
-    "$MANIFEST_DIR/ids-api-FINAL.yaml" \
-    "$MANIFEST_DIR/services-no-build.yaml" \
-    "$MANIFEST_DIR/prometheus-deployment.yaml" \
-    "$MANIFEST_DIR/grafana-deployment.yaml" \
-    "$MANIFEST_DIR/falco-forwarder.yaml" \
-    "$MANIFEST_DIR/suricata-fixed.yaml" \
-    "$MANIFEST_DIR/suricata-forwarder-deployment.yaml"; do
-    
-    if [[ -f "$manifest" ]]; then
-        result=$(kubectl apply -f "$manifest" 2>&1) || true
-        changed=$(echo "$result" | grep -cE '(created|configured)' || true)
-        unchanged=$(echo "$result" | grep -c 'unchanged' || true)
-        if [[ $changed -gt 0 ]]; then
-            log_info "Applied $(basename $manifest) ($changed resource(s) updated)"
-            APPLIED=$((APPLIED + changed))
-        else
-            log_info "$(basename $manifest) — no changes"
-            SKIPPED=$((SKIPPED + unchanged))
-        fi
+echo ""
+echo -n "  Waiting for IDS API..."
+for i in {1..30}; do
+    if kubectl get pods -n smart-city -l app=ids-api 2>/dev/null | grep -q Running; then
+        echo " OK"
+        break
     fi
+    echo -n "."
+    sleep 2
 done
 
-log_info "Manifests applied: ${APPLIED} updated, ${SKIPPED} unchanged"
-
-# Create IDS API deployment artefacts: prefer building a container image for ids-api
-log_info "Preparing IDS API deployment (prefer image build over large ConfigMap)"
-
-# Try to build a local Docker image and import into k3s containerd runtime. This
-# avoids creating a very large ConfigMap (which can exceed Kubernetes limits).
-if command -v docker &> /dev/null; then
-    log_info "Building local Docker image: ids-api:latest"
-    if docker build -t ids-api:latest services/ids-api/src 2>&1 | sed -n '1,3p'; then
-        log_info "Docker image built successfully"
-        TMP_TAR="/tmp/ids-api-image-$$.tar"
-        docker save ids-api:latest -o "$TMP_TAR" || true
-        if command -v k3s &> /dev/null; then
-            log_info "Importing image into k3s containerd"
-            k3s ctr images import "$TMP_TAR" || true
-            rm -f "$TMP_TAR" || true
-        else
-            log_warn "k3s binary not found; image may not be available to the cluster"
-        fi
-    else
-        log_warn "Docker build failed; will fall back to minimal ConfigMap creation"
-        # Fall through to minimal configmap below
+echo -n "  Waiting for Prometheus..."
+for i in {1..20}; do
+    if kubectl get pods -n monitoring -l app=prometheus 2>/dev/null | grep -q Running; then
+        echo " OK"
+        break
     fi
-else
-    log_warn "Docker not installed; using ConfigMap-mounted code for ids-api"
-fi
+    echo -n "."
+    sleep 2
+done
 
-# Create a small ConfigMap for static UI (safe size)
-log_info "Creating IDS API static ConfigMap (ui files)"
-kubectl create configmap ids-app-static \
-    --namespace=smart-city \
-    --from-file=services/ids-api/static \
-    --dry-run=client -o yaml | kubectl apply -f -
-
-# Keep ids-app-code in sync with full source tree so all endpoints/features exist.
-log_info "Creating/updating full ids-app-code ConfigMap"
-kubectl create configmap ids-app-code \
-    --namespace=smart-city \
-    --from-file=services/ids-api/src \
-    --from-file=llm_providers=services/ids-api/src/llm_providers \
-    --dry-run=client -o yaml | kubectl apply --server-side --force-conflicts -f - || \
-    log_warn "ids-app-code ConfigMap update failed; ensure image/config is available"
-
-# =============================================================================
-# Phase 5: Deploy Falco Runtime Security (with JSON output for forwarder)
-# =============================================================================
-log_section "PHASE 5: Falco Runtime Security Deployment"
-
-# Check if Helm is installed
-if ! command -v helm &> /dev/null; then
-    log_info "Installing Helm..."
-    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-fi
-
-# Add Falco Helm repo
-helm repo add falcosecurity https://falcosecurity.github.io/charts 2>/dev/null || true
-helm repo update 2>/dev/null || true
-
-# Install/upgrade Falco with JSON output enabled (required for forwarder integration)
-if helm status falco -n falco-system &>/dev/null; then
-    log_info "Upgrading Falco with JSON output enabled..."
-    helm upgrade falco falcosecurity/falco -n falco-system \
-        -f "$PROJECT_ROOT/k8s-manifests/falco-values.yaml" \
-        --wait --timeout 120s 2>&1 | tail -3 || true
-else
-    log_info "Installing Falco with JSON output enabled..."
-    helm install falco falcosecurity/falco -n falco-system \
-        -f "$PROJECT_ROOT/k8s-manifests/falco-values.yaml" \
-        --wait --timeout 180s 2>&1 | tail -3 || true
-fi
-
-log_info "Falco deployed with JSON output for IDS integration"
-
-# =============================================================================
-# Phase 6: Deploy IoT Device Emulation (Controlled Scale)
-# =============================================================================
-log_section "PHASE 6: IoT Device Emulation Deployment"
-
-# Use the existing enhanced IoT emulation manifest with controlled replicas
-# This deploys 3 device classes: high-frequency (5), medium-frequency (10), burst (5)
-# Total: 20 pods generating realistic MQTT traffic patterns
-if [[ -f "$PROJECT_ROOT/iot-simulator/k8s-enhanced.yaml" ]]; then
-    log_info "Deploying IoT device emulation from iot-simulator/k8s-enhanced.yaml..."
-    kubectl apply -f "$PROJECT_ROOT/iot-simulator/k8s-enhanced.yaml" 2>&1 | grep -E "(created|configured|unchanged)" | head -5 || true
-    log_info "IoT emulation deployed: 5 high-freq + 10 medium-freq + 5 burst = 20 devices"
-else
-    log_warn "iot-simulator/k8s-enhanced.yaml not found, skipping IoT emulation"
-fi
-
-# =============================================================================
-# Phase 7: Wait for Services to be Ready
-# =============================================================================
-log_section "PHASE 7: Waiting for Services to Be Ready"
-
-log_info "Waiting for IDS API to be ready..."
-kubectl wait --for=condition=ready pod -l app=ids-api -n smart-city --timeout=120s 2>/dev/null || true
-
-log_info "Waiting for Prometheus to be ready..."
-kubectl wait --for=condition=ready pod -l app=prometheus -n monitoring --timeout=60s 2>/dev/null || true
-
-log_info "Waiting for Grafana to be ready..."
-kubectl wait --for=condition=ready pod -l app=grafana -n monitoring --timeout=60s 2>/dev/null || true
-
-log_info "Waiting for Falco to be ready..."
-kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=falco -n falco-system --timeout=120s 2>/dev/null || true
-
-log_info "Waiting for IoT device emulation pods to initialize..."
-sleep 5
-
-# Count ready pods
-IOT_PODS=$(kubectl get pods -n smart-city -l app=iot-device --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
-log_info "$IOT_PODS IoT emulation pods are running"
-
-# =============================================================================
-# Phase 8: Verify Kubernetes Organization
-# =============================================================================
-log_section "PHASE 8: System Health Check"
-
-echo ""
-log_info "Kubernetes Cluster Status:"
-kubectl get nodes
-echo ""
-
-log_info "Smart City Namespace Pods:"
-kubectl get pods -n smart-city --no-headers 2>/dev/null | wc -l | xargs echo "  Total pods:"
-kubectl get pods -n smart-city -o wide 2>/dev/null | grep -E "(ids-api|postgres|mqtt|traffic-camera|iot-device)" | head -5 || true
-
-echo ""
-log_info "Monitoring Stack:"
-kubectl get pods -n monitoring --no-headers 2>/dev/null | wc -l | xargs echo "  Total monitoring pods:"
-
-echo ""
-log_info "Security Tools:"
-kubectl get pods -n falco-system --no-headers 2>/dev/null | wc -l | xargs echo "  Falco system pods:"
-
-# =============================================================================
-# Phase 9: Display Service URLs
-# =============================================================================
-log_section "PHASE 9: Service Endpoints"
-
-# Get node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
-
-echo ""
-echo -e "${GREEN}✓ Deployment Complete!${NC}"
-echo ""
-echo "Access your Smart City IDS system at:"
-echo ""
-echo -e "  ${BLUE}🎯 Dashboard:${NC}              http://localhost:8000/ui"
-echo -e "  ${BLUE}📊 API Documentation:${NC}      http://localhost:8000/docs"
-echo -e "  ${BLUE}📈 Grafana Dashboards:${NC}     http://$NODE_IP:30300"
-echo -e "  ${BLUE}📉 Prometheus Metrics:${NC}      http://$NODE_IP:31106"
-echo ""
-echo -e "${YELLOW}Login Credentials:${NC}"
-echo "  Username: operator"
-echo "  Password: operator"
-echo ""
-echo -e "${YELLOW}Quick Commands:${NC}"
-echo "  View all pods:           kubectl get pods -A"
-echo "  Watch IDS API logs:      kubectl logs -f -n smart-city -l app=ids-api"
-echo "  Watch Falco alerts:      kubectl logs -f -n falco-system -l app.kubernetes.io/name=falco"
-echo "  Scale IoT emulation:     kubectl scale deployment/iot-device-high -n smart-city --replicas=10"
-echo ""
-echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-
-log_info "✅ Smart City IDS is now running!"
-echo "  KUBECONFIG: $KUBECONFIG (permanent in $INVOKING_HOME/.bashrc, $INVOKING_HOME/.zshrc)"
-echo ""
-
-# =============================================================================
-# Auto Port-Forward Setup
-# =============================================================================
-log_section "PHASE 10: Setting Up Port-Forwarding"
-
-STATE_DIR="/tmp/smart-city-ids"
-mkdir -p "$STATE_DIR"
-PF_PID_FILE="$STATE_DIR/pf-ids-api.pid"
-
-if [[ -f "$PF_PID_FILE" ]]; then
-    OLD_PID="$(cat "$PF_PID_FILE" 2>/dev/null || true)"
-    if [[ -n "${OLD_PID:-}" ]] && kill -0 "$OLD_PID" 2>/dev/null; then
-        kill "$OLD_PID" 2>/dev/null || true
-        sleep 1
-        kill -9 "$OLD_PID" 2>/dev/null || true
+echo -n "  Waiting for Grafana..."
+for i in {1..20}; do
+    if kubectl get pods -n monitoring -l app=grafana 2>/dev/null | grep -q Running; then
+        echo " OK"
+        break
     fi
-    rm -f "$PF_PID_FILE"
-fi
-pkill -f "kubectl .*port-forward .*svc/ids-api-service .*8000:8000" 2>/dev/null || true
+    echo -n "."
+    sleep 2
+done
 
-setsid kubectl --kubeconfig "$KUBECONFIG" -n smart-city \
-    port-forward svc/ids-api-service 8000:8000 --address 127.0.0.1 \
-    >/tmp/ids-api-portforward.log 2>&1 < /dev/null &
+# =============================================================================
+# Phase 6: Port Forwarding
+# =============================================================================
+section "Phase 6: Port Forwarding"
+
+# Kill old port-forwards
+pkill -f "kubectl.*port-forward.*ids-api" 2>/dev/null || true
+sleep 1
+
+# Start new port-forward
+log_info "Starting port-forward (localhost:8000)..."
+kubectl -n smart-city port-forward svc/ids-api-service 8000:8000 --address 127.0.0.1 > /tmp/pf.log 2>&1 &
 PF_PID=$!
-echo "$PF_PID" > "$PF_PID_FILE"
+sleep 3
 
-PF_OK=0
-for _i in $(seq 1 25); do
-    if curl -fsS --max-time 2 http://localhost:8000/health >/dev/null 2>&1; then
-        PF_OK=1
-        break
-    fi
-    if ! kill -0 "$PF_PID" 2>/dev/null; then
-        break
-    fi
-    sleep 1
-done
-
-if [[ "$PF_OK" -eq 1 ]]; then
-    log_info "✅ Local IDS access is ready (pid=$PF_PID)"
-    echo ""
-    echo -e "${GREEN}🎉 Dashboard ready at:${NC} http://localhost:8000/ui"
-    echo ""
+if kill -0 $PF_PID 2>/dev/null; then
+    log_ok "Port-forward active (PID: $PF_PID)"
 else
-    log_warn "Local IDS access setup failed"
-    tail -n 20 /tmp/ids-api-portforward.log 2>/dev/null || true
-    echo "Fallback NodePort: http://${NODE_IP}:30800/ui"
+    log_warn "Port-forward failed - use NodePort: http://localhost:30800"
 fi
+
+# =============================================================================
+# Summary
+# =============================================================================
+section "System Ready"
+
+echo ""
+log_ok "Smart City IDS is running!"
+echo ""
+echo -e "  ${CYAN}Dashboard:${NC}      http://localhost:8000/ui"
+echo -e "  ${CYAN}API Docs:${NC}       http://localhost:8000/docs"
+echo -e "  ${CYAN}Grafana:${NC}        http://localhost:30300"
+echo -e "  ${CYAN}Prometheus:${NC}     http://localhost:31106"
+echo ""
+echo -e "  ${YELLOW}Login:${NC}          operator / operator"
+echo ""
+echo -e "  ${CYAN}LLM Control:${NC}    ./scripts/llm-manager.sh status"
 echo ""

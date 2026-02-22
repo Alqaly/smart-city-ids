@@ -64,9 +64,9 @@ services/ids-api/src/
 │   ├── __init__.py
 │   ├── _state.py                ← Shared mutable state + helper functions
 │   ├── alerts.py                ← POST/GET /api/alerts, SSE stream
-│   ├── auth.py                  ← POST /api/login
+│   ├── auth.py                  ← POST /api/auth/login
 │   ├── governance.py            ← HITL governance endpoints
-│   ├── health.py                ← GET /api/health (detailed)
+│   ├── health.py                ← GET /health (detailed)
 │   ├── iot.py                   ← IoT sensor + telemetry endpoints
 │   ├── llm.py                   ← LLM diagnostics, circuit-breaker, rate-limiter
 │   ├── metrics_routes.py        ← /health, /metrics, pipeline-overview

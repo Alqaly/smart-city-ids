@@ -6,19 +6,19 @@ Complete endpoint reference for the IDS API (FastAPI). Base URL: `http://localho
 
 ## Authentication
 
-17 endpoints require JWT Bearer tokens. 20 endpoints are unauthenticated.
+Authentication requirements vary by route category below (each endpoint row specifies auth explicitly).
 
 ```bash
-# Get a token (demo credentials)
+# Get a token (use credentials configured via IDS_USER_*/IDS_PASS_* env vars)
 TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"operator","password":"operator"}' | jq -r .access_token)
+  -d '{"username":"<username>","password":"<password>"}' | jq -r .access_token)
 
 # Use token
 curl -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/operator/dashboard
 ```
 
-Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarders) is unauthenticated by design — it runs cluster-internal only.
+Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and requires `X-IDS-Internal-Token` (shared secret) so it cannot be used for synthetic injection.
 
 ---
 
@@ -35,7 +35,7 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/auth/login` | No | Get JWT token. Body: `{"username":"operator","password":"operator"}` |
+| POST | `/api/auth/login` | No | Get JWT token. Body: `{"username":"<username>","password":"<password>"}` |
 | POST | `/api/auth/logout` | No | Client-side logout (no server invalidation) |
 
 ### Health & Monitoring
@@ -45,17 +45,32 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 | GET | `/health` | No | Component status (LLM, K8s, DB, Falco, Suricata), uptime, alert count |
 | GET | `/api/safety` | No | Automation mode, protected services, thresholds, cache stats |
 | GET | `/api/production-status` | No | Rate limiter, circuit breaker, queue, cache operational status |
+| GET | `/api/pipeline-overview` | No | Pipeline-stage counters used by dashboard overview |
 | GET | `/api/metrics` | No | Application metrics (JSON) |
-| GET | `/metrics` | No | Prometheus text exposition format (38 metrics) |
+| GET | `/metrics` | No | Prometheus text exposition format (metric set may evolve by release/config) |
 | GET | `/api/db/stats` | No | Database statistics |
 
 ### Alert Processing
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| **POST** | **`/api/alerts`** | **Yes** | Main alert ingestion. Rate-limited, deduplicated, LLM-analyzed, auto-response |
-| **POST** | **`/api/alerts/internal`** | **No** | Same as above, for cluster-internal forwarders (Falco, Suricata, IoT) |
+| GET | `/api/alerts/live` | No | Server-Sent Events stream for real-time alert updates |
+| POST | `/api/alerts` | Yes | Main alert ingestion. Rate-limited, deduplicated, LLM-analyzed, auto-response |
+| POST | `/api/alerts/internal` | Header | Same as above, for cluster-internal forwarders (Falco, Suricata). Requires `X-IDS-Internal-Token`. |
 | GET | `/api/alerts` | No | Query processed alerts. Params: `limit` (default 10), `source` |
+| POST | `/api/alerts/{alert_id}/reanalyze` | Yes | Re-run analysis for an existing alert record |
+
+### Analyst Chat
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/analyst/session` | No | Bootstrap analyst session, returns `session_id` + available tools/providers |
+| POST | `/api/analyst/chat` | No | Conversational SOC assistant endpoint; returns 429 when chat limiter is exceeded |
+| POST | `/api/analyst/quick-analyze` | No | Fast one-shot threat analysis helper |
+| POST | `/api/analyst/action/submit` | No | Submit explicit analyst action request |
+| POST | `/api/analyst/action/pending-decision` | No | Submit/confirm pending action decision payload |
+| GET | `/api/analyst/tools` | No | List tool functions available to analyst chat |
+| WS | `/api/analyst/ws` | No | Real-time analyst WebSocket channel |
 
 ### Circuit Breaker
 
@@ -69,6 +84,32 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/llm/status` | Yes | Active providers, priority order, circuit breaker state per engine |
+| GET | `/api/llm/diagnostics` | No | Verbose per-provider diagnostics and summary |
+| GET | `/api/llm/retry-queue` | Yes | View queued failed-analysis items |
+| POST | `/api/llm/retry-queue/clear` | Yes | Clear queued failed-analysis items |
+| GET | `/api/llm/providers` | No | Provider availability details |
+| GET | `/api/llm/providers/comparison` | No | Comparative provider view |
+| GET | `/api/llm/providers/health-summary` | No | Aggregated provider health summary |
+| POST | `/api/llm/test/{provider}` | Yes | Send probe/test request to provider |
+| POST | `/api/llm/force/{provider}` | Yes | Force active provider selection |
+| GET | `/api/llm/metrics/24h` | Yes | Rolling LLM metrics window |
+| GET | `/api/llm/routing/strategy` | Yes | Current routing strategy configuration |
+| POST | `/api/llm/routing/strategy` | Yes | Update routing strategy configuration |
+| GET | `/api/llm/predictive-risk` | Yes | Predictive risk analytics output |
+| GET | `/api/llm/control/status` | No | LLM control-plane status |
+| POST | `/api/llm/control/force` | Yes | Force control-plane provider |
+| POST | `/api/llm/control/priority` | Yes | Update runtime provider priority |
+| POST | `/api/llm/control/test` | Yes | Run control-plane test invocation |
+| POST | `/api/llm/feedback` | No | Submit routing/analysis feedback sample |
+| GET | `/api/llm/feedback/stats` | No | Feedback aggregate statistics |
+| GET | `/api/llm-stats/export` | No | Export per-engine latency/cost/token aggregates |
+
+### LLM Credits
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/llm/credits/` | No | Credit status across configured providers |
+| GET | `/api/llm/credits/{provider}` | No | Credit status for one provider |
 
 ### Rate Limiter
 
@@ -81,7 +122,7 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/deduplicator-stats` | Yes | Cache stats, hit rate, estimated cost savings |
+| GET | `/api/deduplicator-stats` | No | Cache stats, hit rate, estimated cost savings |
 | POST | `/api/deduplicator/clear` | Yes | Clear fingerprint cache |
 
 ### Governance (Human-in-the-Loop)
@@ -90,7 +131,7 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 |---|---|---|---|
 | GET | `/api/governance/status` | Yes | Current mode, pending count, decision metrics |
 | GET | `/api/governance/mode` | Yes | Current automation mode |
-| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (autopilot/assisted/manual) |
+| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (`autonomous`/`assisted`/`manual`/`emergency`) |
 | GET | `/api/governance/pending` | Yes | List pending actions awaiting approval |
 | POST | `/api/governance/approve/{action_id}` | Yes | Approve + execute pending action. Params: `operator`, `comment` |
 | POST | `/api/governance/reject/{action_id}` | Yes | Reject pending action. Params: `operator`, `reason` |
@@ -102,9 +143,9 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 |---|---|---|---|
 | GET | `/api/operator/dashboard` | Yes | Full dashboard: stats, severity distribution, threat types, timeline |
 | GET | `/api/operator/incidents` | Yes | Incident list with evidence, reasoning, actions. Param: `limit` |
-| GET | `/api/operator/incident/{id}` | Yes | Single incident full detail |
-| GET | `/api/operator/evidence/{id}` | Yes | Raw evidence excerpts for incident |
-| GET | `/api/operator/reasoning/{id}` | Yes | LLM reasoning chain, confidence, indicators |
+| GET | `/api/operator/incident/{incident_id}` | Yes | Single incident full detail |
+| GET | `/api/operator/evidence/{incident_id}` | Yes | Raw evidence excerpts for incident |
+| GET | `/api/operator/reasoning/{incident_id}` | Yes | LLM reasoning chain, confidence, indicators |
 | GET | `/api/operator/metrics` | Yes | Analysis time, confidence, approval/rejection rates |
 | GET | `/api/operator/search` | Yes | Search incidents. Params: `query`, `severity_min/max`, `threat_type`, `limit` |
 
@@ -112,11 +153,35 @@ Tokens expire after 24 hours. All `/api/alerts/internal` traffic (from forwarder
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
+| GET | `/api/iot/telemetry` | No | Current telemetry snapshot for discovered devices |
 | POST | `/api/iot/sensor` | No | Receive sensor telemetry. Security events auto-create alerts |
 | GET | `/api/iot/devices` | No | List registered IoT devices |
+| GET | `/api/iot/pods` | No | List IoT pods and status metadata |
 | GET | `/api/iot/events` | No | Recent IoT events. Params: `limit`, `device_id` |
+| GET | `/api/iot/discover` | No | Discover IoT devices from cluster inventory |
+| GET | `/api/iot/vulnerabilities` | No | Vulnerability summary for IoT services |
 
-**Total: 37 endpoints** (17 authenticated, 20 unauthenticated)
+### Audit & Logs
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/audit/events` | No | Timeline/audit event stream (paged JSON) |
+| GET | `/api/audit/trace/{trace_id}` | No | Correlated audit trail for one trace id |
+| GET | `/api/audit/export` | No | Export audit records |
+| GET | `/api/logs/events` | Yes | Unified SOC logs feed |
+
+### Demo Controls
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/iot/scale` | No | Read current IoT scaling profile |
+| POST | `/api/iot/scale` | No | Update IoT scaling profile |
+
+Note: Synthetic “chaos” demo endpoints were removed. Live demo runs should use
+real traffic/runtimes (Falco + Suricata) and the `scripts/run-live-attacks.sh`
+runner.
+
+Source inventory (generated from `services/ids-api/src/api/*.py`): **80 routes total** as of 2026-02-20 (30 auth-protected, 50 unauthenticated).
 
 ---
 

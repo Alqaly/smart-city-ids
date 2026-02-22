@@ -35,6 +35,8 @@ try:
     CREDIT_CHECKING_AVAILABLE = True
 except ImportError as e:
     CREDIT_CHECKING_AVAILABLE = False
+    # Define fallback type for type hints when import fails
+    AlertContext = Any
     logging.warning(f"Credit checking not available: {e}")
 
 # Local imports for enhanced validation and retry

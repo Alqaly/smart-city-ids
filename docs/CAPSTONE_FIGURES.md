@@ -137,7 +137,7 @@ sequenceDiagram
             DD-->>DB: Increment hit counter, skip LLM
         else Unique alert
             DD->>LLM: Analyze threat
-            LLM->>LLM: Provider 1 → 2 → … → Local Fallback
+            LLM->>LLM: Provider 1 → 2 → … → next configured provider
             LLM-->>GOV: {severity, threat_type, confidence, recommendations}
 
             alt Autopilot Mode
@@ -218,11 +218,11 @@ graph TB
 
     subgraph L7["<b>Layer 7 — AI / LLM Analysis</b>"]
         A1["xAI Grok-4"] ~~~ A2["OpenAI GPT-4"] ~~~ A3["Claude 3.5"]
-        A4["Gemini 2.0"] ~~~ A5["Kimi v1-128k"] ~~~ A6["Local Fallback"]
+        A4["Gemini 2.0"] ~~~ A5["Kimi v1-128k"] ~~~ A6["Provider failover state"]
     end
 
     subgraph L6["<b>Layer 6 — Application Logic</b>"]
-        B1["FastAPI IDS Core — Python 3.11 — 37 endpoints"]
+        B1["FastAPI IDS Core — Python 3.11 — modular API routes"]
         B2["Dedup Engine — 85–95% alert reduction"]
         B3["HITL Governance — 3-mode controller"]
     end
@@ -348,7 +348,7 @@ graph LR
 
 > **PLACE IN:** Section 5.2 "Multi-LLM Integration" (report line ~512)
 > **PLACE AFTER:** The `LLMManager.analyze()` Python code block (the one with `async def analyze(self, alert: dict)`). Place the figure right below that code.
-> **CAPTION:** "Figure 6: Priority-based LLM failover chain. Alerts are routed through providers in priority order; each provider has an independent circuit breaker. If all cloud providers fail, the local fallback engine guarantees a response."
+> **CAPTION:** "Figure 6: Priority-based LLM failover chain. Alerts are routed through providers in priority order; each provider has an independent circuit breaker."
 
 ```mermaid
 graph LR
@@ -362,8 +362,8 @@ graph LR
     CB4 -->|"✅ Success<br/>(avg 0.9s)"| RESULT
     CB4 -->|"❌ Fail"| CB5{"🔴 Moonshot<br/>Kimi v1-128k<br/><i>Fallback #4</i>"}
     CB5 -->|"✅ Success"| RESULT
-    CB5 -->|"❌ Fail"| CB6["⚪ Local Fallback<br/>Rule-based engine<br/><i>Always succeeds</i>"]
-    CB6 -->|"✅ Guaranteed"| RESULT
+    CB5 -->|"❌ Fail"| CB6["⚪ Escalate / Retry Queue<br/><i>Operator review or retry orchestration</i>"]
+    CB6 -->|"✅ Routed"| RESULT
 
     RESULT --> VALIDATE["🔒 Pydantic Schema<br/>Validation<br/><i>severity 1-10<br/>confidence 0.0-1.0</i>"]
 
@@ -726,7 +726,7 @@ graph LR
 
         P5["🔴 <b>Moonshot Kimi v1</b><br/>Avg latency: 1.8s<br/>Success rate: 97.0%<br/>Circuit trips: 4"]
 
-        P6["⚪ <b>Local Fallback</b><br/>Avg latency: <0.01s<br/>Success rate: 100%<br/>Circuit trips: 0"]
+        P6["⚪ <b>Failover/Queue State</b><br/>Represents non-provider handling path<br/>Not a cloud model provider"]
     end
 
     style P1 fill:#a855f7,color:#fff

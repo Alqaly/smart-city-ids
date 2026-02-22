@@ -62,6 +62,7 @@ const initialState = {
   attackRunCount: 0,
   attackFlowEvents: 0,
   activeCategory: 'all',
+  activePhase: 'all',
   currentAttack: null,           // the attack object currently executing
   attackTimerMs: 0,
 };

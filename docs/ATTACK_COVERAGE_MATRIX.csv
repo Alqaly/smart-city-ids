@@ -1,0 +1,68 @@
+id,name,category,category_name,target,source,severity,mitre_id,mitre_name,tactic,kill_chain,volume,rule
+A1,SQL Injection (Classic),application,Application Layer Attacks,healthcare-api,suricata,9,T1190,Exploit Public-Facing Application,Initial Access,delivery,low,ET WEB_APP SQL Injection Attempt
+A10,DALI Broadcast Shutdown,application,Application Layer Attacks,street-lighting,falco,9,T0831,Manipulation of Control,Impact,actions_on_objectives,low,DALI Broadcast Shutdown
+A11,ONVIF PTZ Hijacking,application,Application Layer Attacks,traffic-camera,falco,8,T0831,Manipulation of Control,Impact,actions_on_objectives,low,ONVIF PTZ Hijacking
+A12,MQTT Topic Traversal,application,Application Layer Attacks,mqtt-broker,suricata,7,T1083,File and Directory Discovery,Discovery,reconnaissance,medium,MQTT Topic Traversal
+A2,SQL Injection (Time-based),application,Application Layer Attacks,healthcare-api,suricata,9,T1190,Exploit Public-Facing Application,Initial Access,delivery,low,ET WEB_APP SQL Injection Time-Based
+A3,SQL Injection (Union),application,Application Layer Attacks,parking-system,suricata,8,T1190,Exploit Public-Facing Application,Initial Access,delivery,low,ET WEB_APP SQL Injection UNION
+A4,Command Injection,application,Application Layer Attacks,traffic-camera,falco,9,T1059.004,Unix Shell,Execution,exploitation,low,Command Injection in Container
+A5,SSTI (Jinja2),application,Application Layer Attacks,healthcare-api,falco,9,T1059.006,Python,Execution,exploitation,low,Server-Side Template Injection
+A6,XXE Injection,application,Application Layer Attacks,traffic-camera,suricata,8,T1212,Exploitation for Credential Access,Credential Access,exploitation,low,ET WEB_APP XXE Injection
+A7,API Parameter Tampering,application,Application Layer Attacks,parking-system,falco,7,T1565.001,Stored Data Manipulation,Impact,actions_on_objectives,low,API Parameter Tampering
+A8,FHIR Resource Manipulation,application,Application Layer Attacks,healthcare-api,falco,10,T1565.001,Stored Data Manipulation,Impact,actions_on_objectives,low,FHIR Resource Manipulation
+A9,Modbus Function Code Abuse,application,Application Layer Attacks,env-sensor,falco,9,T0831,Manipulation of Control,Impact,actions_on_objectives,low,Modbus Unauthorized Write
+C1,Reverse Shell Spawn,container,Container/Runtime Attacks,traffic-camera,falco,9,T1059.004,Unix Shell,Execution,exploitation,low,Terminal shell in container
+C2,Cryptominer Deployment,container,Container/Runtime Attacks,env-sensor,falco,9,T1496,Resource Hijacking,Impact,actions_on_objectives,low,Detect crypto miners using the Stratum protocol
+C3,Sensitive File Read (/etc/shadow),container,Container/Runtime Attacks,healthcare-api,falco,9,T1552.001,Credentials In Files,Credential Access,exploitation,low,Read sensitive file untrusted
+C4,Container Escape (Privileged),container,Container/Runtime Attacks,healthcare-api,falco,10,T1611,Escape to Host,Privilege Escalation,exploitation,low,Launch Privileged Container
+C5,K8s API Access,container,Container/Runtime Attacks,parking-system,falco,8,T1552.001,Credentials In Files,Credential Access,exploitation,low,Contact K8s API Server From Container
+C6,Binary Download & Execute,container,Container/Runtime Attacks,traffic-camera,falco,8,T1105,Ingress Tool Transfer,Command and Control,command_and_control,low,Ingress Tool Transfer
+C7,Dynamic Code Execution,container,Container/Runtime Attacks,healthcare-api,falco,8,T1059.006,Python,Execution,exploitation,low,Dynamic Code Execution
+C8,Environment Variable Stealing,container,Container/Runtime Attacks,healthcare-api,falco,7,T1552,Unsecured Credentials,Credential Access,exploitation,low,Read Process Environment
+D1,Patient Record Exfiltration,data,Data-Focused Attacks,healthcare-api,falco,10,T1041,Exfiltration Over C2 Channel,Exfiltration,actions_on_objectives,medium,Data Exfiltration PHI
+D2,License Plate Harvesting,data,Data-Focused Attacks,traffic-camera,falco,9,T1041,Exfiltration Over C2 Channel,Exfiltration,actions_on_objectives,medium,ANPR Data Exfiltration
+D3,Environmental Data Tampering,data,Data-Focused Attacks,env-sensor,falco,8,T1565.001,Stored Data Manipulation,Impact,actions_on_objectives,low,Environmental Data Tampering
+D4,Ransomware Simulation,data,Data-Focused Attacks,healthcare-api,falco,10,T1486,Data Encrypted for Impact,Impact,actions_on_objectives,low,Ransomware Detected
+D5,Kubernetes Secret Theft,data,Data-Focused Attacks,healthcare-api,falco,10,T1552.007,Container API,Credential Access,exploitation,low,K8s Secret Theft
+D6,MQTT Message Replay,data,Data-Focused Attacks,mqtt-broker,suricata,7,T1557,Adversary-in-the-Middle,Collection,exploitation,medium,MQTT Message Replay
+D7,Log Tampering,data,Data-Focused Attacks,healthcare-api,falco,8,T1070.002,Clear Linux or Mac System Logs,Defense Evasion,actions_on_objectives,low,Log Tampering
+D8,FHIR Bundle Injection,data,Data-Focused Attacks,healthcare-api,falco,9,T1565.001,Stored Data Manipulation,Impact,actions_on_objectives,low,FHIR Bundle Injection
+I1,MQTT Unauthorized Publish,iot_protocol,IoT Protocol-Specific,mqtt-broker,suricata,8,T1565.002,Transmitted Data Manipulation,Impact,actions_on_objectives,medium,MQTT Unauthorized Publish
+I10,FHIR Resource Deletion,iot_protocol,IoT Protocol-Specific,healthcare-api,falco,9,T1485,Data Destruction,Impact,actions_on_objectives,low,FHIR Resource Deletion
+I2,MQTT Retained Message Poisoning,iot_protocol,IoT Protocol-Specific,mqtt-broker,suricata,8,T1565.002,Transmitted Data Manipulation,Impact,actions_on_objectives,low,MQTT Retained Poisoning
+I3,MQTT Client ID Spoofing,iot_protocol,IoT Protocol-Specific,mqtt-broker,suricata,7,T1550,Use Alternate Authentication Material,Defense Evasion,exploitation,low,MQTT Client ID Spoofing
+I4,CoAP Observe Flood,iot_protocol,IoT Protocol-Specific,parking-system,suricata,7,T1499,Endpoint Denial of Service,Impact,actions_on_objectives,high,CoAP Observe Flood
+I5,Modbus Coil Write Attack,iot_protocol,IoT Protocol-Specific,env-sensor,falco,9,T0831,Manipulation of Control,Impact,actions_on_objectives,low,Modbus Coil Write
+I6,Modbus Function Code Scan,iot_protocol,IoT Protocol-Specific,env-sensor,suricata,6,T1046,Network Service Discovery,Discovery,reconnaissance,high,Modbus Function Scan
+I7,OPC UA Session Hijacking,iot_protocol,IoT Protocol-Specific,env-sensor,falco,8,T1563,Remote Service Session Hijacking,Lateral Movement,exploitation,low,OPC UA Session Hijacking
+I8,DALI-2 Dimming Attack,iot_protocol,IoT Protocol-Specific,street-lighting,falco,7,T0831,Manipulation of Control,Impact,actions_on_objectives,low,DALI Dimming Attack
+I9,ONVIF Stream Hijacking,iot_protocol,IoT Protocol-Specific,traffic-camera,falco,8,T0830,Adversary-in-the-Middle,Collection,exploitation,low,ONVIF Stream Hijacking
+L1,Internal Network Scan,lateral,Lateral Movement & Persistence,traffic-camera,suricata,7,T1046,Network Service Discovery,Discovery,reconnaissance,high,ET SCAN Internal Network Scan
+L2,Service Discovery (DNS),lateral,Lateral Movement & Persistence,parking-system,falco,6,T1046,Network Service Discovery,Discovery,reconnaissance,low,Internal Service Discovery
+L3,Pod-to-Pod Credential Relay,lateral,Lateral Movement & Persistence,healthcare-api,falco,8,T1550.001,Application Access Token,Lateral Movement,command_and_control,low,Pod-to-Pod Credential Relay
+L4,CronJob Persistence,lateral,Lateral Movement & Persistence,healthcare-api,falco,8,T1053.003,Cron,Persistence,installation,low,CronJob Persistence
+L5,Web Shell Upload,lateral,Lateral Movement & Persistence,traffic-camera,falco,8,T1505.003,Web Shell,Persistence,installation,low,Web Shell Upload
+L6,DNS Hijacking for C2,lateral,Lateral Movement & Persistence,env-sensor,falco,7,T1557.002,ARP Cache Poisoning,Command and Control,command_and_control,low,DNS Hijacking C2
+N1,TCP SYN Flood,network,Network-Based Attacks,traffic-camera,suricata,9,T1498.001,Direct Network Flood,Impact,actions_on_objectives,high,ET DOS Possible TCP SYN Flood
+N10,TCP RST Injection,network,Network-Based Attacks,healthcare-api,suricata,8,T1565.002,Transmitted Data Manipulation,Impact,actions_on_objectives,low,ET POLICY TCP RST Injection
+N11,ARP Spoofing (Simulated),network,Network-Based Attacks,parking-system,falco,7,T1557.002,ARP Cache Poisoning,Credential Access,exploitation,low,ARP Spoofing Detected
+N12,VLAN Hopping,network,Network-Based Attacks,street-lighting,falco,6,T1599.001,Network Boundary Bridging,Defense Evasion,exploitation,low,VLAN Hopping Attempt
+N13,MQTT Subscribe Flood,network,Network-Based Attacks,mqtt-broker,suricata,7,T1499,Endpoint Denial of Service,Impact,actions_on_objectives,high,ET DOS MQTT Subscribe Flood
+N14,CoAP Amplification,network,Network-Based Attacks,parking-system,suricata,7,T1498.002,Reflection Amplification,Impact,actions_on_objectives,high,ET DOS CoAP Amplification
+N15,OPC UA Discovery Flood,network,Network-Based Attacks,env-sensor,suricata,6,T1046,Network Service Discovery,Discovery,reconnaissance,high,ET SCAN OPC UA Discovery Flood
+N2,UDP Amplification (NTP),network,Network-Based Attacks,traffic-camera,suricata,9,T1498.002,Reflection Amplification,Impact,actions_on_objectives,high,ET DOS Possible NTP DDoS Amplification
+N3,DNS Amplification,network,Network-Based Attacks,mqtt-broker,suricata,8,T1498.002,Reflection Amplification,Impact,actions_on_objectives,high,ET DOS DNS Amplification
+N4,SSDP Reflection,network,Network-Based Attacks,env-sensor,suricata,7,T1498.002,Reflection Amplification,Impact,actions_on_objectives,high,ET DOS SSDP Reflection
+N5,Slowloris HTTP,network,Network-Based Attacks,healthcare-api,suricata,8,T1499.002,Service Exhaustion Flood,Impact,actions_on_objectives,medium,ET DOS Slowloris HTTP DoS
+N6,Slow POST,network,Network-Based Attacks,parking-system,suricata,7,T1499.002,Service Exhaustion Flood,Impact,actions_on_objectives,medium,ET DOS Slow POST Attack
+N7,Connection Exhaustion,network,Network-Based Attacks,mqtt-broker,suricata,8,T1499.002,Service Exhaustion Flood,Impact,actions_on_objectives,high,ET DOS Connection Exhaustion
+N8,ICMP Flood,network,Network-Based Attacks,traffic-camera,suricata,6,T1498.001,Direct Network Flood,Impact,actions_on_objectives,high,ET DOS ICMP Flood
+N9,IP Fragmentation Attack,network,Network-Based Attacks,traffic-camera,suricata,7,T1498.001,Direct Network Flood,Impact,actions_on_objectives,medium,ET DOS IP Fragmentation Overlap
+S1,Brute Force Login,authentication,Authentication & Session,healthcare-api,falco,8,T1110.001,Password Guessing,Credential Access,exploitation,high,Brute Force Login Attempts
+S2,Credential Stuffing,authentication,Authentication & Session,parking-system,falco,7,T1110.004,Credential Stuffing,Credential Access,exploitation,high,Credential Stuffing Attack
+S3,JWT None Algorithm,authentication,Authentication & Session,healthcare-api,falco,9,T1550.001,Application Access Token,Defense Evasion,exploitation,low,JWT Algorithm Bypass
+S4,Default Credentials,authentication,Authentication & Session,mqtt-broker,falco,8,T1078.001,Default Accounts,Initial Access,delivery,medium,Default Credentials Used
+S5,Password Spraying,authentication,Authentication & Session,healthcare-api,falco,7,T1110.003,Password Spraying,Credential Access,exploitation,medium,Password Spraying
+S6,Privilege Escalation (Vertical),authentication,Authentication & Session,parking-system,falco,9,T1548,Abuse Elevation Control Mechanism,Privilege Escalation,exploitation,low,Privilege Escalation Vertical
+S7,OAuth Token Theft,authentication,Authentication & Session,healthcare-api,falco,8,T1528,Steal Application Access Token,Credential Access,exploitation,low,OAuth Token Theft
+S8,Session Hijacking,authentication,Authentication & Session,healthcare-api,falco,8,T1563,Remote Service Session Hijacking,Lateral Movement,exploitation,low,Session Hijacking

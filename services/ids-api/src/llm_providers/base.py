@@ -9,7 +9,7 @@ import os
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +84,41 @@ class BaseProvider(ABC):
         self.model = os.getenv(f"{self.NAME.upper()}_MODEL", self.DEFAULT_MODEL)
         self.base_url = os.getenv(f"{self.NAME.upper()}_BASE_URL", self.DEFAULT_BASE_URL)
         
+        # ── Key validation (format only; no network call) ─────────────────
+        # This prevents repeated 401 spam from malformed or placeholder keys.
+        # Cloud LLM calls remain enabled when a correctly-formatted key exists.
         if not self.api_key:
             raise ValueError(f"API key not set: {self.ENV_KEY}")
+        try:
+            from config import Config
+
+            if hasattr(Config, "is_valid_api_key") and not Config.is_valid_api_key(self.api_key, self.NAME):
+                raise ValueError(
+                    f"{self.NAME} API key format invalid — check {self.ENV_KEY} env var"
+                )
+        except Exception:
+            # If Config import fails for any reason, fall back to a minimal check.
+            if len(self.api_key) < 10:
+                raise ValueError(f"API key too short: {self.ENV_KEY}")
     
     @classmethod
     def is_available(cls) -> bool:
-        """Check if this provider has a valid API key configured."""
+        """Check if this provider has a usable API key configured.
+
+        This is a **format-only** validation. It avoids repeated 401 retries
+        when a placeholder/malformed key is present.
+        """
         api_key = os.getenv(cls.ENV_KEY, "")
-        return bool(api_key and len(api_key) > 10)
+        if not api_key:
+            return False
+        try:
+            from config import Config
+
+            if hasattr(Config, "is_valid_api_key"):
+                return bool(Config.is_valid_api_key(api_key, cls.NAME))
+        except Exception:
+            pass
+        return len(api_key) > 10
     
     @classmethod
     def get_info(cls) -> Dict[str, Any]:
@@ -104,7 +131,7 @@ class BaseProvider(ABC):
         }
     
     @abstractmethod
-    async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
+    async def _call_api(self, system_prompt: str, user_prompt: str) -> Union[str, Tuple[str, Dict[str, Any]]]:
         """
         Call the LLM API and return raw response text.
         
@@ -120,9 +147,9 @@ class BaseProvider(ABC):
         """
         pass
     
-    async def analyze(self, alert: Dict[str, Any]) -> Dict[str, Any]:
+    async def analyze(self, alert: Dict[str, Any], history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
-        Analyze a security alert.
+        Analyze a security alert and return a structured response.
         
         This method handles:
         - Building the prompt from alert data
@@ -154,7 +181,12 @@ class BaseProvider(ABC):
             user_prompt = self._build_user_prompt(alert)
             
             # Call API
-            response_text = await self._call_api(system_prompt, user_prompt)
+            response_data = await self._call_api(system_prompt, user_prompt)
+            usage: Dict[str, Any] = {}
+            if isinstance(response_data, tuple):
+                response_text, usage = response_data
+            else:
+                response_text = response_data
             
             # Parse response
             analysis = self._parse_response(response_text)
@@ -167,7 +199,8 @@ class BaseProvider(ABC):
                 "analysis": analysis,
                 "provider": self.NAME,
                 "model": self.model,
-                "latency_ms": latency_ms
+                "latency_ms": latency_ms,
+                "usage": usage,
             }
             
         except Exception as e:
@@ -280,3 +313,22 @@ Provide analysis for human operator review. Respond with JSON ONLY:
     
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}(model={self.model})>"
+    
+    async def probe(self) -> Dict[str, Any]:
+        """
+        Perform a cheap, lightweight check to confirm API key validity and reachability.
+        This should not be a full analysis. A good candidate is listing available models.
+        """
+        # Default implementation for providers that don't have a specific probe.
+        # This is a fallback and should be overridden where possible.
+        try:
+            # Re-use the analysis path with a very simple, standard prompt.
+            result = await self.analyze({
+                "output": "Health check",
+                "rule": "probe",
+                "priority": "Notice",
+                "output_fields": {}
+            })
+            return {"status": result.get("status", "error"), "error": result.get("error")}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}

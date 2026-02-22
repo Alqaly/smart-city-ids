@@ -4,6 +4,14 @@
 
 This document describes the design, implementation, and deployment of **protocol-accurate IoT device emulators** for the Smart City Intrusion Detection System (IDS) capstone project. The emulation layer replaces the prior simulation approach (random number generators) with realistic, standards-compliant protocol implementations that generate authentic network traffic and data patterns for intrusion detection analysis.
 
+Related attack documentation and appendix artifacts:
+- Attack Simulation UX + governance: [ATTACK_SIMULATION_GUIDE.md](ATTACK_SIMULATION_GUIDE.md)
+- Machine-readable coverage matrix (67 scenarios + 5 campaigns):
+  - [ATTACK_COVERAGE_MATRIX.json](ATTACK_COVERAGE_MATRIX.json)
+  - [ATTACK_COVERAGE_MATRIX.csv](ATTACK_COVERAGE_MATRIX.csv)
+
+Realism scope note: this project prioritizes **protocol and application-layer fidelity** (network traffic, state, and semantics) for IDS/LLM evaluation. Hardware-level side channels (thermal/power/PMU) are not currently modeled and should be documented as out-of-scope unless explicitly required by the evaluation.
+
 ### 1.1 Emulation vs. Simulation — Why It Matters
 
 | Aspect | Simulation (before) | Emulation (after) |

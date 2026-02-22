@@ -208,7 +208,7 @@ Sprint 3 (1–2 days):
 - Risk: Inconsistent LLM explanation quality across providers.
   - Mitigation: normalize response schema and confidence wording in one adapter path.
 - Risk: Demo-time provider degradation.
-  - Mitigation: enforce pre-flight checks and local fallback messaging.
+  - Mitigation: enforce pre-flight checks, clear provider diagnostics, and failover-state messaging.
 
 ---
 

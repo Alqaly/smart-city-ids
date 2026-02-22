@@ -44,12 +44,14 @@ Typical lifecycle:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json as json_mod      # Aliased to avoid shadowing if a local var is named ``json``
 import logging
+import os
 import time
-from collections import OrderedDict  # Available for LRU-style caches elsewhere
+from collections import OrderedDict, deque  # Available for LRU-style caches elsewhere
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Deque, Dict, List, Optional, Union
 
 from config import Config  # Project-level configuration (thresholds, modes, protected services)
 
@@ -167,6 +169,25 @@ iot_events: List[Dict[str, Any]] = []
 
 sse_clients: list = []  # list[asyncio.Queue]
 
+# Enterprise audit/event timeline (in-memory ring buffer).
+audit_events: Deque[Dict[str, Any]] = deque(maxlen=5000)
+llm_retry_queue: Deque[Dict[str, Any]] = deque(maxlen=10000)
+
+# LLM runtime control knobs/state.
+llm_forced_provider: Optional[str] = None
+llm_last_provider_used: Optional[str] = None
+llm_last_provider_ts: Optional[str] = None
+llm_routing_mode: str = os.getenv("LLM_ROUTING_MODE", "priority").strip().lower() or "priority"
+llm_routing_cost_ceiling_usd: float = float(os.getenv("LLM_ROUTING_COST_CEILING_USD", "0.005"))
+llm_ab_config: Dict[str, Any] = {
+    "enabled": False,
+    "provider_a": "xai",
+    "provider_b": "openai",
+    "split_percent_a": 50,
+    "salt": os.getenv("LLM_AB_SALT", "smart-city-ids-ab"),
+}
+llm_routing_decisions: Deque[Dict[str, Any]] = deque(maxlen=500)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 5 — LLM provider cost model and per-provider statistics
@@ -186,6 +207,31 @@ LLM_COST_PER_CALL = {
     "gemini": 0.001,    # Google Gemini — lowest commercial cost
     "kimi": 0.003,      # Moonshot Kimi — mid-range
 }
+
+LLM_COST_PER_1K_TOKENS = {
+    "xai": 0.012,
+    "openai": 0.010,
+    "anthropic": 0.016,
+    "gemini": 0.002,
+    "kimi": 0.006,
+}
+
+
+def _is_trackable_engine(engine: str) -> bool:
+    normalized = str(engine or "").strip().lower()
+    if not normalized:
+        return False
+    if normalized in {"unknown", "none", "cache", "n/a", "null"}:
+        return False
+    return normalized in {"xai", "openai", "anthropic", "gemini", "kimi", "custom"}
+
+
+def _estimate_cost_from_tokens(engine: str, prompt_tokens: int, completion_tokens: int) -> float:
+    total_tokens = max(0, int(prompt_tokens or 0)) + max(0, int(completion_tokens or 0))
+    if total_tokens <= 0:
+        return 0.0
+    rate_per_1k = float(LLM_COST_PER_1K_TOKENS.get(engine, 0.0))
+    return round((total_tokens / 1000.0) * rate_per_1k, 8)
 
 # Populated lazily by ``record_llm_call()`` — keys are engine names, values
 # are dicts with ``total_requests``, ``successes``, ``failures``,
@@ -323,6 +369,335 @@ async def sse_broadcast(event: dict):
         sse_clients.remove(q)
 
 
+def set_llm_forced_provider(provider: Optional[str]) -> Optional[str]:
+    """Set (or clear) forced LLM provider used by the analysis pipeline."""
+    global llm_forced_provider
+    llm_forced_provider = provider if provider else None
+    return llm_forced_provider
+
+
+def get_llm_forced_provider() -> Optional[str]:
+    """Get currently forced LLM provider, if any."""
+    return llm_forced_provider
+
+
+def get_llm_routing_config() -> Dict[str, Any]:
+    """Return current runtime routing strategy configuration."""
+    try:
+        config = db.get_system_config('llm_cost_ceiling', {
+            "max_daily_usd": 10.0,
+            "current_daily_usd": 0.0,
+            "last_reset": None
+        })
+        ceiling = config.get("max_daily_usd", llm_routing_cost_ceiling_usd)
+    except Exception:
+        ceiling = llm_routing_cost_ceiling_usd
+        
+    return {
+        "mode": llm_routing_mode,
+        "cost_ceiling_usd": ceiling,
+        "ab_test": dict(llm_ab_config),
+        "recent_decisions": list(llm_routing_decisions)[-30:],
+    }
+
+
+def update_llm_routing_config(
+    *,
+    mode: Optional[str] = None,
+    cost_ceiling_usd: Optional[float] = None,
+    ab_enabled: Optional[bool] = None,
+    provider_a: Optional[str] = None,
+    provider_b: Optional[str] = None,
+    split_percent_a: Optional[int] = None,
+):
+    """Update runtime routing strategy (A/B and cost-aware modes)."""
+    global llm_routing_mode, llm_routing_cost_ceiling_usd
+
+    allowed_modes = {"priority", "cost_optimized", "ab_test", "severity_adaptive"}
+    if mode is not None:
+        normalized = str(mode).strip().lower()
+        if normalized in allowed_modes:
+            llm_routing_mode = normalized
+
+    if cost_ceiling_usd is not None:
+        llm_routing_cost_ceiling_usd = max(0.0001, float(cost_ceiling_usd))
+        try:
+            config = db.get_system_config('llm_cost_ceiling', {
+                "max_daily_usd": 10.0,
+                "current_daily_usd": 0.0,
+                "last_reset": None
+            })
+            config["max_daily_usd"] = llm_routing_cost_ceiling_usd
+            db.set_system_config('llm_cost_ceiling', config)
+        except Exception as e:
+            logger.warning(f"Could not save cost ceiling to DB: {e}")
+
+    if ab_enabled is not None:
+        llm_ab_config["enabled"] = bool(ab_enabled)
+    if provider_a:
+        llm_ab_config["provider_a"] = str(provider_a).strip().lower()
+    if provider_b:
+        llm_ab_config["provider_b"] = str(provider_b).strip().lower()
+    if split_percent_a is not None:
+        llm_ab_config["split_percent_a"] = max(0, min(100, int(split_percent_a)))
+
+    return get_llm_routing_config()
+
+
+def set_llm_last_provider_used(provider: Optional[str]) -> None:
+    """Track last provider (or fallback engine) used for analysis."""
+    global llm_last_provider_used, llm_last_provider_ts
+    llm_last_provider_used = provider
+    llm_last_provider_ts = datetime.now().isoformat()
+
+
+def _ab_bucket_for_alert(alert_dict: Dict[str, Any]) -> int:
+    """Deterministic 0..99 bucket for A/B assignment per alert signature."""
+    material = {
+        "rule": alert_dict.get("rule"),
+        "priority": alert_dict.get("priority"),
+        "output": alert_dict.get("output"),
+        "container": (alert_dict.get("output_fields") or {}).get("container.name"),
+        "salt": llm_ab_config.get("salt", "smart-city-ids-ab"),
+    }
+    key = json_mod.dumps(material, sort_keys=True, ensure_ascii=False)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % 100
+
+
+def _estimate_engine_call_cost(engine: str) -> float:
+    return float(LLM_COST_PER_CALL.get(engine, 0.005))
+
+
+def check_cost_ceiling() -> bool:
+    """Check if the daily cost ceiling has been reached."""
+    try:
+        from infrastructure.metrics import PROM_LLM_BUDGET_REMAINING_USD, PROM_LLM_BUDGET_CEILING_USD
+        config = db.get_system_config('llm_cost_ceiling', {
+            "max_daily_usd": 10.0,
+            "current_daily_usd": 0.0,
+            "last_reset": None
+        })
+
+        # Reset daily counter if it's a new day
+        today = datetime.now().strftime('%Y-%m-%d')
+        if config.get("last_reset") != today:
+            config["current_daily_usd"] = 0.0
+            config["last_reset"] = today
+            db.set_system_config('llm_cost_ceiling', config)
+
+        ceiling = float(config.get("max_daily_usd") or 0.0)
+        spent = float(config.get("current_daily_usd") or 0.0)
+
+        # Treat ceiling=0 as "no ceiling configured" — use env-based fallback.
+        # This prevents a zero-valued DB entry from silently blocking all LLM calls.
+        if ceiling <= 0.0:
+            ceiling = max(float(os.getenv("LLM_ROUTING_COST_CEILING_USD", "10.0")), 0.01)
+
+        PROM_LLM_BUDGET_CEILING_USD.set(ceiling)
+        PROM_LLM_BUDGET_REMAINING_USD.set(max(0.0, ceiling - spent))
+        return spent >= ceiling
+    except Exception as e:
+        logger.warning(f"Error checking cost ceiling: {e}")
+        return False
+
+
+def update_cost_tracking(cost_usd: float):
+    """Update the daily cost tracking and Prometheus budget gauges."""
+    if cost_usd <= 0:
+        return
+
+    try:
+        from infrastructure.metrics import PROM_LLM_BUDGET_REMAINING_USD, PROM_LLM_BUDGET_CEILING_USD
+        config = db.get_system_config('llm_cost_ceiling', {
+            "max_daily_usd": 10.0,
+            "current_daily_usd": 0.0,
+            "last_reset": None
+        })
+        
+        today = datetime.now().strftime('%Y-%m-%d')
+        if config.get("last_reset") != today:
+            config["current_daily_usd"] = cost_usd
+            config["last_reset"] = today
+        else:
+            config["current_daily_usd"] = config.get("current_daily_usd", 0.0) + cost_usd
+
+        db.set_system_config('llm_cost_ceiling', config)
+
+        ceiling = float(config.get("max_daily_usd", 10.0))
+        spent = float(config.get("current_daily_usd", 0.0))
+        PROM_LLM_BUDGET_CEILING_USD.set(ceiling)
+        PROM_LLM_BUDGET_REMAINING_USD.set(max(0.0, ceiling - spent))
+    except Exception as e:
+        logger.warning(f"Error updating cost tracking: {e}")
+
+
+def select_preferred_provider(alert_dict: Dict[str, Any]) -> Optional[str]:
+    """Select preferred provider based on forced override or routing strategy."""
+    forced = get_llm_forced_provider()
+    if forced:
+        llm_routing_decisions.append({
+            "ts": datetime.now().isoformat(),
+            "mode": "forced",
+            "chosen": forced,
+            "reason": "forced_provider_override",
+        })
+        return forced
+
+    if not llm_manager or not hasattr(llm_manager, "get_available_providers"):
+        return None
+
+    available = llm_manager.get_available_providers() or []
+    if not available:
+        return None
+
+    mode = llm_routing_mode
+    severity = int((alert_dict or {}).get("severity") or 0)
+    chosen: Optional[str] = None
+    reason = mode
+
+    if mode == "ab_test" and llm_ab_config.get("enabled"):
+        bucket = _ab_bucket_for_alert(alert_dict or {})
+        threshold = int(llm_ab_config.get("split_percent_a", 50))
+        candidate = llm_ab_config.get("provider_a") if bucket < threshold else llm_ab_config.get("provider_b")
+        if candidate in available:
+            chosen = candidate
+            reason = f"ab_bucket:{bucket}"
+
+    elif mode == "cost_optimized":
+        cheap = [p for p in available if _estimate_engine_call_cost(p) <= llm_routing_cost_ceiling_usd]
+        pool = cheap or available
+        chosen = min(pool, key=_estimate_engine_call_cost)
+        reason = f"cost_ceiling:{llm_routing_cost_ceiling_usd}"
+
+    elif mode == "severity_adaptive":
+        if severity >= 8:
+            premium = [p for p in available if p in ("xai", "anthropic", "openai")]
+            chosen = premium[0] if premium else available[0]
+            reason = "severity_high_quality"
+        else:
+            chosen = min(available, key=_estimate_engine_call_cost)
+            reason = "severity_cost_efficiency"
+
+    if not chosen:
+        chosen = available[0]
+        reason = f"{reason}_fallback_priority"
+
+    llm_routing_decisions.append({
+        "ts": datetime.now().isoformat(),
+        "mode": mode,
+        "chosen": chosen,
+        "reason": reason,
+        "severity": severity,
+    })
+    return chosen
+
+
+def get_predictive_risk_snapshot(limit: int = 100) -> Dict[str, Any]:
+    """Build lightweight predictive risk indicators from recent alerts and LLM behavior."""
+    rows = list(alerts_db)[-max(20, min(500, int(limit or 100))):]
+    severities = [int(r.get("severity", 0) or 0) for r in rows if r.get("severity") is not None]
+    if not severities:
+        return {
+            "risk_score": 0.0,
+            "trend": "stable",
+            "critical_rate": 0.0,
+            "avg_severity": 0.0,
+            "recommendation": "Insufficient data",
+            "window_size": len(rows),
+        }
+
+    avg_severity = sum(severities) / len(severities)
+    critical_rate = sum(1 for s in severities if s >= 8) / len(severities)
+
+    mid = max(1, len(severities) // 2)
+    older = severities[:mid]
+    newer = severities[mid:]
+    older_avg = (sum(older) / len(older)) if older else avg_severity
+    newer_avg = (sum(newer) / len(newer)) if newer else avg_severity
+    delta = newer_avg - older_avg
+
+    if delta >= 1.0:
+        trend = "rising"
+    elif delta <= -1.0:
+        trend = "falling"
+    else:
+        trend = "stable"
+
+    error_pressure = 0.0
+    total_req = 0
+    total_fail = 0
+    for engine_stats in llm_provider_stats.values():
+        total_req += int(engine_stats.get("total_requests", 0))
+        total_fail += int(engine_stats.get("failures", 0))
+    if total_req > 0:
+        error_pressure = total_fail / total_req
+
+    risk_score = min(100.0, max(0.0, (avg_severity * 8.0) + (critical_rate * 30.0) + (error_pressure * 20.0)))
+    recommendation = (
+        "Switch to assisted/manual review and prioritize high-quality provider"
+        if risk_score >= 70
+        else "Keep assisted mode with active monitoring" if risk_score >= 45
+        else "Current posture acceptable; continue automated handling"
+    )
+
+    return {
+        "risk_score": round(risk_score, 2),
+        "trend": trend,
+        "critical_rate": round(critical_rate, 4),
+        "avg_severity": round(avg_severity, 3),
+        "llm_failure_rate": round(error_pressure, 4),
+        "recommendation": recommendation,
+        "window_size": len(severities),
+    }
+
+
+def add_audit_event(
+    event_type: str,
+    *,
+    trace_id: Optional[str] = None,
+    severity: Optional[int] = None,
+    user: Optional[str] = None,
+    status: str = "ok",
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Append an event to the in-memory SOC audit timeline."""
+    ev = {
+        "id": f"ev-{int(time.time() * 1000)}-{len(audit_events)}",
+        "timestamp": datetime.now().isoformat(),
+        "event_type": event_type,
+        "trace_id": trace_id,
+        "severity": severity,
+        "user": user,
+        "status": status,
+        "payload": payload or {},
+    }
+    audit_events.append(ev)
+    return ev
+
+
+def get_audit_events(
+    *,
+    event_type: Optional[str] = None,
+    min_severity: Optional[int] = None,
+    user: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    """Read filtered audit events newest-first."""
+    rows = list(audit_events)
+    if event_type:
+        rows = [r for r in rows if str(r.get("event_type", "")).lower() == event_type.lower()]
+    if min_severity is not None:
+        rows = [r for r in rows if isinstance(r.get("severity"), int) and r["severity"] >= min_severity]
+    if user:
+        rows = [r for r in rows if str(r.get("user", "")).lower() == user.lower()]
+    if trace_id:
+        rows = [r for r in rows if r.get("trace_id") == trace_id]
+    rows.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return rows[: max(1, min(limit, 5000))]
+
+
 def classify_llm_error(error_msg: str) -> str:
     """Classify a raw LLM error string into a human-readable diagnostic reason.
 
@@ -429,18 +804,20 @@ def is_protected_service(container_name: str) -> bool:
     return False
 
 
-def can_execute_action(action: str, container_name: str) -> tuple:
+def can_execute_action(
+    action: str,
+    container_name: str,
+    severity: Optional[int] = None,
+    confidence: Optional[float] = None,
+) -> tuple:
     """Determine whether an automated remediation action is permitted.
 
     This function implements the **safety-gate logic** that sits between the
     LLM's recommendation and actual Kubernetes execution.  Three levels of
     control are evaluated in order:
 
-    1. **Dry-run mode** — all actions are logged but never executed.
-    2. **Approval-required mode** — actions are queued for human approval
-       via the operator interface.
-    3. **Protected-service check** — even in full-auto mode, actions
-       targeting critical infrastructure are blocked.
+    1. **SOAR mode policy** — autonomous / assisted / manual / emergency.
+    2. **Protected-service check** — for non-emergency modes.
 
     Parameters
     ----------
@@ -457,14 +834,66 @@ def can_execute_action(action: str, container_name: str) -> tuple:
         suitable for logging and dashboard display.
     """
     # Check global automation mode from project configuration
-    if Config.AUTOMATION_MODE == "dry-run":
-        return False, f"DRY-RUN: Would execute {action} on {container_name}"
-    if Config.AUTOMATION_MODE == "approval-required":
-        return False, f"APPROVAL-REQUIRED: {action} on {container_name} needs manual approval"
-    # Even in auto mode, never touch protected services
+    sev = int(severity or 0)
+    conf = float(confidence or 0.0)
+    mode = str(Config.AUTOMATION_MODE or "assisted").strip().lower()
+
+    # Backward-compatible mode aliases
+    if mode in {"live", "autopilot"}:
+        mode = "autonomous"
+    elif mode in {"dry-run", "approval-required"}:
+        mode = "manual"
+
+    # Emergency mode: bypass confidence and approval gates for catastrophic events
+    if (
+        mode == "emergency"
+        and sev >= int(Config.EMERGENCY_SEVERITY_THRESHOLD)
+        and conf >= float(Config.EMERGENCY_MIN_CONFIDENCE)
+    ):
+        return True, "EMERGENCY mode: severity/confidence threshold met"
+
+    # Protected services are never auto-acted on outside emergency bypass
     if is_protected_service(container_name):
         return False, f"BLOCKED: {container_name} is a protected service"
-    return True, "OK"
+
+    if mode == "manual":
+        return False, f"MANUAL mode: {action} on {container_name} requires human action"
+
+    if mode == "assisted":
+        if conf >= float(Config.AUTONOMOUS_MIN_CONFIDENCE):
+            # High confidence can execute immediately in assisted mode.
+            return True, "ASSISTED mode: high-confidence action auto-approved"
+        if conf >= float(Config.ASSISTED_MIN_CONFIDENCE):
+            return False, (
+                f"ASSISTED mode: confidence {conf:.2f} requires 1-click approval "
+                f"for {action} on {container_name}"
+            )
+        return False, (
+            f"ASSISTED mode: confidence {conf:.2f} below threshold; manual handling required"
+        )
+
+    # Default autonomous mode
+    if conf >= float(Config.AUTONOMOUS_MIN_CONFIDENCE):
+        return True, "AUTONOMOUS mode: confidence threshold met"
+    return False, (
+        f"AUTONOMOUS mode: confidence {conf:.2f} below {float(Config.AUTONOMOUS_MIN_CONFIDENCE):.2f}"
+    )
+
+
+def enqueue_llm_retry(alert_dict: Dict[str, Any], error: str, attempt: int = 1) -> Dict[str, Any]:
+    """Queue a failed analysis payload for retry with exponential backoff metadata."""
+    base = max(0.1, float(Config.BACKOFF_BASE_SECONDS))
+    delay = base * (2 ** max(0, attempt - 1))
+    item = {
+        "id": f"retry-{int(time.time() * 1000)}",
+        "queued_at": datetime.now().isoformat(),
+        "attempt": attempt,
+        "next_retry_after_seconds": delay,
+        "error": str(error),
+        "alert": alert_dict,
+    }
+    llm_retry_queue.append(item)
+    return item
 
 
 def classify_decision_outcome(severity: int) -> str:
@@ -563,19 +992,15 @@ def detect_alert_source(alert) -> str:
     return "falco"
 
 
-def compute_human_review_required(severity: int) -> bool:
+def compute_human_review_required(severity: int, confidence: float = 0.0) -> bool:
     """Decide whether a given alert requires human operator review.
 
     The decision depends on the current **governance / automation mode**:
 
-    - ``"manual"``    — every alert requires human review (return ``True``).
-    - ``"autopilot"`` — no alert requires review (return ``False``).
-    - ``"assisted"``  — only alerts at or above a configurable severity
-      threshold (default 8) require review.
-
-    The ``ASSISTED_THRESHOLD`` environment variable allows operators to
-    tune how aggressive the assisted mode is without redeploying the
-    service.
+    - ``"manual"``      — every alert requires human review.
+    - ``"assisted"``    — medium confidence requires one-click approval.
+    - ``"autonomous"``  — high-confidence auto execute, otherwise review.
+    - ``"emergency"``   — catastrophic severity + confidence bypass review.
 
     Parameters
     ----------
@@ -593,23 +1018,37 @@ def compute_human_review_required(severity: int) -> bool:
     from governance import get_automation_mode
     import os
 
-    mode = get_automation_mode()
-    # Configurable severity threshold for the "assisted" mode
-    threshold = int(os.getenv("ASSISTED_THRESHOLD", "8"))
+    mode = str(get_automation_mode() or "assisted").strip().lower()
+    if mode in {"live", "autopilot"}:
+        mode = "autonomous"
+    elif mode in {"dry-run", "approval-required"}:
+        mode = "manual"
+
+    autonomous_conf = float(os.getenv("AUTONOMOUS_MIN_CONFIDENCE", str(Config.AUTONOMOUS_MIN_CONFIDENCE)))
+    assisted_conf = float(os.getenv("ASSISTED_MIN_CONFIDENCE", str(Config.ASSISTED_MIN_CONFIDENCE)))
+    emergency_conf = float(os.getenv("EMERGENCY_MIN_CONFIDENCE", str(Config.EMERGENCY_MIN_CONFIDENCE)))
+    emergency_sev = int(os.getenv("EMERGENCY_SEVERITY_THRESHOLD", str(Config.EMERGENCY_SEVERITY_THRESHOLD)))
 
     if mode == "manual":
         return True      # All alerts need human eyes
-    if mode == "autopilot":
-        return False     # Full automation — no human gate
-    # "assisted" mode — only high-severity alerts escalate
-    return severity >= threshold
+    if mode == "emergency" and severity >= emergency_sev and confidence >= emergency_conf:
+        return False
+    if mode == "autonomous":
+        return confidence < autonomous_conf
+    if mode == "assisted":
+        if confidence >= autonomous_conf:
+            return False
+        if confidence >= assisted_conf:
+            return True
+        return True
+    return True
 
 
 def set_automation_mode_metric(mode: str):
     """Update the Prometheus automation-mode gauge to reflect the current mode.
 
-    The gauge ``PROM_AUTOMATION_MODE`` has a ``mode`` label with three
-    possible values: ``"autopilot"``, ``"assisted"``, ``"manual"``.
+    The gauge ``PROM_AUTOMATION_MODE`` has a ``mode`` label across
+    ``"autonomous"``, ``"assisted"``, ``"manual"``, ``"emergency"``.
     Exactly one of these is set to ``1`` and the others to ``0``, making
     it easy to build Grafana panels that show the active mode as a
     state-timeline or single-stat.
@@ -624,7 +1063,7 @@ def set_automation_mode_metric(mode: str):
     from infrastructure.metrics import PROM_AUTOMATION_MODE
 
     # Set exactly one label to 1, all others to 0
-    for label in ("autopilot", "assisted", "manual"):
+    for label in ("autonomous", "assisted", "manual", "emergency"):
         PROM_AUTOMATION_MODE.labels(mode=label).set(1 if label == mode else 0)
 
 
@@ -721,7 +1160,9 @@ def refresh_iot_active_metric() -> int:
     if k8s_automation:
         try:
             pod_list = k8s_automation.core_v1.list_namespaced_pod(
-                namespace="smart-city", timeout_seconds=5
+                namespace="smart-city",
+                timeout_seconds=2,
+                _request_timeout=(1, 2),
             )
             # Known pod-name prefixes for IoT-related services in this deployment
             iot_prefixes = [
@@ -819,7 +1260,8 @@ def record_llm_call(engine: str, latency_s: float, success: bool):
     - Increments ``PROM_LLM_COST_USD`` Prometheus counter on success.
     - Updates the in-memory ``llm_provider_stats[engine]`` dict.
     """
-    from infrastructure.metrics import PROM_LLM_COST_USD
+    if not _is_trackable_engine(engine):
+        return
 
     # Lazily initialise stats dict for this engine if not already present
     s = llm_provider_stats.setdefault(engine, {
@@ -834,15 +1276,11 @@ def record_llm_call(engine: str, latency_s: float, success: bool):
         # Cap the latency sample buffer at 500 to bound memory usage
         if len(s["latencies"]) > 500:
             s["latencies"] = s["latencies"][-500:]
-        # Look up per-call cost, defaulting to $0.005 for unknown engines
-        cost = LLM_COST_PER_CALL.get(engine, 0.005)
-        s["total_cost_usd"] += cost
-        PROM_LLM_COST_USD.labels(engine=engine).inc(cost)
     else:
         s["failures"] += 1
 
 
-def record_llm_tokens(engine: str, prompt_payload: Any, completion_payload: Any):
+def record_llm_tokens(engine: str, prompt_payload: Any, completion_payload: Any, usage: Any = None):
     """Estimate and record prompt/completion token counts for a single LLM call.
 
     Token counts are tracked in two places:
@@ -866,11 +1304,26 @@ def record_llm_tokens(engine: str, prompt_payload: Any, completion_payload: Any)
     - Updates ``prompt_tokens`` and ``completion_tokens`` in
       ``llm_provider_stats[engine]``.
     """
-    from infrastructure.metrics import PROM_LLM_TOKENS_TOTAL
+    from infrastructure.metrics import PROM_LLM_TOKENS_TOTAL, PROM_LLM_COST_USD
 
-    # Estimate token counts using the chars/4 heuristic
-    prompt_tokens = _estimate_tokens(prompt_payload)
-    completion_tokens = _estimate_tokens(completion_payload)
+    if not _is_trackable_engine(engine):
+        return 0, 0, 0.0
+
+    # Use provider-reported usage when available; fallback to chars/4 estimates.
+    prompt_tokens = None
+    completion_tokens = None
+    if isinstance(usage, dict):
+        raw_prompt = usage.get("prompt_tokens")
+        raw_completion = usage.get("completion_tokens")
+        if raw_prompt is not None:
+            prompt_tokens = max(0, int(raw_prompt))
+        if raw_completion is not None:
+            completion_tokens = max(0, int(raw_completion))
+
+    if prompt_tokens is None:
+        prompt_tokens = _estimate_tokens(prompt_payload)
+    if completion_tokens is None:
+        completion_tokens = _estimate_tokens(completion_payload)
 
     # Update Prometheus counters (separate series for prompt vs completion)
     PROM_LLM_TOKENS_TOTAL.labels(engine=engine, kind="prompt").inc(prompt_tokens)
@@ -884,6 +1337,75 @@ def record_llm_tokens(engine: str, prompt_payload: Any, completion_payload: Any)
     })
     s["prompt_tokens"] = s.get("prompt_tokens", 0) + prompt_tokens
     s["completion_tokens"] = s.get("completion_tokens", 0) + completion_tokens
+
+    token_cost = _estimate_cost_from_tokens(engine, prompt_tokens, completion_tokens)
+    if token_cost > 0:
+        s["total_cost_usd"] = round(float(s.get("total_cost_usd", 0.0)) + token_cost, 8)
+        PROM_LLM_COST_USD.labels(engine=engine).inc(token_cost)
+
+    return int(prompt_tokens), int(completion_tokens), float(token_cost)
+
+
+def record_llm_usage(
+    engine: str,
+    *,
+    latency_s: float,
+    success: bool,
+    prompt_payload: Any,
+    completion_payload: Any,
+    usage: Any = None,
+    purpose: str = "alerts",
+    model: Optional[str] = None,
+    error_message: Optional[str] = None,
+    meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Record a single LLM call in memory/Prometheus AND persist token usage to DB.
+
+    This is the preferred entry-point for usage tracking because it captures:
+    - calls, successes/failures, latency samples
+    - prompt/completion tokens (provider-reported when available, else estimated)
+    - a DB row for "today" usage dashboards across restarts
+
+    Returns:
+        dict with prompt_tokens, completion_tokens, tokens_total, estimated_cost_usd
+    """
+    prompt_tokens, completion_tokens, token_cost = record_llm_tokens(
+        engine,
+        prompt_payload,
+        completion_payload,
+        usage=usage,
+    )
+    record_llm_call(engine, float(latency_s or 0.0), bool(success))
+
+    # Best-effort DB persistence (never break alert processing if DB write fails).
+    try:
+        if db and hasattr(db, "log_llm_api_call"):
+            latency_ms = int(max(0.0, float(latency_s or 0.0)) * 1000)
+            safe_meta = dict(meta or {})
+            if token_cost:
+                safe_meta.setdefault("estimated_cost_usd", float(token_cost))
+            if usage is not None and isinstance(usage, dict):
+                safe_meta.setdefault("provider_usage", usage)
+            db.log_llm_api_call(
+                engine,
+                int(prompt_tokens),
+                int(completion_tokens),
+                purpose=str(purpose or "alerts"),
+                model=model,
+                success=bool(success),
+                latency_ms=latency_ms,
+                error_message=error_message,
+                meta=safe_meta,
+            )
+    except Exception:
+        pass
+
+    return {
+        "prompt_tokens": int(prompt_tokens),
+        "completion_tokens": int(completion_tokens),
+        "tokens_total": int(prompt_tokens) + int(completion_tokens),
+        "estimated_cost_usd": float(token_cost or 0.0),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -945,6 +1467,11 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple:
         PROM_LLM_LATENCY_SECONDS,
     )
 
+    # ── Step 0: LLM manager availability ───────────────────────────────
+    if not llm_manager:
+        enqueue_llm_retry(alert_dict, "llm_manager_unavailable", attempt=1)
+        raise Exception("LLM manager unavailable; alert queued for retry")
+
     # ── Step 1: Check the alert cache ──────────────────────────────────
     cached = alert_cache.get(alert_dict)
     if cached:
@@ -957,16 +1484,39 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple:
     PROM_LLM_CACHE_OPERATIONS.labels(operation="miss").inc()
 
     # ── Step 2: Invoke the LLM manager ─────────────────────────────────
-    llm_start = time.perf_counter()
-    result = await llm_manager.analyze(alert_dict)
-    llm_duration = time.perf_counter() - llm_start
+    preferred = select_preferred_provider(alert_dict)
+    max_attempts = max(1, int(Config.MAX_RETRY_ATTEMPTS))
+    llm_duration = 0.0
+    result = None
+    engine_used = "unknown"
+    failed_engines = []
+    last_error = "unknown"
+
+    for attempt in range(1, max_attempts + 1):
+        llm_start = time.perf_counter()
+        try:
+            result = await llm_manager.analyze(alert_dict, preferred_engine=preferred)
+        except Exception as exc:
+            result = {"status": "error", "error": str(exc), "engine": preferred or "unknown"}
+        llm_duration += time.perf_counter() - llm_start
+
+        engine_used = (result or {}).get("provider") or (result or {}).get("engine", "unknown")
+        failed_engines = (result or {}).get("failed_engines", [])
+
+        if (result or {}).get("status") == "success":
+            break
+
+        last_error = (result or {}).get("error", "unknown error")
+        if attempt < max_attempts:
+            backoff = max(0.1, float(Config.BACKOFF_BASE_SECONDS)) * (2 ** (attempt - 1))
+            await asyncio.sleep(backoff)
 
     # Extract metadata about which engine was used and which ones failed
-    engine_used = result.get("provider") or result.get("engine", "unknown")
-    failed_engines = result.get("failed_engines", [])
+    engine_used = (result or {}).get("provider") or (result or {}).get("engine", "unknown")
+    failed_engines = (result or {}).get("failed_engines", [])
 
     # ── Step 3: Handle success ─────────────────────────────────────────
-    if result.get("status") == "success":
+    if (result or {}).get("status") == "success":
         # Record circuit-breaker failures for engines that were tried and failed
         for failed_engine in failed_engines:
             if failed_engine in circuit_breaker.engine_stats:
@@ -981,15 +1531,25 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple:
         # Store in cache so subsequent identical alerts skip the LLM
         alert_cache.set(alert_dict, analysis)
         PROM_LLM_CACHE_SIZE.set(len(alert_cache.cache))
-        # Record Prometheus metrics for latency, throughput, tokens, cost
+        # Record Prometheus + DB metrics for latency, throughput, tokens, cost
         PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="success").inc()
         PROM_LLM_LATENCY_SECONDS.labels(engine=engine_used).observe(llm_duration)
-        record_llm_tokens(engine_used, alert_dict, analysis)
-        record_llm_call(engine_used, llm_duration, True)
+        record_llm_usage(
+            engine_used,
+            latency_s=llm_duration,
+            success=True,
+            prompt_payload=alert_dict,
+            completion_payload=analysis,
+            usage=result.get("usage"),
+            purpose="alerts",
+            model=(result.get("model") or None),
+            meta={"failed_engines": failed_engines} if failed_engines else None,
+        )
+        set_llm_last_provider_used(engine_used)
         return analysis, engine_used, llm_duration
 
     # ── Step 4: Handle failure ─────────────────────────────────────────
-    error_msg = result.get("error", "Unknown error")
+    error_msg = (result or {}).get("error", "Unknown error")
     # Record failures in circuit breakers for all attempted engines
     for failed_engine in failed_engines:
         if failed_engine in circuit_breaker.engine_stats:
@@ -999,6 +1559,20 @@ async def analyze_with_fallback(alert_dict: dict) -> tuple:
     update_circuit_breaker_metrics()
     # Record the error in Prometheus counters
     PROM_LLM_REQUESTS_TOTAL.labels(engine=engine_used, result="error").inc()
-    record_llm_call(engine_used, llm_duration, False)
+    # Best-effort usage record for failures (prompt tokens estimated, completion=0)
+    record_llm_usage(
+        engine_used,
+        latency_s=llm_duration,
+        success=False,
+        prompt_payload=alert_dict,
+        completion_payload="",
+        usage=None,
+        purpose="alerts",
+        model=(result.get("model") or None) if isinstance(result, dict) else None,
+        error_message=error_msg or last_error,
+        meta={"failed_engines": failed_engines} if failed_engines else None,
+    )
+    set_llm_last_provider_used(engine_used)
+    enqueue_llm_retry(alert_dict, error_msg or last_error, attempt=max_attempts)
     # Raise so the calling router can return an HTTP 5xx response
-    raise Exception(f"LLM analysis failed: {error_msg}")
+    raise Exception(f"LLM analysis failed after retries; queued for retry: {error_msg}")

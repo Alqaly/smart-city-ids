@@ -61,7 +61,7 @@ graph TB
         Claude["Anthropic Claude"]
         Gemini["Google Gemini"]
         Kimi["Moonshot Kimi"]
-        Local["Local Fallback"]
+        Local["Provider failover / queue path"]
     end
 
     subgraph "Persistence & Monitoring"
@@ -466,7 +466,7 @@ CPU ──────── 8% ──── 12% ─── 17% ─── 25% ─
 |-------|-------------|
 | Orchestration | K3s (lightweight Kubernetes) |
 | Application | FastAPI, Flask, Python 3.11 |
-| LLM Integration | xAI Grok-4, OpenAI GPT-4, Claude, Gemini, Kimi, Local Fallback |
+| LLM Integration | xAI Grok, OpenAI GPT, Claude, Gemini, Kimi (priority/failover manager) |
 | Security Monitoring | Falco (runtime), Suricata (network) |
 | Database | PostgreSQL 15 |
 | Monitoring | Prometheus, Grafana |
@@ -480,15 +480,19 @@ CPU ──────── 8% ──── 12% ─── 17% ─── 25% ─
 
 | API Category | Endpoints |
 |-------------|-----------|
-| Core IDS (/api/alerts, /api/health, etc.) | 12 |
-| IoT Management (/api/iot/*) | 6 |
-| Governance (/api/governance/*) | 8 |
-| LLM Status (/api/llm/*) | 5 |
-| K8s Proxy (/api/k8s/*) | 4 |
-| Auth (/api/auth/*) | 2 |
-| SSE Streams (/api/stream/*) | 2 |
-| Dashboard (static) | 1 |
-| **Total** | **40** |
+| Health + Metrics (`/`, `/ui`, `/health`, `/metrics`, `/api/metrics*`) | 11 |
+| Alerts (`/api/alerts*`) | 5 |
+| Analyst (`/api/analyst*`) | 7 |
+| LLM Ops (`/api/llm*`, `/api/circuit-breaker*`, `/api/rate-limiter*`) | 24 |
+| LLM Credits (`/api/llm/credits*`) | 2 |
+| Governance (`/api/governance*`) | 7 |
+| Operator (`/api/operator*`) | 7 |
+| IoT + Demo (`/api/iot*`, `/api/demo*`) | 11 |
+| Audit + Logs (`/api/audit*`, `/api/logs*`) | 4 |
+| Auth (`/api/auth*`) | 2 |
+| **Total** | **80** |
+
+Source: generated from `services/ids-api/src/api/*.py` route decorators on 2026-02-20.
 
 ---
 
@@ -505,7 +509,7 @@ CPU ──────── 8% ──── 12% ─── 17% ─── 25% ─
 | 5 | K8s ConfigMap size limits | Cannot mount large apps | Split code + static into separate ConfigMaps | All apps deployable |
 | 6 | Resource constraints (single node) | OOM kills at scale | Resource limits + careful replica count | 34 pods, 76% memory |
 | 7 | Kubernetes RBAC for automation | Pod isolation fails | ServiceAccount with scoped permissions | All actions functional |
-| 8 | LLM cost control | Budget exceeded in testing | Dedup + provider cooldown + local fallback | 40–60% cost reduction |
+| 8 | LLM cost control | Budget exceeded in testing | Dedup + provider cooldown + priority routing | 40–60% cost reduction |
 | 9 | Dashboard state on refresh | Lose all context | SSE reconnection + API state endpoints | Persistent state |
 | 10 | RPi ↔ K3s networking (NAT) | HW device cannot reach API | Windows port proxy + documented network path | End-to-end connectivity |
 

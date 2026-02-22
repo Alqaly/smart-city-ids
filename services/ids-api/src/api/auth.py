@@ -17,8 +17,9 @@ deployment scenarios:
    short-lived tokens with a refresh mechanism.
 
 Demo credentials (configured in ``infrastructure/auth.py``):
-    * ``analyst`` / ``analyst`` — read-only security analyst role
-    * ``operator`` / ``operator`` — full operator privileges
+    * ``operator`` / ``operator`` — dashboard default
+    * ``analyst`` / ``analyst`` — analyst/chat flows
+    * ``admin`` / ``admin`` — full demo access
 
 Security note:
     The credentials and JWT secret are hard-coded for the capstone
@@ -31,8 +32,10 @@ from fastapi import APIRouter, Request
 from infrastructure.auth import (
     authenticate_user,
     create_jwt_token,
+    resolve_username,
 )
 from models.auth import LoginRequest, LoginResponse
+from api._state import add_audit_event
 
 # ── Router instance registered by the main FastAPI application at startup ──
 router = APIRouter(tags=["auth"])
@@ -51,8 +54,9 @@ async def login(request: LoginRequest):
     header.
 
     Demo credentials:
-        * ``analyst``  / ``analyst``
         * ``operator`` / ``operator``
+        * ``analyst`` / ``analyst``
+        * ``admin`` / ``admin``
 
     Args:
         request: A ``LoginRequest`` Pydantic model containing
@@ -67,14 +71,27 @@ async def login(request: LoginRequest):
     """
     # Verify credentials against the demo user store
     if authenticate_user(request.username, request.password):
+        canonical_user = resolve_username(request.username) or request.username.strip()
         # Mint a signed JWT containing the username claim
-        token = create_jwt_token(request.username)
+        token = create_jwt_token(canonical_user)
+        add_audit_event(
+            "USER_LOGIN",
+            user=canonical_user,
+            status="ok",
+            payload={"result": "success"},
+        )
         return LoginResponse(
-            access_token=token, token_type="bearer", user=request.username
+            access_token=token, token_type="bearer", user=canonical_user
         )
     # Import here to keep the happy-path import footprint minimal
     from fastapi import HTTPException
 
+    add_audit_event(
+        "USER_LOGIN",
+        user=request.username,
+        status="failed",
+        payload={"result": "invalid_credentials"},
+    )
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
 

@@ -1,0 +1,349 @@
+<!-- 
+  ENHANCED LLM CONTROL CENTER
+  Enterprise-grade LLM provider management with improved UX, reliability indicators,
+  and visual hierarchy.
+-->
+<div id="tab-llm-control" class="tab-panel">
+    <!-- Header with simplified description -->
+    <div style="margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+            <h2 style="font-size:24px;font-weight:800;margin:0;">AI Provider Control Center</h2>
+            <span id="llmConnectivityBadge" class="pill" style="font-size:11px;">
+                <i class="fas fa-circle" style="font-size:8px;margin-right:4px;"></i>Connecting...
+            </span>
+        </div>
+        <p style="font-size:13px;color:#606080;margin:0;max-width:800px;">
+            Manage which AI providers analyze security alerts. View health status, costs, and control automatic failover between providers.
+        </p>
+    </div>
+
+    <!-- KPI Cards Row - Redesigned as metric tiles -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+        <!-- Provider Status - Prominent colored badge -->
+        <div class="stat-card" style="position:relative;overflow:hidden;">
+            <div class="stat-label"><i class="fas fa-server mr-1"></i> Healthy Providers</div>
+            <div class="stat-value" id="llmCtrlOperational" style="font-size:28px;color:var(--accent-cyan);">—</div>
+            <div class="stat-sub" id="llmCtrlOperationalSub">checking status...</div>
+            <div id="llmProviderHealthBar" style="position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,#22c55e,#eab308,#ef4444);width:100%;opacity:0.3;"></div>
+        </div>
+
+        <!-- Active Provider - Most prominent card -->
+        <div class="stat-card" id="activeProviderCard" style="border:1px solid rgba(0,240,255,0.3);background:linear-gradient(135deg,rgba(0,240,255,0.05),transparent);">
+            <div class="stat-label"><i class="fas fa-bolt mr-1" style="color:var(--accent-cyan);"></i> Currently Routing To</div>
+            <div class="stat-value" id="llmCtrlActive" style="font-size:24px;color:#fff;text-shadow:0 0 10px rgba(0,240,255,0.5);">—</div>
+            <div class="stat-sub" id="llmCtrlActiveMeta">analyzing alerts</div>
+        </div>
+
+        <!-- Total Calls - KPI tile -->
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-phone-alt mr-1"></i> Total API Calls</div>
+            <div class="stat-value" id="llmCtrlCalls" style="font-size:24px;">0</div>
+            <div class="stat-sub">all providers combined</div>
+        </div>
+
+        <!-- Tokens - KPI tile -->
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-coins mr-1"></i> Tokens Used</div>
+            <div class="stat-value" id="llmCtrlTokens" style="font-size:24px;">0</div>
+            <div class="stat-sub">prompt + response</div>
+        </div>
+
+        <!-- Cost - KPI tile with warning colors -->
+        <div class="stat-card" id="costCard">
+            <div class="stat-label"><i class="fas fa-dollar-sign mr-1"></i> Est. Cost (USD)</div>
+            <div class="stat-value" id="llmCtrlCost" style="font-size:24px;color:#4ade80;">$0.00</div>
+            <div class="stat-sub" id="llmCtrlCostSub">today</div>
+        </div>
+
+        <!-- Success Rate - KPI tile -->
+        <div class="stat-card">
+            <div class="stat-label"><i class="fas fa-chart-line mr-1"></i> Success Rate</div>
+            <div class="stat-value" id="llmCtrlSuccess" style="font-size:24px;">—</div>
+            <div class="stat-sub" title="Weighted by call volume across providers">weighted avg <i class="fas fa-info-circle" style="font-size:9px;opacity:0.5;"></i></div>
+        </div>
+    </div>
+
+    <!-- Connection Status & Last Update Widget -->
+    <div class="glass-panel rounded-xl p-3 mb-6" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:6px;">
+                <span id="sseStatusDot" style="width:8px;height:8px;border-radius:50%;background:#eab308;box-shadow:0 0 6px #eab308;"></span>
+                <span id="sseStatusText" style="font-size:12px;color:#a0a0b0;">Connecting to live updates...</span>
+            </div>
+            <div style="width:1px;height:16px;background:rgba(255,255,255,0.1);"></div>
+            <div style="font-size:12px;color:#606080;">
+                Last updated: <span id="lastUpdateTime" style="color:#a0a0b0;font-family:'JetBrains Mono',monospace;">—</span>
+                <span id="dataAge" style="color:#606080;margin-left:4px;"></span>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="silenceErrorsBtn" onclick="app.toggleErrorSilence()" style="padding:6px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#a0a0b0;border-radius:6px;font-size:11px;" title="Hide non-critical health messages">
+                <i class="fas fa-bell-slash mr-1"></i>Silence Noise
+            </button>
+            <button id="liveProbeBtn" onclick="app.refreshLLMControl(true)" style="padding:6px 12px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:6px;font-size:11px;">
+                <i class="fas fa-sync-alt mr-1"></i>Health Check
+            </button>
+        </div>
+    </div>
+
+    <!-- Provider Status Section - Grouped by state -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+            <div>
+                <h3 style="font-size:15px;font-weight:700;margin:0;"><i class="fas fa-heartbeat mr-2" style="color:#22c55e;"></i>Provider Health Status</h3>
+                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Click any provider for detailed diagnostics and manual testing</p>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="app.retryAllProviders()" style="padding:8px 14px;background:rgba(245,158,11,0.14);border:1px solid rgba(245,158,11,0.35);color:#fcd34d;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-redo mr-1"></i>Reset All
+                </button>
+            </div>
+        </div>
+
+        <!-- Operational Providers -->
+        <div id="llmProvidersOperational" style="margin-bottom:16px;">
+            <div style="font-size:11px;color:#4ade80;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-check-circle"></i> Operational
+            </div>
+            <div id="llmProviderCardsOperational" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <!-- Operational provider cards rendered here -->
+            </div>
+        </div>
+
+        <!-- Degraded Providers -->
+        <div id="llmProvidersDegraded" style="margin-bottom:16px;display:none;">
+            <div style="font-size:11px;color:#facc15;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-exclamation-triangle"></i> Degraded / Cooldown
+            </div>
+            <div id="llmProviderCardsDegraded" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <!-- Degraded provider cards rendered here -->
+            </div>
+        </div>
+
+        <!-- Not Configured / Failed Providers -->
+        <div id="llmProvidersFailed" style="display:none;">
+            <div style="font-size:11px;color:#f87171;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                <i class="fas fa-times-circle"></i> Not Configured / Failed
+            </div>
+            <div id="llmProviderCardsFailed" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <!-- Failed provider cards rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Test Panel -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-vial mr-2" style="color:#a78bfa;"></i>Test Provider Response</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+            <select id="llmTestProvider" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;min-width:180px;">
+                <option value="">Auto-select (router decides)</option>
+            </select>
+            <input id="llmTestPrompt" value="Analyze this security alert: suspicious outbound connection detected" 
+                style="flex:1;min-width:280px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;" />
+            <button id="llmRunTestBtn" onclick="app.runLLMTest()" style="padding:8px 16px;background:rgba(124,58,237,0.18);border:1px solid rgba(124,58,237,0.45);color:#c4b5fd;border-radius:8px;font-size:12px;">
+                <i class="fas fa-play mr-1"></i>Test
+            </button>
+            <button id="llmRunAllTestBtn" onclick="app.runLLMTestAll()" style="padding:8px 16px;background:rgba(56,189,248,0.16);border:1px solid rgba(56,189,248,0.4);color:#7dd3fc;border-radius:8px;font-size:12px;">
+                <i class="fas fa-layer-group mr-1"></i>Test All
+            </button>
+        </div>
+        <div id="llmTestResult" style="margin-top:12px;display:none;">
+            <div style="background:#0a0a0f;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
+                <div id="llmTestResultHeader" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span id="llmTestResultStatus" style="font-size:12px;font-weight:600;"></span>
+                    <span id="llmTestResultMeta" style="font-size:11px;color:#606080;"></span>
+                </div>
+                <pre id="llmTestResultContent" style="margin:0;color:#a0a0b0;font-size:11.5px;white-space:pre-wrap;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;"></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- Failover Chain Visualization -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-code-branch mr-2" style="color:#22c55e;"></i>Automatic Failover Chain</h3>
+        <p style="font-size:12px;color:#606080;margin:0 0 12px;">If the active provider fails, traffic automatically flows to the next healthy provider in this chain.</p>
+        <div id="llmFallbackChain" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;">
+            <span style="color:#606080;font-size:12px;">Loading failover configuration...</span>
+        </div>
+        
+        <!-- Manual Override Controls -->
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.06);">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <span style="font-size:12px;color:#a0a0b0;">Manual Override:</span>
+                <select id="forceProviderSelect" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;">
+                    <option value="">Automatic (failover enabled)</option>
+                </select>
+                <button id="forceApplyBtn" onclick="app.applyForcedProvider()" style="padding:6px 12px;background:rgba(0,240,255,0.12);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:6px;font-size:11px;">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Performance Comparison -->
+    <div class="glass-panel rounded-xl p-4 mb-6">
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-chart-bar mr-2" style="color:#38bdf8;"></i>Provider Performance Comparison</h3>
+        <div id="llmUsageCompare" style="font-size:12px;">
+            <div style="color:#606080;text-align:center;padding:20px;">
+                <i class="fas fa-spinner fa-spin mr-2"></i>Loading performance metrics...
+            </div>
+        </div>
+    </div>
+
+    <!-- Routing Strategy & Risk -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="glass-panel rounded-xl p-4">
+            <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-route mr-2" style="color:#f59e0b;"></i>Routing Strategy</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                <select id="llmRoutingMode" onchange="app.onRoutingModeChange()" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;min-width:160px;">
+                    <option value="priority">Priority (failover chain)</option>
+                    <option value="cost_optimized">Cost Optimized (cheapest first)</option>
+                    <option value="severity_adaptive">Severity Adaptive (premium for critical)</option>
+                    <option value="ab_test">A/B Testing (split traffic)</option>
+                </select>
+                <div id="routingModeHelp" style="font-size:11px;color:#606080;max-width:300px;">
+                    Use failover chain order. If provider fails, automatically switch to next.
+                </div>
+            </div>
+            
+            <!-- Cost ceiling input (shown for cost_optimized) -->
+            <div id="costCeilingGroup" style="display:none;margin-bottom:12px;">
+                <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">Max cost per call (USD)</label>
+                <input id="llmRoutingCost" type="number" step="0.001" min="0" placeholder="0.005" style="width:120px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 10px;color:#fff;font-size:12px;" />
+            </div>
+            
+            <!-- A/B test inputs (shown for ab_test) -->
+            <div id="abTestGroup" style="display:none;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                    <div>
+                        <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">Provider A</label>
+                        <select id="llmRoutingA" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;width:120px;"></select>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">Provider B</label>
+                        <select id="llmRoutingB" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;width:120px;"></select>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:#606080;display:block;margin-bottom:4px;">A Traffic %</label>
+                        <input id="llmRoutingSplit" type="number" min="0" max="100" placeholder="50" style="width:80px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;" />
+                    </div>
+                </div>
+            </div>
+            
+            <button id="llmRoutingApplyBtn" onclick="app.applyRoutingStrategy()" style="padding:8px 16px;background:rgba(245,158,11,0.14);border:1px solid rgba(245,158,11,0.35);color:#fcd34d;border-radius:8px;font-size:12px;">
+                <i class="fas fa-save mr-1"></i>Save Strategy
+            </button>
+        </div>
+
+        <div class="glass-panel rounded-xl p-4">
+            <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-brain mr-2" style="color:#a78bfa;"></i>Risk Forecast</h3>
+            <div id="llmPredictiveRisk">
+                <div style="text-align:center;padding:20px;color:#606080;">
+                    <i class="fas fa-chart-area" style="font-size:24px;margin-bottom:8px;opacity:0.5;"></i>
+                    <div style="font-size:12px;">Risk forecast will appear after processing alerts</div>
+                    <div style="font-size:11px;margin-top:4px;">Based on recent alert patterns and provider performance</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Log - Deduplicated and filterable -->
+    <div class="glass-panel rounded-xl p-4">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+            <h3 style="font-size:14px;font-weight:700;margin:0;"><i class="fas fa-terminal mr-2" style="color:#a0a0b0;"></i>System Events</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="app.clearLLMEvents()" style="padding:4px 10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#606080;border-radius:6px;font-size:11px;">Clear</button>
+            </div>
+        </div>
+        <pre id="llmEventLog" style="background:#0a0a0f;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;color:#a0a0b0;font-size:11px;max-height:200px;overflow-y:auto;font-family:'JetBrains Mono',monospace;margin:0;">
+<span style="color:#606080;">// Events appear here: provider health changes, routing decisions, test results</span>
+        </pre>
+    </div>
+</div>
+
+<style>
+/* Provider card styles */
+.provider-card {
+    background: rgba(19,19,31,0.8);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 14px;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+.provider-card:hover {
+    border-color: rgba(255,255,255,0.15);
+    transform: translateY(-1px);
+}
+.provider-card.operational {
+    border-left: 3px solid #22c55e;
+}
+.provider-card.degraded {
+    border-left: 3px solid #facc15;
+}
+.provider-card.failed {
+    border-left: 3px solid #ef4444;
+}
+.provider-card.not-configured {
+    border-left: 3px solid #64748b;
+    opacity: 0.8;
+}
+.provider-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.provider-status-dot.operational {
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e;
+}
+.provider-status-dot.degraded {
+    background: #facc15;
+    box-shadow: 0 0 6px #facc15;
+}
+.provider-status-dot.failed {
+    background: #ef4444;
+    box-shadow: 0 0 6px #ef4444;
+}
+.provider-status-dot.not-configured {
+    background: #64748b;
+}
+
+/* Failover chain pills */
+.chain-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid rgba(255,255,255,0.15);
+}
+.chain-pill.healthy {
+    background: rgba(34,197,94,0.1);
+    color: #4ade80;
+    border-color: rgba(34,197,94,0.3);
+}
+.chain-pill.degraded {
+    background: rgba(250,204,21,0.1);
+    color: #facc15;
+    border-color: rgba(250,204,21,0.3);
+}
+.chain-pill.failed {
+    background: rgba(239,68,68,0.1);
+    color: #f87171;
+    border-color: rgba(239,68,68,0.3);
+}
+.chain-pill.active {
+    box-shadow: 0 0 0 2px rgba(0,240,255,0.4);
+}
+
+/* Metric sparkline placeholder */
+.sparkline {
+    height: 20px;
+    width: 60px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+}
+</style>

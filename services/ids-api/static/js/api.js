@@ -155,6 +155,16 @@ export const api = {
       }),
     }),
   getFeedbackStats: () => requestNoAuth('/api/llm/feedback/stats'),
+
+  // ── LLM Provider Management (requires auth) ─────────────────────────
+  retryAllProviders: () => request('/api/llm/retry-all', { method: 'POST' }),
+  resetLLMCooldown: () => request('/api/llm/reset-cooldown', { method: 'POST' }),
+  enableLLMProvider: (id, enabled = true) =>
+    request(`/api/llm/providers/${id}/enable`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }),
   // ── IoT Fleet Scaling ──────────────────────────────────────────────
   getIoTScale:  () => requestNoAuth('/api/iot/scale'),
   setIoTScale:  (replicas, service) => {
@@ -165,7 +175,13 @@ export const api = {
 
   // ── Chaos Mode ─────────────────────────────────────────────────────
   startChaos:   (mode = 'quick') => requestNoAuth(`/api/demo/chaos?mode=${mode}`, { method: 'POST' }),
-  getChaosStatus: () => requestNoAuth('/api/demo/chaos/status'),};
+  getChaosStatus: () => requestNoAuth('/api/demo/chaos/status'),
+
+  // ── Attack Registry & Runner ───────────────────────────────────
+  getAttackRegistry: () => requestNoAuth('/api/attacks/registry'),
+  runAttackScenario: (scenarioId, campaign = false) =>
+    requestNoAuth(`/api/attacks/run?scenario_id=${scenarioId}&campaign=${campaign}`, { method: 'POST' }),
+};
 
 /**
  * Fetch all overview data in parallel — used by refreshAll().

@@ -40,6 +40,7 @@ import logging
 import os
 import sys
 import time
+import asyncio
 from datetime import datetime
 
 from fastapi import FastAPI
@@ -138,17 +139,25 @@ try:
                 """Per-engine runtime statistics (attempts, latencies, …)."""
                 return self._m.runtime_stats
 
-            async def analyze(self, alert_dict):
+            async def analyze(self, alert_dict, preferred_engine=None):
                 """Run LLM analysis on an alert dictionary.
 
                 Returns a dict with ``status``, ``analysis``, ``provider``,
                 and optionally ``failed_engines``.
                 """
-                return await self._m.analyze(alert_dict)
+                return await self._m.analyze(alert_dict, preferred_engine=preferred_engine)
 
             def get_available_providers(self):
                 """Return list of engine names that have valid API keys."""
                 return self._m.get_available_engines()
+
+            def get_priority_order(self):
+                """Return effective runtime provider priority order."""
+                return self._m.get_priority_order()
+
+            def set_priority_order(self, providers):
+                """Update runtime provider priority order."""
+                return self._m.set_priority_order(providers)
 
             def get_status(self):
                 """Build a status dict compatible with the new LLMManager.
@@ -177,6 +186,7 @@ try:
                 return {
                     "provider_count": len(providers),
                     "providers": providers,
+                    "priority_order": self._m.get_priority_order(),
                     "details": details,
                 }
 
@@ -289,9 +299,12 @@ from api.llm import router as llm_router  # noqa: E402             — /api/llm/
 from api.iot import router as iot_router  # noqa: E402             — /api/iot/*          (telemetry, sensors)
 from api.metrics_routes import router as metrics_router  # noqa: E402 — /health, /metrics, /api/metrics
 from api.health import router as health_router  # noqa: E402       — /, /ui
-from api.demo import router as demo_router  # noqa: E402           — /api/iot/scale, /api/demo/chaos
+from api.demo import router as demo_router  # noqa: E402           — /api/iot/scale
 from api.analyst import router as analyst_router  # noqa: E402         — /api/analyst/* (AI Chat)
 from api.credits import credits_router as credits_router  # noqa: E402     — /llm/credits/* (LLM Monitoring)
+from api.audit import router as audit_router  # noqa: E402         — /api/audit/* (forensics timeline)
+from api.logs import router as logs_router  # noqa: E402           — /api/logs/* (unified SOC logs)
+from api.health_monitor import router as health_monitor_router  # noqa: E402 — /api/health/* (enhanced health)
 
 app.include_router(auth_router)
 app.include_router(alerts_router)
@@ -304,6 +317,9 @@ app.include_router(health_router)
 app.include_router(demo_router)
 app.include_router(analyst_router)
 app.include_router(credits_router)
+app.include_router(audit_router)
+app.include_router(logs_router)
+app.include_router(health_monitor_router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -325,6 +341,8 @@ from infrastructure.metrics import (  # noqa: E402
     PROM_IOT_DEVICES_ACTIVE,
     PROM_IOT_EVENTS_TOTAL,
     PROM_LLM_CACHE_SIZE,
+    PROM_LLM_BUDGET_REMAINING_USD,
+    PROM_LLM_BUDGET_CEILING_USD,
     PROM_UPTIME_SECONDS,
 )
 
@@ -486,6 +504,8 @@ async def startup():
     if llm_manager:
         providers = llm_manager.get_available_providers()
         logger.info(f"LLM: ✅ {len(providers)} provider(s) — {', '.join(providers)}")
+        # Asynchronously validate providers without blocking startup
+        asyncio.create_task(llm_manager.validate_providers_on_startup())
     else:
         logger.info("LLM: ❌ Not configured")
 
@@ -508,15 +528,64 @@ async def startup():
 
     # -- Set initial gauge values --
     PROM_IOT_DEVICES_ACTIVE.set(db_stats.get("iot_devices", 0))
-    refresh_iot_active_metric()    # live K8s pod count
+    # Do not block app startup on Kubernetes API reachability. In some
+    # constrained demo environments K8s API calls can hang long enough to
+    # trip startup probes before Uvicorn binds port 8000.
+    try:
+        await asyncio.wait_for(asyncio.to_thread(refresh_iot_active_metric), timeout=2.0)
+    except Exception:
+        logger.warning("Skipping startup IoT metric refresh due to Kubernetes API timeout")
     update_circuit_breaker_metrics()  # per-engine state gauges
     PROM_LLM_CACHE_SIZE.set(0)     # cache is empty at startup
+
+    # -- Initialise daily budget gauges from DB cost ceiling config --
+    try:
+        from api._state import db as _state_db
+        _ceiling_cfg = _state_db.get_system_config('llm_cost_ceiling', {
+            'max_daily_usd': 10.0, 'current_daily_usd': 0.0, 'last_reset': None
+        })
+        _ceil = float(_ceiling_cfg.get('max_daily_usd', 10.0))
+        _spent = float(_ceiling_cfg.get('current_daily_usd', 0.0))
+        PROM_LLM_BUDGET_CEILING_USD.set(_ceil)
+        PROM_LLM_BUDGET_REMAINING_USD.set(max(0.0, _ceil - _spent))
+        logger.info(f"💰 LLM budget: ${_spent:.4f} spent / ${_ceil:.2f} ceiling")
+    except Exception as _e:
+        logger.debug(f"Could not initialise budget gauges at startup (non-fatal): {_e}")
 
     # -- Set automation mode gauge --
     set_automation_mode_metric(get_automation_mode())
 
     logger.info(f"🔧 Automation mode: {get_automation_mode()}")
     logger.info("📊 Prometheus metrics initialized")
+
+    # -- Periodic LLM provider health snapshots (DB-backed) --
+    # This is intentionally lightweight: it checks API reachability/billing endpoints
+    # where available (no large prompts) and persists a compact status so the UI can
+    # show stable provider health across restarts.
+    if os.getenv("LLM_HEALTH_SNAPSHOT_ENABLED", "1").strip() not in ("0", "false", "no"):
+        interval_s = max(60, int(os.getenv("LLM_HEALTH_SNAPSHOT_INTERVAL_SECONDS", "300")))
+
+        async def _snapshot_loop():
+            from llm_credit_checker import LLMHealthMonitor
+
+            monitor = LLMHealthMonitor()
+            while True:
+                try:
+                    health = await monitor.get_health_status()
+                    for name, h in (health or {}).items():
+                        try:
+                            db.upsert_llm_provider_health(
+                                name,
+                                getattr(h, "health_status", None).value if getattr(h, "health_status", None) else "unknown",
+                                details=h.to_dict() if hasattr(h, "to_dict") else {},
+                            )
+                        except Exception:
+                            pass
+                except Exception as e:
+                    logger.debug(f"LLM health snapshot loop error (non-fatal): {e}")
+                await asyncio.sleep(interval_s)
+
+        asyncio.create_task(_snapshot_loop())
 
 
 @app.on_event("shutdown")

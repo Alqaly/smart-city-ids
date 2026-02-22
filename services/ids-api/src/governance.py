@@ -3,9 +3,10 @@ Human-in-the-Loop Governance System
 Capstone II Integration Plan - TASK 4
 
 Implements three automation modes:
-- AUTOPILOT: Full automation, all LLM-recommended actions execute immediately
-- ASSISTED: Actions with severity >= 8 require human approval
-- MANUAL: All actions require human approval, system only recommends
+- AUTONOMOUS: High-confidence actions auto-execute
+- ASSISTED: Medium-confidence actions require quick operator approval
+- MANUAL: Human-only execution
+- EMERGENCY: Catastrophic high-confidence events bypass gates
 
 Each mode provides IEEE-defensible trade-offs between response time and safety.
 """
@@ -33,29 +34,25 @@ class AutomationMode(Enum):
     """
     Human-in-the-Loop automation modes.
     
-    AUTOPILOT: Maximum automation
-    - All LLM-recommended actions execute immediately
-    - Fastest response time (seconds)
-    - Best for: Known threat patterns, high-confidence scenarios
+    AUTONOMOUS: High-confidence autonomous execution
     
     ASSISTED: Balanced automation
-    - Low/medium severity actions execute automatically
-    - High severity (>= 8) requires human approval
-    - Moderate response time (seconds to minutes)
-    - Best for: Production environments with SOC oversight
+    - Medium confidence actions require 1-click approval
     
     MANUAL: Human-controlled
-    - All actions require explicit approval
-    - System provides recommendations only
-    - Longest response time (depends on operator)
-    - Best for: Testing, compliance-sensitive environments
+    - All actions require explicit operator action
+
+    EMERGENCY: Catastrophic threat response
+    - Severity + confidence threshold bypasses normal gates
     """
-    AUTOPILOT = "autopilot"
+    AUTONOMOUS = "autonomous"
     ASSISTED = "assisted"
     MANUAL = "manual"
+    EMERGENCY = "emergency"
     
     # Legacy compatibility
-    LIVE = "autopilot"     # Map old "live" to autopilot
+    AUTOPILOT = "autonomous"
+    LIVE = "autonomous"     # Map old "live" to autonomous
     DRY_RUN = "manual"     # Map old "dry-run" to manual
 
 
@@ -104,7 +101,10 @@ class GovernanceController:
     
     # Configuration defaults
     DEFAULT_MODE = AutomationMode.ASSISTED
-    ASSISTED_THRESHOLD = 8  # Severity at which ASSISTED mode requires approval
+    AUTONOMOUS_MIN_CONFIDENCE = 0.90
+    ASSISTED_MIN_CONFIDENCE = 0.70
+    EMERGENCY_MIN_CONFIDENCE = 0.85
+    EMERGENCY_SEVERITY = 10
     ACTION_EXPIRY_SECONDS = 300  # 5 minutes
     MAX_PENDING_ACTIONS = 100
     
@@ -124,7 +124,10 @@ class GovernanceController:
         # Load configuration
         mode_str = os.getenv("AUTOMATION_MODE", "assisted").lower()
         self._mode = self._parse_mode(mode_str)
-        self._assisted_threshold = int(os.getenv("ASSISTED_THRESHOLD", str(self.ASSISTED_THRESHOLD)))
+        self._autonomous_min_confidence = float(os.getenv("AUTONOMOUS_MIN_CONFIDENCE", str(self.AUTONOMOUS_MIN_CONFIDENCE)))
+        self._assisted_min_confidence = float(os.getenv("ASSISTED_MIN_CONFIDENCE", str(self.ASSISTED_MIN_CONFIDENCE)))
+        self._emergency_min_confidence = float(os.getenv("EMERGENCY_MIN_CONFIDENCE", str(self.EMERGENCY_MIN_CONFIDENCE)))
+        self._emergency_severity = int(os.getenv("EMERGENCY_SEVERITY_THRESHOLD", str(self.EMERGENCY_SEVERITY)))
         self._action_expiry = int(os.getenv("ACTION_EXPIRY_SECONDS", str(self.ACTION_EXPIRY_SECONDS)))
         
         # State
@@ -148,15 +151,21 @@ class GovernanceController:
             "blocked_dry_run": 0,
         }
         
-        logger.info(f"GovernanceController initialized: mode={self._mode.value}, threshold={self._assisted_threshold}")
+        logger.info(
+            "GovernanceController initialized: "
+            f"mode={self._mode.value}, autonomous={self._autonomous_min_confidence}, "
+            f"assisted={self._assisted_min_confidence}, emergency=sev{self._emergency_severity}/conf{self._emergency_min_confidence}"
+        )
     
     def _parse_mode(self, mode_str: str) -> AutomationMode:
         """Parse mode string with legacy compatibility."""
         mode_map = {
-            "autopilot": AutomationMode.AUTOPILOT,
+            "autonomous": AutomationMode.AUTONOMOUS,
+            "autopilot": AutomationMode.AUTONOMOUS,
             "assisted": AutomationMode.ASSISTED,
             "manual": AutomationMode.MANUAL,
-            "live": AutomationMode.AUTOPILOT,
+            "emergency": AutomationMode.EMERGENCY,
+            "live": AutomationMode.AUTONOMOUS,
             "dry-run": AutomationMode.MANUAL,
             "approval-required": AutomationMode.ASSISTED,
         }
@@ -175,7 +184,8 @@ class GovernanceController:
         logger.warning(f"Automation mode changed: {old_mode.value} → {value.value}")
         self._log_audit("mode_change", {"old": old_mode.value, "new": value.value})
     
-    def should_auto_execute(self, action_type: str, severity: int, 
+    def should_auto_execute(self, action_type: str, severity: int,
+                           confidence: float = 0.0,
                            target: Optional[str] = None) -> tuple[bool, str]:
         """
         Determine if an action should execute automatically.
@@ -185,16 +195,31 @@ class GovernanceController:
         """
         self._metrics["total_actions_requested"] += 1
         
-        if self._mode == AutomationMode.AUTOPILOT:
+        if (
+            self._mode == AutomationMode.EMERGENCY
+            and severity >= self._emergency_severity
+            and confidence >= self._emergency_min_confidence
+        ):
             self._metrics["auto_executed"] += 1
-            return True, "AUTOPILOT mode: all actions auto-execute"
+            return True, "EMERGENCY mode: severity/confidence threshold met"
+        
+        if self._mode == AutomationMode.AUTONOMOUS:
+            if confidence >= self._autonomous_min_confidence:
+                self._metrics["auto_executed"] += 1
+                return True, f"AUTONOMOUS mode: confidence {confidence:.2f} >= {self._autonomous_min_confidence:.2f}"
+            return False, f"AUTONOMOUS mode: confidence {confidence:.2f} below threshold"
         
         elif self._mode == AutomationMode.ASSISTED:
-            if severity < self._assisted_threshold:
+            if confidence >= self._autonomous_min_confidence:
                 self._metrics["auto_executed"] += 1
-                return True, f"ASSISTED mode: severity {severity} < threshold {self._assisted_threshold}"
+                return True, "ASSISTED mode: high confidence auto-execute"
+            elif confidence >= self._assisted_min_confidence:
+                return False, (
+                    f"ASSISTED mode: confidence {confidence:.2f} in approval band "
+                    f"[{self._assisted_min_confidence:.2f}, {self._autonomous_min_confidence:.2f})"
+                )
             else:
-                return False, f"ASSISTED mode: severity {severity} >= threshold {self._assisted_threshold}, requires approval"
+                return False, f"ASSISTED mode: confidence {confidence:.2f} below assisted threshold"
         
         elif self._mode == AutomationMode.MANUAL:
             return False, "MANUAL mode: all actions require human approval"
@@ -203,6 +228,7 @@ class GovernanceController:
     
     def request_action(self, action_type: str, target: str, severity: int,
                       reason: str, recommended_by: str = "llm",
+                      confidence: float = 0.0,
                       alert_id: Optional[str] = None,
                       execute_callback: Optional[Callable] = None) -> Dict:
         """
@@ -220,7 +246,7 @@ class GovernanceController:
         Returns:
             Dict with status and action details
         """
-        should_execute, explanation = self.should_auto_execute(action_type, severity, target)
+        should_execute, explanation = self.should_auto_execute(action_type, severity, confidence, target)
         
         if should_execute:
             # Execute immediately
@@ -400,7 +426,10 @@ class GovernanceController:
         self._cleanup_expired()
         return {
             "mode": self._mode.value,
-            "assisted_threshold": self._assisted_threshold,
+            "autonomous_min_confidence": self._autonomous_min_confidence,
+            "assisted_min_confidence": self._assisted_min_confidence,
+            "emergency_min_confidence": self._emergency_min_confidence,
+            "emergency_severity": self._emergency_severity,
             "action_expiry_seconds": self._action_expiry,
             "pending_count": len(self._pending_actions),
             "metrics": self._metrics.copy()
@@ -474,16 +503,18 @@ def set_automation_mode(mode: str) -> Dict:
         governance.mode = AutomationMode(mode)
         return {"status": "success", "mode": mode}
     except ValueError:
-        return {"status": "error", "reason": f"Invalid mode: {mode}. Use: autopilot, assisted, manual"}
+        return {"status": "error", "reason": f"Invalid mode: {mode}. Use: autonomous, assisted, manual, emergency"}
 
 def request_automated_action(action_type: str, target: str, severity: int,
-                            reason: str, execute_fn: Optional[Callable] = None) -> Dict:
+                            reason: str, execute_fn: Optional[Callable] = None,
+                            confidence: float = 0.0) -> Dict:
     """Request an automated action through governance."""
     return governance.request_action(
         action_type=action_type,
         target=target,
         severity=severity,
         reason=reason,
+        confidence=confidence,
         execute_callback=execute_fn
     )
 

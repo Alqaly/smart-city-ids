@@ -473,7 +473,7 @@ Capstone II implementation added approximately 5,000+ lines of production code a
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `main.py` | 2,162 | FastAPI application, 37 endpoints |
+| `main.py` | current | FastAPI bootstrap and modular router wiring |
 | `database.py` | 894 | PostgreSQL + in-memory fallback |
 | `governance.py` | 508 | Human-in-the-loop controller |
 | `operator_interface.py` | 495 | Operator dashboard service |

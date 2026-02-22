@@ -10,6 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/lib/script-utils.sh"
+source "$SCRIPT_DIR/lib/llm-control.sh"
 
 init_script "$0" "Smart City IDS Demo Day"
 
@@ -92,6 +93,11 @@ check_llm_runtime_status() {
     [[ -n "$token" ]] || die "Could not login to ids-api on localhost:8000 (port-forward missing?)"
 
     curl -s http://localhost:8000/api/llm/status -H "Authorization: Bearer $token" | jq .
+    
+    # Also check credits
+    echo ""
+    log_info "Checking LLM credits..."
+    llm_check_credits 2.0 true || true
 }
 
 start_local_port_forwards() {
@@ -122,18 +128,17 @@ run_controlled_attacks() {
     echo "Runs: $RUNS"
     echo ""
 
-    local pipeline_args=(--url "http://localhost:8000")
-
+    local duration="30"
     case "$PROFILE" in
-        minimal)  pipeline_args+=(--quick) ;;
-        standard) pipeline_args+=(--quick) ;;
-        full)     ;; # all 13 scenarios
+        minimal)  duration="20" ;;
+        standard) duration="30" ;;
+        full)     duration="60" ;;
     esac
 
     local i
     for i in $(seq 1 "$RUNS"); do
         echo "Run $i/$RUNS"
-        bash "$SCRIPT_DIR/attack-iot-pipeline.sh" "${pipeline_args[@]}" || true
+        bash "$SCRIPT_DIR/run-live-attacks.sh" --duration "$duration" || true
         echo ""
     done
 }

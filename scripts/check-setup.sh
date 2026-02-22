@@ -9,6 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
+source "$SCRIPT_DIR/lib/llm-control.sh"
 
 VERBOSE=0
 while [[ $# -gt 0 ]]; do
@@ -217,6 +218,37 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
+# LLM Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+log_section "9. LLM CONFIGURATION"
+
+LLM_CONFIGURED=0
+for provider in xai openai anthropic gemini kimi; do
+    var_name="${provider^^}_API_KEY"
+    if [[ -n "${!var_name:-}" ]]; then
+        log_info "$provider: API key configured ✓"
+        ((LLM_CONFIGURED++))
+        ((PASSED++))
+    else
+        log_warn "$provider: No API key"
+    fi
+done
+
+if [[ $LLM_CONFIGURED -eq 0 ]]; then
+    log_error "No LLM providers configured!"
+    log_info "Set at least one of: XAI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, KIMI_API_KEY"
+    ((FAILED++))
+elif [[ $LLM_CONFIGURED -lt 2 ]]; then
+    log_warn "Only 1 LLM provider configured (recommend 2+ for failover)"
+    ((WARNINGS++))
+else
+    log_info "$LLM_CONFIGURED providers configured"
+fi
+
+log_subsection "Current Priority"
+log_info "Priority order: ${CYAN}${LLM_PRIORITY}${RESET}"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -238,8 +270,14 @@ if [[ $FAILED -eq 0 ]]; then
     echo "  1. Set LLM API key if not already set:"
     echo "     export XAI_API_KEY='your-key' OR export OPENAI_API_KEY='your-key'"
     echo ""
-    echo "  2. Deploy the system:"
+    echo "  2. Check LLM credits before deployment:"
+    echo "     ./scripts/llm-manager.sh credits"
+    echo ""
+    echo "  3. Deploy the system:"
     echo "     sudo bash scripts/start-everything.sh"
+    echo ""
+    echo "  4. For LLM control during attacks:"
+    echo "     ./scripts/llm-manager.sh interactive"
     echo ""
     exit 0
 else

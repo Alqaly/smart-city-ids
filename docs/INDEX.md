@@ -39,12 +39,16 @@ The Smart City IDS project now has comprehensive, professional documentation org
 | **[OPERATIONS.md](OPERATIONS.md)** | Operational tasks | 10 min | Operators |
 | **[DEVELOPMENT.md](DEVELOPMENT.md)** | Code structure & contribution | 15 min | Developers |
 | **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | Common issues & solutions | 10 min | Everyone |
+| **[SAFETY_AND_ETHICS.md](SAFETY_AND_ETHICS.md)** | Containment, NetworkPolicy audit, demo safety | 10 min | Thesis / Operators |
 
 ### 📚 Reference & Technical Details
 
 | Doc | Purpose | Time | Audience |
 |-----|---------|------|----------|
 | **[LOG_FORMAT_GUIDE.md](LOG_FORMAT_GUIDE.md)** | Alert JSON schema | 10 min | Developers |
+| **[ATTACK_SIMULATION_GUIDE.md](ATTACK_SIMULATION_GUIDE.md)** | Attack scenarios, governance modes, and applicability scope | 10 min | Operators / Demo Audience |
+| **[ATTACK_COVERAGE_MATRIX.json](ATTACK_COVERAGE_MATRIX.json)** | Machine-readable scenario → ATT&CK mapping (appendix artifact) | 5 min | Thesis / Reviewers |
+| **[ATTACK_COVERAGE_MATRIX.csv](ATTACK_COVERAGE_MATRIX.csv)** | Spreadsheet-friendly coverage table | 5 min | Thesis / Reviewers |
 | **[SETUP.md](SETUP.md)** | Detailed installation | 20 min | Deployers |
 | **[VALIDATION_CHECKLIST.md](VALIDATION_CHECKLIST.md)** | Production validation | 15 min | DevOps |
 
@@ -58,6 +62,14 @@ The Smart City IDS project now has comprehensive, professional documentation org
 | **[EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md)** | Ready-to-use explanations | Students |
 | **[METRICS_AUDIT.md](METRICS_AUDIT.md)** | Metric realism validation | Analysts |
 | **[LLM_REALITY_CHECK.md](LLM_REALITY_CHECK.md)** | LLM capabilities & limits | Engineers |
+
+### 📝 Capstone Writing Implementation
+
+| Doc | Purpose | Audience |
+|-----|---------|----------|
+| **[CAPSTONE_70P_REPORT_BLUEPRINT.md](CAPSTONE_70P_REPORT_BLUEPRINT.md)** | 70-page IEEE chapter/page blueprint | Student/Author |
+| **[CAPSTONE_CANONICAL_SOURCE_LEDGER.md](CAPSTONE_CANONICAL_SOURCE_LEDGER.md)** | Canonical claim source control | Student/Reviewer |
+| **[CAPSTONE_EVIDENCE_MATRIX.md](CAPSTONE_EVIDENCE_MATRIX.md)** | Chapter-to-evidence traceability map | Student/Examiner |
 
 ### 📊 Project Status
 

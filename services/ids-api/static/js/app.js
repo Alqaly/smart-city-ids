@@ -66,7 +66,13 @@ let activeTab = 'overview';
 function doLogin() {
   const uEl = $('loginUser'), pEl = $('loginPass');
   if (!uEl || !pEl) return;
-  const u = uEl.value, p = pEl.value;
+  const u = (uEl.value || '').trim();
+  const p = (pEl.value || '').trim();
+  const err = $('loginError');
+  if (!u || !p) {
+    if (err) { err.textContent = 'Please enter username and password'; err.style.display = 'block'; }
+    return;
+  }
   api.login(u, p)
     .then(d => {
       if (d && d.access_token) {
@@ -74,12 +80,10 @@ function doLogin() {
         localStorage.setItem('ids_token', d.access_token);
         showDashboard();
       } else {
-        const err = $('loginError');
         if (err) { err.textContent = (d && d.detail) || 'Login failed'; err.style.display = 'block'; }
       }
     })
     .catch(() => {
-      const err = $('loginError');
       if (err) { err.textContent = 'Connection error'; err.style.display = 'block'; }
     });
 }
@@ -177,6 +181,9 @@ function refreshAll() {
     }
   });
 }
+
+// Expose refresh function so LLM provider buttons can trigger a refresh
+window._llmRefresh = refreshAll;
 
 /**
  * Derive LLM info from /health response (no auth needed).
