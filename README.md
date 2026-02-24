@@ -6,7 +6,7 @@ LLM-driven Intrusion Detection System for smart city IoT infrastructure. Runs on
 
 ## 🎓 DEMO DAY - Quick Start
 
-**System Status: ✅ READY**
+**System Status: READY (demo-focused build)**
 
 ```bash
 # 1. Pre-demo check (run this first!)
@@ -19,19 +19,15 @@ open http://localhost:30800/ui
 bash scripts/run-live-attacks.sh --duration 30
 
 # 4. Read full cheat sheet
-cat DEMO_CHEAT_SHEET.md
+cat docs/DEMO_CHEAT_SHEET.md
 ```
 
 **Current Status:**
 - ✅ Dashboard: http://localhost:30800/ui
 - ✅ 6,577+ alerts processed
 - ✅ 13 IoT devices monitored  
-- ✅ 5/5 LLM providers operational
+- ✅ Multi-provider LLM failover supported (provider health depends on current keys/credits)
 - ✅ All pipelines GREEN
-
----
-
-## What This Is
 
 ---
 
@@ -59,7 +55,7 @@ Detection                    Analysis                    Response
 └─────────┘                 └──────────┘                └──────────────┘
                                  │
                             ┌────┴─────┐
-                            │Governance│ autopilot / assisted / manual
+                            │Governance│ autonomous / assisted / manual
                             └──────────┘
 ```
 
@@ -102,6 +98,19 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | Grafana | http://localhost:30300 |
 
 **Demo credentials**: `admin` / `admin`
+
+## Key Documents
+
+| Document | Purpose |
+|---|---|
+| `CAPSTONE_2_REPORT.md` | Final capstone report (Markdown source) |
+| `CAPSTONE_2_REPORT.pdf` | Final capstone report (PDF submission) |
+| `VALIDATION_REPORT.md` | Validation evidence and demo fixes summary |
+| `docs/ARCHITECTURE.md` | System architecture and component design |
+| `docs/EXAMINER_QA_30.md` | Examiner Q&A prep (validated answers) |
+| `docs/FORCED_ARCHITECTURE_50Q.md` | Deep backup / gap-analysis style Q&A |
+| `docs/DEMO_CHEAT_SHEET.md` | Demo-day commands and talking points |
+| `scripts/README.md` | Script index (what to run, what is archived/disabled) |
 
 ### LLM API Keys — Single Source of Truth
 
@@ -213,6 +222,10 @@ curl http://localhost:30800/api/llm/diagnostics | python3 -m json.tool
 # Bootstrap + verify + run attacks + validate
 ./scripts/demo-day.sh --profile minimal
 ```
+
+## Script Reference
+
+Use `scripts/README.md` for the current script inventory, recommended demo sequence, and disabled legacy stubs.
 
 ---
 
