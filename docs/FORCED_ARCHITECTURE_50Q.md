@@ -5,6 +5,19 @@ Scope reviewed: IDS API routers/state/config, LLM provider manager stack, Falco/
 
 This document answers each required question from code reality, then adds improvement guidance where gaps exist.
 
+## Status Note (2026-02-24)
+
+This file is a broad architecture review snapshot and includes some historical references
+from earlier dashboard/governance iterations. For examiner prep, prefer:
+
+- `docs/EXAMINER_QA_30.md` (clean, current, concise answers)
+- `docs/ARCHITECTURE.md` (full technical reference)
+
+Current-state corrections (important):
+- Governance mode names in the live UI/API are `autonomous`, `assisted`, `manual` (with legacy aliases normalized).
+- Dashboard behavior now includes explicit dedup/flood-suppression visibility and clearer platform-noise labeling.
+- Alert flood handling now suppresses throttled duplicates before DB/SSE dashboard broadcast.
+
 ## ✅ P0 Implementation Update (2026-02-20)
 
 The three P0 backlog items are now implemented in runtime code:
@@ -196,10 +209,10 @@ The three P0 backlog items are now implemented in runtime code:
 - Shows event_type/status/timestamps and raw payload blocks.
 - Improvement: convert to true modal with stage badges and elapsed step timings.
 
-32) What are the 12 navigation tabs and purpose?
-- Current implementation has 9 tabs: Overview, Alerts, IoT Mesh, K8s Cluster, LLM Control, Security Chat, Audit Log, Logs, Attack Simulation.
-- Not 12 in current code.
-- Improvement: add three planned tabs (MITRE Heatmap, Reports, Settings) or update requirement baseline to 9.
+32) What are the navigation tabs and purpose?
+- The required baseline and the current UI can differ by branch/revision; verify against the live dashboard build used for the demo.
+- This review snapshot observed fewer than 12 tabs in that branch and flagged the mismatch as a documentation/requirements issue.
+- Improvement: keep a versioned UI inventory table in docs tied to release date/commit.
 
 33) Explain hotkeys (Ctrl+1, Ctrl+A, etc)?
 - Global hotkeys are not implemented in current index.html (only Enter handlers in inputs).
@@ -235,16 +248,17 @@ The three P0 backlog items are now implemented in runtime code:
 - Improvement: add confidence and estimated blast-radius per suggested action.
 
 40) What rate limits protect chat interface?
-- No dedicated per-user chat limiter in analyst router currently.
-- Global API and alert-specific limiters exist elsewhere, but chat lacks per-session/user quotas.
-- Improvement: implement per-user token bucket and max concurrent chat requests.
+- A dedicated per-user/session token-bucket limiter exists in `services/ids-api/src/api/analyst.py`.
+- Tunables: `ANALYST_CHAT_RATE_LIMIT_PER_MINUTE` and `ANALYST_CHAT_RATE_LIMIT_BURST`.
+- Improvement: add explicit max-concurrent chat request caps and surface limiter status in diagnostics.
 
 ---
 
 ## 🛡️ SECURITY & OPERATIONS (41-50)
 
 41) How does HITL work for critical actions?
-- Governance modes: autopilot/assisted/manual; assisted threshold controls approval requirement.
+- Governance modes are `autonomous` / `assisted` / `manual` (legacy names may be normalized internally).
+- Assisted mode uses confidence thresholds to require approvals for medium-confidence actions; manual requires operator approval for all actions.
 - Analyst submit endpoint enforces confirmation_required then governance pending/decision path.
 - Improvement: enforce dual-approval for severity >=9 actions.
 
@@ -274,9 +288,9 @@ The three P0 backlog items are now implemented in runtime code:
 - Improvement: add embedding similarity cache for near-duplicate alerts with threshold tuning.
 
 47) Explain per-user chat rate limiting?
-- Currently absent as dedicated feature.
-- Existing auth identifies users, but analyst chat endpoint has no per-user limiter.
-- Improvement: add user/session limiter (requests/min + burst) and websocket message limits.
+- Implemented: `services/ids-api/src/api/analyst.py` includes a per-user/session token bucket (`PerUserTokenBucket`).
+- Requests are keyed by normalized user/session identity and consume tokens with refill over time.
+- Improvement: add websocket message-rate limits and admin-observable limiter metrics.
 
 48) What happens on DDoS attack simulation?
 - Attack simulation injects synthetic alert payload via /api/alerts/internal.
@@ -298,9 +312,9 @@ The three P0 backlog items are now implemented in runtime code:
 ## ⚙️ ADDITIONAL OPERABILITY Q&A
 
 1) How does the system behave when all external dependencies (K8s, DB, all 5 LLM providers) fail simultaneously? Does it queue alerts, drop them, or crash?
-- System degrades instead of crashing: database falls back to in-memory storage, and LLM path falls back to safe-mode local analysis when enabled.
-- Admission control still applies: token-bucket limiter and bounded request queue reject overload with 429/503.
-- Result: no hard crash by design, but alerts may be throttled/rejected under sustained overload.
+- System is designed to degrade rather than hard-crash: DB can fall back to in-memory storage, and detector/API admission control still applies.
+- Current branch should not assume a local-LLM fallback path; if all providers fail, analysis degrades and automation is constrained by governance/error handling.
+- Bounded queue + rate limits + alert throttling can reject or suppress alerts under sustained overload (429/503/throttled), which is intentional backpressure.
 
 2) Can an attacker bypass LLM analysis by crafting specific alert payloads? Is there input validation or prompt injection detection?
 - Input validation exists via Pydantic schema (field lengths, allowed priority values, ISO timestamp, output_fields count cap).
@@ -316,7 +330,7 @@ The three P0 backlog items are now implemented in runtime code:
 - Automated before/after impact assessment snapshots are not implemented; proving non-regression still requires manual comparative analysis.
 
 5) What prevents a compromised analyst account from mass-destroying infrastructure? Are there approval velocity limits and dual-approval for critical actions?
-- Governance modes and approval queues exist (autopilot/assisted/manual), with protected-service blocking and audit trail.
+- Governance modes and approval queues exist (`autonomous`/`assisted`/`manual`), with protected-service blocking and audit trail.
 - Dual-approval and approval velocity/rate limits are not implemented in current governance endpoints.
 - Authentication is explicitly demo-grade and should be upgraded for production RBAC/identity assurance.
 

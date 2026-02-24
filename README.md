@@ -4,6 +4,37 @@ LLM-driven Intrusion Detection System for smart city IoT infrastructure. Runs on
 
 ---
 
+## 🎓 DEMO DAY - Quick Start
+
+**System Status: ✅ READY**
+
+```bash
+# 1. Pre-demo check (run this first!)
+bash scripts/pre-demo-check.sh
+
+# 2. Open dashboard
+open http://localhost:30800/ui
+
+# 3. Run attack demo
+bash scripts/run-live-attacks.sh --duration 30
+
+# 4. Read full cheat sheet
+cat DEMO_CHEAT_SHEET.md
+```
+
+**Current Status:**
+- ✅ Dashboard: http://localhost:30800/ui
+- ✅ 6,577+ alerts processed
+- ✅ 13 IoT devices monitored  
+- ✅ 5/5 LLM providers operational
+- ✅ All pipelines GREEN
+
+---
+
+## What This Is
+
+---
+
 ## What This Is
 
 A working IDS that:
@@ -70,7 +101,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | Prometheus | http://localhost:31106 |
 | Grafana | http://localhost:30300 |
 
-**Demo credentials**: `analyst` / `analyst`
+**Demo credentials**: `admin` / `admin`
 
 ### LLM API Keys — Single Source of Truth
 
@@ -98,6 +129,57 @@ bash scripts/apply-llm-env-to-k8s-secret.sh
 # 3. Verify end-to-end
 bash scripts/llm-manager.sh check
 ```
+
+### Add / Rotate an LLM API Key (Operator Runbook)
+
+Use this when a provider shows `Key invalid`, `quota exceeded`, `circuit open`, or you want to enable a new provider.
+
+1. Update the key in `.env` (single source of truth)
+- One or more of:
+- `KIMI_API_KEY`
+- `XAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+- `OPENAI_API_KEY`
+
+2. Sync `.env` into the Kubernetes secret used by `ids-api`
+```bash
+bash scripts/apply-llm-env-to-k8s-secret.sh
+```
+
+3. Redeploy `ids-api` so the new secret/env is loaded
+```bash
+bash scripts/deploy-code.sh
+```
+
+4. Reset provider failure state (cooldowns + circuit breakers)
+```bash
+TOKEN=$(curl -s http://localhost:30800/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
+
+curl -s -X POST http://localhost:30800/api/llm/retry-all \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+5. Probe/test a provider directly (example: Kimi)
+```bash
+curl -s -X POST http://localhost:30800/api/llm/test/kimi \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Analyze: suspicious outbound connection"}' | jq .
+```
+
+6. Verify dashboard + diagnostics
+```bash
+curl -s http://localhost:30800/api/llm/diagnostics | jq .
+curl -s http://localhost:30800/api/metrics/llm-usage?window=today | jq .
+```
+
+Notes:
+- `retry-all` resets provider states and circuit breakers; it does **not** fix invalid keys or exhausted credits.
+- A provider can be configured but still unusable (bad key / no credits / quota / model access issue).
+- If only one provider is healthy (e.g. Kimi), failover still works but capacity/resilience is reduced.
 
 **Provider priority** (kimi is primary, others are fallbacks):
 

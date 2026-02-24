@@ -24,7 +24,7 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 │  │  └────────────────────────────────────────────────────────────────┬──┐ │ │
 │  │                                                                   │  │ │ │
 │  │  ┌───────────────────────────────────────────┐  ┌──────────────┐  │  │ │ │
-│  │  │           IDS API  (×2 pods)              │  │  PostgreSQL  │  │  │ │ │
+│  │  │           IDS API  (×1 pod demo-pinned)   │  │  PostgreSQL  │  │  │ │ │
 │  │  │  FastAPI · LLM Analysis · K8s Automation  │──│  (persistence)│  │  │ │ │
 │  │  │  NodePort 30800                           │  └──────────────┘  │  │ │ │
 │  │  └──────────────┬────────────────────────────┘                    │  │ │ │
@@ -60,7 +60,7 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 
 | Namespace | Component | Replicas | Purpose |
 |---|---|---|---|
-| `smart-city` | ids-api | 2 | Core IDS: alert intake, LLM analysis, K8s automation |
+| `smart-city` | ids-api | 1 (demo-pinned) | Core IDS: alert intake, LLM analysis, K8s automation |
 | `smart-city` | postgres | 1 | Alert/action/audit persistence |
 | `smart-city` | traffic-camera | 2 | Vulnerable Flask camera feed + license plate API |
 | `smart-city` | healthcare-api | 2 | Vulnerable Flask patient record API |
@@ -111,7 +111,7 @@ Every security event follows this path:
 4. AUTOMATED RESPONSE (k8s_automation.py + governance.py)
    ├─ severity ≥ 8 → isolate_pod (NetworkPolicy, unless protected service)
    ├─ severity ≥ 6 → scale_up (replicas to 5)
-   └─ Governance: autopilot (all auto) / assisted (sev<8 auto) / manual (all approval)
+   └─ Governance: autonomous / assisted / manual (legacy aliases normalized)
 
 5. PERSISTENCE (database.py)
    ├─ PostgreSQL: alerts, analysis_results, automation_actions, audit_logs
@@ -198,6 +198,23 @@ Cloud providers with priority-ordered failover:
 | Provider Cooldown | 15 minutes (env: `LLM_PROVIDER_COOLDOWN_SECONDS`) | After HTTP 401/403/429 or quota errors |
 | Dedup Cache | 60s TTL, 100 max entries | MD5(rule+process+container), avoids duplicate LLM calls |
 
+### LLM Key Management (Operational Procedure)
+
+The IDS reads provider keys from environment variables injected into the `ids-api` pod via Kubernetes Secret.
+
+Add/rotate a provider key:
+
+1. Update project `.env` (single source of truth)
+2. Sync to K8s secret (`ids-secrets`) via `scripts/apply-llm-env-to-k8s-secret.sh`
+3. Restart/redeploy `ids-api` so the new env vars are loaded
+4. Reset provider states (`/api/llm/retry-all`) to clear circuit breaker/cooldown latches
+5. Probe/test the provider (`/api/llm/test/{provider}`) and verify `/api/llm/diagnostics`
+
+Important:
+- `retry-all` resets in-memory failure state, not provider billing/quota.
+- Providers can be `configured` but still unusable due invalid keys, quota exhaustion, or model access restrictions.
+- The dashboard LLM Control tab now exposes provider diagnostics, health, usage, and a manual reset/test flow.
+
 ### LLM Response Contract
 
 ```json
@@ -235,7 +252,7 @@ Note: current startup validation requires at least one configured LLM API key; k
 
 | Mode | Behavior | Use Case |
 |---|---|---|
-| `autopilot` | All actions execute immediately | Demo, testing |
+| `autonomous` | High-confidence actions can execute automatically | Demo / controlled automation |
 | `assisted` | Auto if severity < 8; otherwise queued | Default, production |
 | `manual` | All actions require operator approval | Audit, investigation |
 
