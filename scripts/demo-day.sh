@@ -89,8 +89,8 @@ check_llm_runtime_status() {
     log_section "LLM Runtime Status"
     local token
     token="$(curl -s -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' \
-        -d '{"username":"operator","password":"operator"}' | jq -r '.access_token // empty')"
-    [[ -n "$token" ]] || die "Could not login to ids-api on localhost:8000 (port-forward missing?)"
+        -d '{"username":"admin","password":"admin"}' | jq -r '.access_token // empty')"
+    [[ -n "$token" ]] || die "Could not login to ids-api on localhost:8000 with admin/admin (or port-forward missing)"
 
     curl -s http://localhost:8000/api/llm/status -H "Authorization: Bearer $token" | jq .
     

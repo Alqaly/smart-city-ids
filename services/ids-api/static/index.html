@@ -158,13 +158,11 @@
                         <div id="systemHealth"><div class="health-row"><div class="health-dot health-warn"></div><span style="font-size:13px;">Connecting…</span></div></div>
                     </div>
                     <div class="glass-panel rounded-xl p-6">
-                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;"><i class="fas fa-brain" style="color:#b829dd;"></i> LLM Engines</h3>
-                        <div id="llmStatus"><div style="color:#606080;font-size:13px;">Loading…</div></div>
-                    </div>
-                    <div class="glass-panel rounded-xl p-6">
-                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;"><i class="fas fa-coins" style="color:#facc15;"></i> API Credits
-                        <button onclick="app.refreshCredits()" style="margin-left:auto;font-size:11px;color:#606080;background:none;border:none;cursor:pointer;" title="Refresh credits"><i class="fas fa-sync-alt"></i></button></h3>
-                        <div id="creditsPanel"><div style="color:#606080;font-size:13px;">Loading…</div></div>
+                        <h3 style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+                            <i class="fas fa-brain" style="color:#b829dd;"></i> AI Providers
+                            <button onclick="app.refreshAll()" style="margin-left:auto;font-size:11px;color:#606080;background:none;border:none;cursor:pointer;" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+                        </h3>
+                        <div id="llmProvidersPanel"><div style="color:#606080;font-size:13px;">Loading…</div></div>
                     </div>
                 </div>
             </div>
@@ -376,7 +374,7 @@
 
     <!-- Quick Test Panel -->
     <div class="glass-panel rounded-xl p-4 mb-6">
-        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-vial mr-2" style="color:#a78bfa;"></i>Test Provider Response</h3>
+        <h3 style="font-size:14px;font-weight:700;margin:0 0 12px;"><i class="fas fa-vial mr-2" style="color:#a78bfa;"></i>Manual Provider Test (sanity check)</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
             <select id="llmTestProvider" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;min-width:180px;">
                 <option value="">Auto-select (router decides)</option>
@@ -697,16 +695,235 @@ function sevInfo(n) {
     return             { cls:'sev-low',  label:`LOW (${n}/10)`,       short:'LOW',  color:'#4ade80' };
 }
 
+function dbStatusMeta(raw) {
+    const v = String(raw || 'unknown').toLowerCase();
+    if (v === 'connected' || v === 'postgresql') {
+        return { label: 'PostgreSQL (persistent)', detail: 'Data is saved persistently', tone: 'ok', short: 'PostgreSQL' };
+    }
+    if (v === 'memory-fallback') {
+        return { label: 'In-memory fallback (demo mode)', detail: 'App works, but data resets on restart', tone: 'warn', short: 'In-memory' };
+    }
+    return { label: v === 'error' ? 'Database error' : (raw || 'Unknown'), detail: 'Database connectivity issue', tone: 'err', short: 'Error' };
+}
+
+function statusColor(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'green' || s === 'ok' || s === 'healthy' || s === 'operational') return '#00ff88';
+    if (s === 'idle') return '#94a3b8';
+    if (s === 'yellow' || s === 'warn' || s === 'warning' || s === 'degraded') return '#ffaa00';
+    return '#ff3366';
+}
+
+function pipelineStageMeta(stage) {
+    const rate = Number(stage?.rate_per_minute || 0);
+    const raw = String(stage?.status || '').toLowerCase();
+    if (raw === 'idle' || (raw === 'yellow' && rate === 0)) {
+        return { label: 'IDLE', color: '#94a3b8' };
+    }
+    if (raw === 'yellow') return { label: 'ATTENTION', color: '#ffaa00' };
+    if (raw === 'green') return { label: 'ACTIVE', color: '#00ff88' };
+    return { label: raw ? raw.toUpperCase() : 'UNKNOWN', color: '#ff3366' };
+}
+
+function alertFields(a) {
+    return (a && (a.output_fields || a.raw_alert?.output_fields)) || {};
+}
+
+function alertNamespace(a) {
+    const f = alertFields(a);
+    return f['k8s.ns.name'] || f['k8s_ns_name'] || a.namespace || '';
+}
+
+function alertPod(a) {
+    const f = alertFields(a);
+    return f['k8s.pod.name'] || f['k8s_pod_name'] || '';
+}
+
+function alertProc(a) {
+    const f = alertFields(a);
+    return f['proc.name'] || '';
+}
+
+function alertFile(a) {
+    const f = alertFields(a);
+    return f['fd.name'] || '';
+}
+
+function alertContainer(a) {
+    const f = alertFields(a);
+    return a.container_name || f['container.name'] || '—';
+}
+
+function alertSignatureId(a) {
+    const f = alertFields(a);
+    return f['alert.signature_id'] || f['alert.signatureId'] || '';
+}
+
+function isPlatformAlert(a) {
+    const ns = String(alertNamespace(a) || '').toLowerCase();
+    return ns === 'monitoring' || ns === 'falco-system' || ns === 'kube-system';
+}
+
+function alertFingerprint(a) {
+    const ts = String(a.timestamp || '').slice(0, 19); // second-level grouping
+    return [
+        ts,
+        a.source || '',
+        a.rule || '',
+        a.severity || '',
+        alertNamespace(a),
+        alertContainer(a),
+        a.summary || '',
+    ].join('|');
+}
+
+function collapseAlerts(rows) {
+    const out = [];
+    const map = new Map();
+    for (const a of (rows || [])) {
+        const key = alertFingerprint(a);
+        if (!map.has(key)) {
+            const copy = { ...a, _repeat_count: 1 };
+            map.set(key, copy);
+            out.push(copy);
+        } else {
+            map.get(key)._repeat_count += 1;
+        }
+    }
+    return out;
+}
+
+function providerUiMeta(name, statusStr, creditInfo) {
+    const isConfigured = statusStr.includes('configured') && !statusStr.includes('not configured');
+    const circuitMatch = statusStr.match(/circuit:\s*(\w+)/i);
+    const circuitState = (circuitMatch ? circuitMatch[1] : 'closed').toLowerCase();
+    const creditStatus = String(creditInfo?.status || 'unknown').toLowerCase();
+    const creditErr = String(creditInfo?.error_message || '').toLowerCase();
+    const apiReachable = !!creditInfo?.api_reachable;
+    const hasCreditValue = creditInfo?.credits != null;
+
+    if (!isConfigured) return { label: 'Not configured', tone: 'muted' };
+    if (circuitState === 'open') return { label: 'Circuit open (reset/probe to retry)', tone: 'bad' };
+    if (creditErr.includes('invalid api key') || creditErr.includes('api key') || creditErr.includes('auth')) {
+        return { label: 'Key invalid / expired', tone: 'bad' };
+    }
+    if (creditStatus === 'ok' && hasCreditValue) return { label: 'Ready (credit verified)', tone: 'good' };
+    if (apiReachable && creditStatus === 'ok') return { label: 'Ready (API reachable)', tone: 'good' };
+    if (apiReachable) return { label: 'Connected (credit unknown)', tone: 'warn' };
+    return { label: 'Configured (not verified)', tone: 'warn' };
+}
+
+function ruleHelpMeta(a) {
+    const src = String(a?.source || '').toLowerCase();
+    const rule = String(a?.rule || '');
+    const sid = alertSignatureId(a);
+    const ns = String(alertNamespace(a) || '').toLowerCase();
+    const platform = isPlatformAlert(a);
+    const sidText = sid ? ` (SID ${sid})` : '';
+
+    if (src === 'suricata') {
+        if (/SMARTCITY HTTP flood/i.test(rule)) {
+            return {
+                tone: 'warn',
+                short: `High-rate HTTP traffic from one source exceeded the Suricata threshold${sidText}.`,
+                detail: 'Rule uses a detection_filter (300 requests / 10s by source). During demo flood traffic, duplicate alerts are expected and may be throttled.'
+            };
+        }
+        if (/SMARTCITY IoT sensor API flood/i.test(rule)) {
+            return {
+                tone: 'warn',
+                short: `IoT sensor endpoint request rate exceeded threshold${sidText}.`,
+                detail: 'Useful for abuse or runaway clients hitting /api/iot/sensor. Validate source IP and request pattern.'
+            };
+        }
+        if (/SMARTCITY SQLi/i.test(rule)) {
+            return {
+                tone: 'bad',
+                short: `SQL injection pattern matched in HTTP request payload${sidText}.`,
+                detail: 'Custom Suricata signature matched strings like OR 1=1 / UNION SELECT / DROP TABLE in request body or URI.'
+            };
+        }
+        if (/Auth brute force/i.test(rule)) {
+            return {
+                tone: 'warn',
+                short: `Repeated login/auth requests crossed brute-force threshold${sidText}.`,
+                detail: 'Detection uses source-based rate threshold on /auth or /login requests.'
+            };
+        }
+        if (/Suspiciously long DNS query/i.test(rule)) {
+            return {
+                tone: 'warn',
+                short: `Possible DNS tunneling indicator${sidText}: unusually long query label.`,
+                detail: 'Investigate if this is testing/telemetry vs encoded payload exfiltration.'
+            };
+        }
+        if (/crypto miner|stratum mining port|port 3333|port 4444|port 14444/i.test(rule)) {
+            return {
+                tone: 'bad',
+                short: `Connection to common crypto-mining port matched${sidText}.`,
+                detail: 'Can indicate miner traffic or a test; confirm destination and process owner.'
+            };
+        }
+        if (/MQTT cleartext connection/i.test(rule)) {
+            return {
+                tone: 'warn',
+                short: `MQTT traffic observed on cleartext port 1883${sidText}.`,
+                detail: 'Policy alert (not always malicious). Useful for identifying insecure transport in IoT paths.'
+            };
+        }
+    }
+
+    if (src === 'falco') {
+        if (/Sensitive File Read|Read sensitive file/i.test(rule)) {
+            if (platform || ns === 'monitoring') {
+                return {
+                    tone: 'muted',
+                    short: 'Sensitive file read detected in monitoring/security infrastructure (platform alert).',
+                    detail: 'Grafana/Prometheus/Falco may legitimately read certificates/keys. Treat as platform noise unless the process/path is unusual.'
+                };
+            }
+            return {
+                tone: 'warn',
+                short: 'Container process read a sensitive file (.env/.pem/.key or similar).',
+                detail: 'Check file path, process name, and container role to confirm if it is expected application behavior.'
+            };
+        }
+        if (/Shell Spawned|shell.*container/i.test(rule)) {
+            return {
+                tone: 'bad',
+                short: 'Interactive shell process started inside a container.',
+                detail: 'High-value runtime signal for RCE or manual tampering. Verify parent process and command line.'
+            };
+        }
+        if (/Package Manager in Container|Package manager|downloader executed/i.test(rule)) {
+            return {
+                tone: 'warn',
+                short: 'Package manager/downloader executed at runtime inside a container.',
+                detail: 'Often indicates drift, debugging, or post-exploitation tooling (apt/yum/pip/curl/wget).'
+            };
+        }
+        if (/Crypto Mining Process|miner/i.test(rule)) {
+            return {
+                tone: 'bad',
+                short: 'Falco detected a known crypto-mining process name in a container.',
+                detail: 'Critical runtime signal; verify process image, container image, and outbound connections.'
+            };
+        }
+    }
+
+    return null;
+}
+
 // ── API client ─────────────────────────────────────────────────────────
 const api = {
     token: localStorage.getItem(CFG.TOKEN_KEY) || '',
     async _fetch(path, opts={}) {
         try {
             const res = await fetch(CFG.API+path, { ...opts, headers:{'Authorization':'Bearer '+api.token,'Content-Type':'application/json',...(opts.headers||{})} });
-            // Never auto-logout on 401 — governance/llm endpoints may return 401
-            // when the feature is disabled; user must click Exit explicitly
-            if (!res.ok) return null;
-            return res.json().catch(() => null);
+            let body = null;
+            try { body = await res.json(); } catch { body = null; }
+            if (!res.ok) return { status: 'error', status_code: res.status, ...(body||{}) };
+            return body;
         } catch { return null; }
     },
     async _pub(path) {
@@ -718,11 +935,56 @@ const api = {
         const qs = new URLSearchParams({ window: String(window||'today') }).toString();
         return this._pub(`/api/metrics/llm-usage?${qs}`);
     },
+    getLLMControl(probe=false) {
+        const qs = new URLSearchParams({ probe: String(probe) }).toString();
+        return this._pub(`/api/llm/control/status?${qs}`);
+    },
+    getLLMProviderComparison() {
+        return this._pub('/api/llm/providers/comparison');
+    },
+    getLLMProviderHealthSummary() {
+        return this._pub('/api/llm/providers/health-summary');
+    },
+    getLLMRoutingStrategy() {
+        return this._fetch('/api/llm/routing/strategy');
+    },
+    getLLMPredictiveRisk() {
+        return this._fetch('/api/llm/predictive-risk');
+    },
+    testProvider(provider, prompt) {
+        return this._fetch('/api/llm/control/test', { 
+            method: 'POST', 
+            body: JSON.stringify({ provider, prompt }) 
+        });
+    },
+    testProviderByName(provider, prompt) {
+        return this._fetch(`/api/llm/test/${provider}`, { 
+            method: 'POST', 
+            body: JSON.stringify({ prompt }) 
+        });
+    },
+    forceProviderByName(provider) {
+        return this._fetch('/api/llm/control/force', { 
+            method: 'POST', 
+            body: JSON.stringify({ provider }) 
+        });
+    },
+    setLLMRoutingStrategy(payload) {
+        return this._fetch('/api/llm/routing/strategy', { 
+            method: 'POST', 
+            body: JSON.stringify(payload) 
+        });
+    },
+    retryAllLLMProviders() {
+        return this._fetch('/api/llm/retry-all', { method: 'POST' });
+    },
     getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||50}`); },
     getIoT()      { return this._pub('/api/iot/devices'); },
     getPipeline() { return this._pub('/api/pipeline-overview'); },
-    getGov()      { return this._fetch('/api/governance/status'); },
-    getGovPending(){ return this._fetch('/api/governance/pending'); },
+    getDedupStats(){ return this._pub('/api/deduplicator-stats'); },
+    getAlertRateLimiterStatus(){ return this._pub('/api/rate-limiter/status'); },
+    getGov()      { return this._pub('/api/governance/status'); },
+    getGovPending(){ return this._pub('/api/governance/pending'); },
     setGovMode(mode){
         const qs = new URLSearchParams({ mode: String(mode||'assisted') }).toString();
         return this._fetch(`/api/governance/mode?${qs}`, { method:'POST' });
@@ -756,23 +1018,41 @@ const liveFeed = {
         const _handleAlert = ev => {
             try {
                 const d=JSON.parse(ev.data);
-                // Skip keepalive pings and non-alert messages
-                if (!d || d.type==='connected' || d.type==='keepalive') return;
+                // Skip keepalive pings and connection messages
+                if (!d) return;
+                if (d.type==='connected') {
+                    const log=$('liveFeedLog');
+                    if (log && String(log.textContent||'').trim().startsWith('Connecting')) {
+                        log.textContent='Waiting for new alerts…';
+                    }
+                    const st=$('liveFeedStatus'); if (st) st.textContent='Connected — waiting for new alerts';
+                    return;
+                }
+                if (d.type==='keepalive') return;
                 this.count++;
                 const ce=$('liveFeedCount'); if(ce) ce.textContent=this.count+(this.count===1?' event':' events');
+                // Update status to show we're receiving data
+                const st=$('liveFeedStatus'); if(st) st.textContent='Receiving alerts...';
                 this._append(d); app.onLiveAlert(d);
-            } catch {}
+            } catch(e) {
+                console.error('SSE handler error:', e);
+            }
         };
         this.sse.addEventListener('alert', _handleAlert);
         // Fallback: some proxies strip SSE event names, falling back to message
         this.sse.addEventListener('message', _handleAlert);
         this.sse.addEventListener('connected', () => {
             const log=$('liveFeedLog');
-            if(log && (log.textContent==='Connecting…'||log.textContent==='')) log.textContent='Waiting for alerts…';
+            if (log && String(log.textContent||'').trim().startsWith('Connecting')) {
+                log.textContent='Waiting for new alerts…';
+            }
+            const st=$('liveFeedStatus');
+            if (st) st.textContent='Connected — waiting for new alerts';
         });
         this.sse.onerror = () => {
             if (dot) dot.style.background='#ef4444';
-            if (st)  st.textContent='Disconnected — reconnecting…';
+            if (st)  st.textContent='Live feed reconnecting (automatic)…';
+            if (dot) dot.style.background='#f59e0b';
         };
     },
     _append(d) {
@@ -791,118 +1071,262 @@ const liveFeed = {
 // ── Renderers ──────────────────────────────────────────────────────────
 const render = {
     overview(data) {
-        const {health, metrics, pipeline, alerts} = data;
+        const {health, metrics, pipeline, alerts, dedup, rateLimiter} = data;
         const el=$('overviewStats');
         if (el && metrics) {
             const uptime   = fmtDuration(health?.uptime_seconds);
             const total    = metrics.total_alerts||0;
             const crit     = metrics.critical_alerts||0;
             const iot      = metrics.iot_devices_active||0;
-            const dedup    = metrics.dedup_rate_percent!=null ? metrics.dedup_rate_percent+'%' : '—';
+            const dedupHitPct = (dedup?.hit_rate_percent ?? pipeline?.stages?.find?.(s => s.id === 'ingest')?.dedup_hit_rate_percent);
+            const fatigue = pipeline?.alert_fatigue || {};
+            const reductionPct = (fatigue?.reduction_percent ?? metrics?.alert_reduction_percentage);
+            const costSaved = (dedup?.cost_saved_usd != null ? Number(dedup.cost_saved_usd) : null);
+            const dedupValue = (reductionPct != null && isFinite(Number(reductionPct)))
+                ? `${Number(reductionPct).toFixed(1)}%`
+                : (dedupHitPct != null && isFinite(Number(dedupHitPct)) ? `${Number(dedupHitPct).toFixed(1)}%` : '—');
+            const dedupSub = (costSaved != null)
+                ? `LLM cost saved ~$${costSaved.toFixed(2)} · hit-rate ${dedupHitPct != null ? Number(dedupHitPct).toFixed(1) + '%' : '—'}`
+                : (dedupHitPct != null ? `Dedup cache hit-rate ${Number(dedupHitPct).toFixed(1)}%` : 'Duplicate alerts suppressed before re-analysis');
+            const rlStats = rateLimiter?.stats || {};
+            const throttled = Number(rlStats.total_throttled || 0);
+            const rlReceived = Number(rlStats.total_received || 0);
+            const rlProcessed = Number(rlStats.total_processed || 0);
+            const rlPct = Number(rlStats.throttle_rate_percent || 0);
+            const rlWindow = Number(rateLimiter?.config?.window_seconds || 60);
+            const floodColor = throttled > 0 ? (rlPct >= 80 ? '#facc15' : '#4ade80') : '#94a3b8';
             const critPct  = total>0 ? Math.round(crit/total*100) : 0;
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-label">Total Alerts</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">Ingested via Falco / Suricata</div></div>
                 <div class="stat-card"><div class="stat-label">Critical Alerts</div><div class="stat-value" style="color:#f87171;">${crit}</div><div class="stat-sub">Severity 8–10 &nbsp;(${critPct}% of total)</div></div>
                 <div class="stat-card"><div class="stat-label">IoT Devices</div><div class="stat-value" style="color:#4ade80;">${iot}</div><div class="stat-sub">${iot} pod(s) running in K8s</div></div>
-                <div class="stat-card"><div class="stat-label">Dedup Savings</div><div class="stat-value" style="color:#ffaa00;">${dedup}</div><div class="stat-sub">Duplicate alerts suppressed</div></div>
+                <div class="stat-card"><div class="stat-label">Dedup + LLM Savings</div><div class="stat-value" style="color:#ffaa00;">${dedupValue}</div><div class="stat-sub">${esc(dedupSub)}</div></div>
+                <div class="stat-card"><div class="stat-label">Flood Suppression</div><div class="stat-value" style="color:${floodColor};">${throttled.toLocaleString()}</div><div class="stat-sub">${rlReceived>0 ? `${rlProcessed}/${rlReceived} alerts processed in ${rlWindow}s window · ${rlPct.toFixed(1)}% throttled` : 'No throttling in current window'}</div></div>
                 <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value" style="color:#a78bfa;">${uptime}</div><div class="stat-sub">IDS API process uptime</div></div>`;
         }
         const pe=$('pipelineOverview');
         if (pe) {
             if (pipeline?.stages) {
-                const sc=s=>s==='green'?'#00ff88':s==='yellow'?'#ffaa00':'#ff3366';
-                pe.innerHTML=pipeline.stages.map(s=>`<div class="pipe-stage"><div class="pipe-dot" style="background:${sc(s.status)};box-shadow:0 0 6px ${sc(s.status)};"></div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${esc(s.label)}</div><div style="font-size:11px;color:#606080;">${s.rate_per_minute||0} alerts/min &nbsp;·&nbsp; p95 latency: ${s.p95_latency_ms??'—'}ms</div></div><div style="font-size:11px;color:${sc(s.status)};font-weight:700;">${(s.status||'').toUpperCase()}</div></div>`).join('');
+                pe.innerHTML=pipeline.stages.map(s=>{
+                    const meta = pipelineStageMeta(s);
+                    const rate = Number(s.rate_per_minute || 0);
+                    const p95 = (s.p95_latency_ms ?? '—');
+                    const stateText = s.status_text || (meta.label === 'IDLE' ? 'Waiting for traffic/events' : '');
+                    return `<div class="pipe-stage">
+                        <div class="pipe-dot" style="background:${meta.color};box-shadow:0 0 6px ${meta.color};"></div>
+                        <div style="flex:1;">
+                            <div style="font-size:13px;font-weight:600;">${esc(s.label)}</div>
+                            <div style="font-size:11px;color:#606080;">${rate} alerts/min &nbsp;·&nbsp; p95 latency: ${p95}ms</div>
+                            ${stateText ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px;">${esc(stateText)}</div>` : ''}
+                        </div>
+                        <div style="font-size:11px;color:${meta.color};font-weight:700;">${meta.label}</div>
+                    </div>`;
+                }).join('');
             } else {
                 pe.innerHTML='<div style="color:#606080;font-size:13px;padding:8px 0;">No pipeline data yet. Alerts are processed as they arrive.</div>';
             }
         }
         const af=$('alertFeed');
         if (af && alerts?.alerts) {
-            const recent=alerts.alerts.slice(0,10);
+            const recent=collapseAlerts(alerts.alerts).slice(0,10);
             af.innerHTML = recent.length===0
                 ? '<div style="color:#606080;font-size:13px;padding:8px 0;">No alerts yet. Generate real detections by running <strong>scripts/run-live-attacks.sh</strong>.</div>'
-                : recent.map(a=>{const s=sevInfo(a.severity);return `<div class="alert-row"><span style="font-family:monospace;font-size:11px;color:#606080;min-width:60px;">${fmtTime(a.timestamp)}</span><span class="sev-badge ${s.cls}">${s.short}&nbsp;${a.severity}</span><span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}</span><span style="flex:1;font-size:12px;color:#c0c0d0;">${esc(a.rule||'Unknown Rule')}</span></div>`;}).join('');
+                : recent.map(a=>{
+                    const s=sevInfo(a.severity);
+                    const ns=alertNamespace(a);
+                    const guide = ruleHelpMeta(a);
+                    const repeat=a._repeat_count>1?`<span style="margin-left:6px;padding:1px 6px;border-radius:999px;background:rgba(250,204,21,0.14);color:#facc15;font-size:10px;font-weight:700;">x${a._repeat_count}</span>`:'';
+                    const platform=isPlatformAlert(a)?`<span style="margin-left:6px;padding:1px 6px;border-radius:999px;background:rgba(148,163,184,0.12);color:#94a3b8;font-size:10px;">platform</span>`:'';
+                    return `<div class="alert-row">
+                        <span style="font-family:monospace;font-size:11px;color:#606080;min-width:60px;">${fmtTime(a.timestamp)}</span>
+                        <span class="sev-badge ${s.cls}">${s.short}&nbsp;${a.severity}</span>
+                        <span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}${ns?` · ${esc(ns)}`:''}</span>
+                        <span style="flex:1;font-size:12px;color:#c0c0d0;">
+                            ${esc(a.rule||'Unknown Rule')}${repeat}${platform}
+                            ${guide?.short ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px;">${esc(guide.short)}</div>` : ''}
+                        </span>
+                    </div>`;
+                }).join('');
         }
         this.health(health);
-        this.llmStatus(health);
-        this.pills(health, data.gov);
+        this.llmProviders(health, data.credits);
+        this.pills(health, data.gov, data.credits);
     },
     health(health) {
         const el=$('systemHealth'); if(!el) return;
         const c=health?.components||{};
-        const row=(lbl,val,ok)=>`<div class="health-row"><div class="health-dot ${ok?'health-ok':'health-err'}"></div><span style="font-size:13px;font-weight:600;">${lbl}</span><span style="font-size:12px;color:#a0a0b0;margin-left:auto;">${esc(val||'unknown')}</span></div>`;
-        el.innerHTML=row('Kubernetes',c.kubernetes,c.kubernetes==='connected')+row('Database',c.database,c.database==='connected')+row('Falco',c.falco,c.falco==='enabled')+row('Suricata',c.suricata,c.suricata==='enabled');
+        const row=(lbl,val,label,tone,detail='')=>`<div class="health-row" title="${esc(detail||'')}">
+            <div class="health-dot ${tone==='ok'?'health-ok':tone==='warn'?'health-warn':'health-err'}"></div>
+            <span style="font-size:13px;font-weight:600;">${lbl}</span>
+            <span style="font-size:12px;color:${tone==='ok'?'#c7f9dd':tone==='warn'?'#fde68a':'#fda4af'};margin-left:auto;text-align:right;">${esc(label||val||'unknown')}</span>
+        </div>`;
+        const db = dbStatusMeta(c.database);
+        el.innerHTML=
+            row('Kubernetes', c.kubernetes, c.kubernetes==='connected'?'Connected':'Disconnected', c.kubernetes==='connected'?'ok':'err', 'Kubernetes control plane connectivity')+
+            row('Database', c.database, db.short, db.tone, db.detail)+
+            row('Falco', c.falco, c.falco==='enabled'?'Enabled':'Disabled', c.falco==='enabled'?'ok':'err', 'Runtime behavior detection')+
+            row('Suricata', c.suricata, c.suricata==='enabled'?'Enabled':'Disabled', c.suricata==='enabled'?'ok':'err', 'Network traffic detection');
     },
-    llmStatus(health) {
-        const el=$('llmStatus'); if(!el) return;
-        const prov=health?.components?.llm_providers||{};
-        const names=Object.keys(prov);
-        if (!names.length) { el.innerHTML='<div style="color:#606080;font-size:13px;">No LLM providers configured.</div>'; return; }
-        el.innerHTML=names.map(name=>{const ok=prov[name]==='ok'||prov[name]==='healthy';return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><div style="width:7px;height:7px;border-radius:50%;background:${ok?'#00ff88':'#ff3366'};"></div><span style="font-size:13px;flex:1;">${esc(name)}</span><span style="font-size:11px;padding:2px 7px;border-radius:4px;${ok?'background:rgba(0,255,136,0.1);color:#00ff88;':'background:rgba(255,51,102,0.1);color:#ff3366;'}">${ok?'OK':'Error'}</span></div>`;}).join('');
-    },
-    credits(data) {
-        const el=$('creditsPanel'); if(!el) return;
-        // data is the raw response from /api/llm/credits/ — a dict of provider→CreditInfo
+    // Combined LLM Providers panel - merges health status and credits
+    llmProviders(health, credits) {
+        const el=$('llmProvidersPanel'); if(!el) return;
+
         const DISPLAY={'xai':'xAI Grok','openai':'OpenAI','anthropic':'Claude','gemini':'Gemini','kimi':'Kimi'};
-        const STATUS_COLOR={'ok':'#00ff88','warning':'#ffaa00','critical':'#f87171','exhausted':'#ff3366','error':'#606080','not_configured':'#404060','unknown':'#606080'};
-        if (!data || typeof data !== 'object' || Array.isArray(data)) {
-            el.innerHTML='<div style="color:#606080;font-size:12px;">Credits API unavailable — install llm_credit_checker.</div>'; return;
+        const prov=health?.components?.llm_providers||{};
+        const names=Object.keys(prov).sort();
+
+        if (!names.length) {
+            el.innerHTML='<div style="color:#606080;font-size:13px;">No LLM providers configured.</div>';
+            return;
         }
-        const entries=Object.entries(data);
-        if (!entries.length) { el.innerHTML='<div style="color:#606080;font-size:12px;">No providers configured.</div>'; return; }
-        const fmtReset = (iso) => {
-            try { return iso ? new Date(String(iso)).toLocaleString() : null; } catch { return null; }
+
+        const toneMap = {
+            good: { fg:'#00ff88', bg:'rgba(0,255,136,0.14)' },
+            warn: { fg:'#ffaa00', bg:'rgba(255,170,0,0.14)' },
+            bad: { fg:'#ff6688', bg:'rgba(255,51,102,0.14)' },
+            muted: { fg:'#94a3b8', bg:'rgba(148,163,184,0.12)' }
         };
-        el.innerHTML=entries.map(([name,info])=>{
-            const status=info?.status||'unknown';
-            const credits=info?.credits;
-            const color=STATUS_COLOR[status]||'#606080';
-            const credText=credits!=null?`$${Number(credits).toFixed(2)} ${info.currency||'USD'}`:status.replace('_',' ');
-            const rem = info?.rate_limit_remaining;
-            const reset = fmtReset(info?.rate_limit_reset);
-            const rtt = info?.response_time_ms;
-            const metaParts = [];
-            if (rem != null) metaParts.push(`remaining ${Number(rem).toLocaleString()}`);
-            if (reset) metaParts.push(`reset ${reset}`);
-            if (rtt != null) metaParts.push(`${Number(rtt).toFixed(0)}ms`);
-            const meta = metaParts.length ? metaParts.join(' · ') : '';
-            const metaHtml = meta
-                ? `<div style="margin-left:15px;margin-top:2px;font-size:11px;color:#606080;font-family:monospace;">rate limit: ${esc(meta)}</div>`
-                : '';
+
+        const cards = names.map(name=>{
+            const statusStr = String(prov[name] || '');
+            const statusLower = statusStr.toLowerCase();
+            const creditInfo = credits?.[name] || {};
+            const displayName = DISPLAY[name] || name;
+            const meta = providerUiMeta(name, statusLower, creditInfo);
+            const tone = toneMap[meta.tone] || toneMap.muted;
+            const errorText = String(creditInfo.error_message || '');
+
+            const details = [];
+            if (statusLower.includes('not configured')) details.push('No API key configured');
+            else if (statusLower.includes('configured')) details.push('API key configured');
+
+            if (creditInfo.api_reachable) {
+                const ms = creditInfo.response_time_ms != null ? ` (${Math.round(Number(creditInfo.response_time_ms))}ms)` : '';
+                details.push(`Provider API reachable${ms}`);
+            }
+
+            if (creditInfo.credits != null) {
+                details.push(`Credit balance: ${creditInfo.credits}${creditInfo.currency ? ' ' + creditInfo.currency : ''}`);
+            } else if (creditInfo.total_granted != null || creditInfo.total_used != null) {
+                const used = creditInfo.total_used != null ? Number(creditInfo.total_used).toFixed(2) : '—';
+                const granted = creditInfo.total_granted != null ? Number(creditInfo.total_granted).toFixed(2) : '—';
+                details.push(`Credits used ${used} / granted ${granted}`);
+            } else if (creditInfo.api_reachable) {
+                details.push('Credit balance not exposed by provider');
+            }
+
+            if (creditInfo.rate_limit_remaining != null) {
+                details.push(`Rate limit remaining: ${creditInfo.rate_limit_remaining}`);
+            }
+
+            let hint = '';
+            if (meta.label === 'Key invalid / expired') {
+                hint = 'Action: update API key to enable this provider.';
+            } else if (meta.label.includes('Circuit open')) {
+                hint = 'Action: circuit breaker is open after repeated failures; use Reset All Providers or wait, then probe again.';
+            } else if (meta.label === 'Connected (credit unknown)') {
+                hint = 'Usable now. This provider/API does not expose a balance endpoint in this dashboard.';
+            } else if (meta.label === 'Configured (not verified)') {
+                hint = 'Configured, but no successful health check has completed yet.';
+            } else if (meta.label === 'Not configured') {
+                hint = 'Provider is optional and currently disabled.';
+            }
+
             return `
-                <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <div style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;"></div>
-                        <span style="font-size:13px;flex:1;">${esc(DISPLAY[name]||name)}</span>
-                        <span style="font-size:12px;font-family:monospace;color:${color};">${esc(credText)}</span>
+                <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <div style="width:8px;height:8px;border-radius:50%;background:${tone.fg};box-shadow:0 0 6px ${tone.fg};"></div>
+                        <span style="font-size:13px;flex:1;font-weight:600;">${esc(displayName)}</span>
+                        <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${tone.bg};color:${tone.fg};font-weight:700;">${esc(meta.label)}</span>
                     </div>
-                    ${metaHtml}
+                    ${details.length ? `<div style="margin-left:18px;margin-top:3px;font-size:11px;color:#a0a0b0;line-height:1.45;">${esc(details.join(' · '))}</div>` : ''}
+                    ${errorText ? `<div style="margin-left:18px;margin-top:4px;font-size:11px;color:${meta.tone==='bad'?'#fda4af':'#facc15'};">${esc(errorText)}</div>` : ''}
+                    ${hint ? `<div style="margin-left:18px;margin-top:4px;font-size:11px;color:#94a3b8;">${esc(hint)}</div>` : ''}
                 </div>
             `;
         }).join('');
+
+        const summary = (() => {
+            let ready = 0, usable = 0, issues = 0;
+            for (const name of names) {
+                const meta = providerUiMeta(name, String(prov[name] || '').toLowerCase(), credits?.[name] || {});
+                if (meta.tone === 'good') ready++;
+                if (meta.tone === 'good' || meta.label === 'Connected (credit unknown)') usable++;
+                if (meta.tone === 'bad') issues++;
+            }
+            return `Usable providers: ${usable}/${names.length} · Verified ready: ${ready} · Issues: ${issues}`;
+        })();
+
+        el.innerHTML = cards +
+        `<div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);">
+            <div style="font-size:11px;color:#94a3b8;line-height:1.45;">${esc(summary)}</div>
+            <div style="font-size:11px;color:#606080;line-height:1.45;margin-top:4px;">Ready = usable and health-checked. Connected (credit unknown) = API responds, but balance is not available from provider API.</div>
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.08);cursor:pointer;" onclick="app.switchTab('llm-control')">
+            <div style="font-size:11px;color:#606080;text-align:center;">
+                Open LLM Control Center for key testing, routing, and usage cost → 
+            </div>
+        </div>`;
     },
-    pills(health, gov) {
-        const cp=$('clusterPill'); if(cp){const ok=health?.components?.kubernetes==='connected';cp.className='pill '+(ok?'pill-ok':'pill-err');cp.textContent=ok?'K8s Connected':'K8s Disconnected';}
-        const lp=$('llmPill'); if(lp&&health){const cnt=health.llm_provider_count||0;const tot=health.llm_providers_total||cnt;lp.className='pill '+(cnt>0?'pill-ok':'pill-err');lp.textContent=cnt>0?`${cnt}/${tot>0?tot:cnt} LLM OK`:'No LLM';}
+    pills(health, gov, creditsData) {
+        // Kubernetes pill
+        const cp=$('clusterPill'); 
+        if(cp) {
+            const ok=health?.components?.kubernetes==='connected';
+            cp.className='pill '+(ok?'pill-ok':'pill-err');
+            cp.textContent=ok?'● K8s':'● K8s Error';
+            cp.title = ok ? 'Kubernetes Connected' : 'Kubernetes Disconnected';
+        }
+        
+        // LLM pill - show count of operational providers
+        const lp=$('llmPill'); 
+        if(lp && health) {
+            const prov = health?.components?.llm_providers || {};
+            const credits = creditsData || {};  // credits passed to render.llmProviders
+            const total = Object.keys(prov).length;
+            let usable = 0;
+            let verified = 0;
+            Object.entries(prov).forEach(([name, status]) => {
+                const meta = providerUiMeta(name, String(status || '').toLowerCase(), credits[name] || {});
+                if (meta.tone === 'good') verified++;
+                if (meta.tone === 'good' || meta.label === 'Connected (credit unknown)') usable++;
+            });
+
+            const hasLLM = total > 0;
+            const allOK = usable === total && total > 0;
+            lp.className='pill '+(allOK?'pill-ok':(usable>0?'pill-warn':'pill-err'));
+            lp.textContent=hasLLM?`● LLM ${usable}/${total}`:'● No LLM';
+            lp.title = hasLLM ? `${usable}/${total} usable, ${verified}/${total} verified-ready` : 'No LLM providers configured';
+        }
+        
+        // Automation/Governance pill
         const gp=$('govPill');
         if (gp) {
             gp.style.cursor = 'pointer';
             gp.onclick = () => app.switchTab('governance');
             if (gov && typeof gov === 'object') {
                 const raw = String(gov.mode || 'assisted').toLowerCase();
-                // UI only supports three modes; anything else is treated as Manual.
                 const allowed = { manual:1, assisted:1, autonomous:1 };
                 const m = allowed[raw] ? raw : 'manual';
-                const label = m === 'manual' ? '🔒 Manual' : m === 'autonomous' ? '✅ Auto' : '⚡ Assisted';
+                const label = m === 'manual' ? '● Manual' : m === 'autonomous' ? '● Auto' : '● Assisted';
                 const cls = m === 'manual' ? 'pill-err' : m === 'assisted' ? 'pill-warn' : 'pill-ok';
                 gp.className = 'pill ' + cls;
                 gp.textContent = label;
+                gp.title = m === 'manual' ? 'Manual mode: All actions require approval' : 
+                           m === 'autonomous' ? 'Autonomous mode: High-confidence actions auto-execute' :
+                           'Assisted mode: Medium-confidence actions require approval';
             } else {
-                gp.className = 'pill';
-                gp.textContent = 'Automation —';
+                gp.className = 'pill pill-warn';
+                gp.textContent = '● Auto —';
+                gp.title = 'Automation status unknown';
             }
         }
-        const up=$('uptimeLabel'); if(up&&health?.uptime_seconds) up.textContent='Uptime: '+fmtDuration(health.uptime_seconds);
+        
+        // Uptime
+        const up=$('uptimeLabel'); 
+        if(up && health?.uptime_seconds) {
+            up.textContent='Uptime: '+fmtDuration(health.uptime_seconds);
+        }
     },
 
     governance(gov, pending) {
@@ -915,28 +1339,37 @@ const render = {
         const help = $('govModeHelp');
         const desc = $('govModeDesc');
 
-        const label = mode === 'manual' ? '🔒 Manual' : mode === 'autonomous' ? '✅ Auto' : '⚡ Assisted';
+        const label = mode === 'manual' ? 'Manual Approval' : mode === 'autonomous' ? 'Auto-Execute' : 'Assisted';
         const cls = mode === 'manual' ? 'pill-err' : mode === 'assisted' ? 'pill-warn' : 'pill-ok';
 
         if (pill) { pill.className = 'pill ' + cls; pill.textContent = label; }
         if (help) {
             help.textContent = mode === 'manual'
-                ? 'Every action requires approval.'
+                ? 'No automatic response actions. Analysts review and approve every action.'
                 : mode === 'assisted'
-                    ? 'Higher-risk actions require approval.'
-                    : 'Actions execute automatically when confidence thresholds are met.';
+                    ? 'Recommended actions are prepared for the analyst. Some actions require a 1-click approval gate.'
+                    : 'Approved action types can execute automatically when confidence and policy thresholds are met.';
         }
         if (desc) {
-            desc.textContent = 'Controls whether Kubernetes response actions run automatically or require approval.';
+            desc.textContent = 'Controls whether Kubernetes response actions (isolate pod, scale up, etc.) run automatically or require operator approval.';
         }
 
+        // Get metrics from governance status - handle different possible structures
         const metrics = status.metrics || {};
+        
+        // Calculate totals from the metrics
+        const autoExecuted = Number(metrics.auto_executed || 0);
         const approved = Number(metrics.approved || 0);
         const rejected = Number(metrics.rejected || 0);
-        const pendingCount = Number(status.pending_count || metrics.pending_approval || 0);
-        const a=$('govApproved'); if(a) a.textContent = String(approved);
+        const pendingApproval = Number(metrics.pending_approval || 0);
+        const totalRequested = Number(metrics.total_actions_requested || 0);
+        
+        // Display: Approved = auto-executed + manually approved
+        const totalApproved = autoExecuted + approved;
+        
+        const a=$('govApproved'); if(a) a.textContent = String(totalApproved);
         const r=$('govRejected'); if(r) r.textContent = String(rejected);
-        const p=$('govPending');  if(p) p.textContent = String(pendingCount);
+        const p=$('govPending');  if(p) p.textContent = String(pendingApproval);
 
         // Highlight active mode button
         const setActive = (id, active) => {
@@ -944,6 +1377,7 @@ const render = {
             if (!el) return;
             el.style.outline = active ? '2px solid rgba(0,240,255,0.55)' : 'none';
             el.style.boxShadow = active ? '0 0 0 3px rgba(0,240,255,0.15)' : 'none';
+            el.style.opacity = active ? '1' : '0.7';
         };
         setActive('govBtnManual', mode === 'manual');
         setActive('govBtnAssisted', mode === 'assisted');
@@ -954,7 +1388,7 @@ const render = {
         if (!list) return;
 
         if (!actions.length) {
-            list.innerHTML = '<div style="color:#606080;font-size:13px;">No pending actions right now.</div>';
+            list.innerHTML = '<div style="color:#606080;font-size:13px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;"><i class="fas fa-check-circle" style="color:#4ade80;margin-right:8px;"></i>No pending actions. All automated actions have been processed.</div>';
             return;
         }
 
@@ -987,6 +1421,8 @@ const render = {
     // LLM Control Center render functions
     llmControl(status, comparison, healthSummary, usage, usageWeek) {
         const actEl = $('llmCtrlActive');
+        const actMetaEl = $('llmCtrlActiveMeta');
+        const connBadge = $('llmConnectivityBadge');
         const tokensEl = $('llmCtrlTokens');
         const tokensSubEl = $('llmCtrlTokensSub');
         const costEl = $('llmCtrlCost');
@@ -1008,6 +1444,20 @@ const render = {
         const threshold = Number(usage?.cost_threshold_usd || 5.0);
 
         if (actEl) actEl.textContent = (status?.effective_provider || status?.active_provider || usage?.active_provider || 'AUTO').toUpperCase();
+        if (actMetaEl) {
+            const mode = status?.routing_mode || status?.routing?.mode || 'priority';
+            actMetaEl.textContent = `routing mode: ${String(mode).replaceAll('_', ' ')}`;
+        }
+        if (connBadge) {
+            const ops = Number(healthSummary?.operational ?? comparison?.summary?.operational ?? 0);
+            const total = Number(healthSummary?.providers ?? comparison?.summary?.providers ?? 0);
+            const ok = (usage?.totals?.calls ?? 0) >= 0;
+            connBadge.innerHTML = `<i class="fas fa-circle" style="font-size:8px;margin-right:4px;"></i>${ok ? 'Connected' : 'Disconnected'}`;
+            connBadge.style.color = ok ? '#4ade80' : '#f87171';
+            connBadge.style.borderColor = ok ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.25)';
+            connBadge.style.background = ok ? 'rgba(74,222,128,0.10)' : 'rgba(248,113,113,0.10)';
+            connBadge.title = `${ops}/${total} providers operational`;
+        }
         if (tokensEl) tokensEl.textContent = isFinite(tokensToday) ? tokensToday.toLocaleString() : '0';
         if (tokensSubEl) tokensSubEl.textContent = `prompt ${promptToday.toLocaleString()} · completion ${completionToday.toLocaleString()}`;
         if (costEl) {
@@ -1098,6 +1548,21 @@ const render = {
                        (i < status.fallback_chain.length - 1 ? ' <i class="fas fa-chevron-right" style="color:#606080;"></i> ' : '');
             }).join('');
         }
+        
+        // Update timestamp and connection status
+        const lastUpdateEl = $('lastUpdateTime');
+        const sseStatusText = $('sseStatusText');
+        const sseStatusDot = $('sseStatusDot');
+        if (lastUpdateEl) {
+            lastUpdateEl.textContent = new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        }
+        if (sseStatusText) {
+            sseStatusText.textContent = usage?.totals?.calls > 0 ? 'Data loaded successfully' : 'Connected — waiting for usage data';
+        }
+        if (sseStatusDot) {
+            sseStatusDot.style.background = '#22c55e';
+            sseStatusDot.style.boxShadow = '0 0 6px #22c55e';
+        }
     },
     
     _renderProviderCards(status) {
@@ -1142,26 +1607,36 @@ const render = {
         const status = p?.status || 'unknown';
         const isOk = status === 'operational' || status === 'healthy';
         const isCooldown = status === 'cooldown';
+        const isCircuitOpen = status === 'circuit_open';
         
         let statusIcon = 'fa-circle';
         let statusColor = '#606080';
         
         if (isOk) { statusIcon = 'fa-check-circle'; statusColor = '#22c55e'; }
         else if (isCooldown) { statusIcon = 'fa-clock'; statusColor = '#facc15'; }
+        else if (isCircuitOpen) { statusIcon = 'fa-plug-circle-xmark'; statusColor = '#f97316'; }
         else if (status === 'not_configured') { statusIcon = 'fa-ban'; statusColor = '#64748b'; }
         else { statusIcon = 'fa-times-circle'; statusColor = '#ef4444'; }
+
+        const statusText =
+            isOk ? 'Healthy' :
+            isCooldown ? `Cooldown${p?.cooldown_remaining_seconds ? ` (${p.cooldown_remaining_seconds}s)` : ''}` :
+            isCircuitOpen ? 'Circuit open (retry/reset needed)' :
+            status === 'not_configured' ? 'Not configured' :
+            (p?.reason || status);
         
-        return `<div class="provider-card ${isOk ? 'operational' : isCooldown ? 'degraded' : 'failed'}">
+        return `<div class="provider-card ${isOk ? 'operational' : (isCooldown || isCircuitOpen) ? 'degraded' : 'failed'}">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="provider-status-dot ${isOk ? 'operational' : isCooldown ? 'degraded' : 'failed'}"></span>
+                    <span class="provider-status-dot ${isOk ? 'operational' : (isCooldown || isCircuitOpen) ? 'degraded' : 'failed'}"></span>
                     <strong style="font-size:14px;text-transform:uppercase;">${name}</strong>
                 </div>
                 <span style="font-size:11px;color:#606080;background:rgba(0,0,0,0.3);padding:2px 8px;border-radius:4px;">${p?.model || 'unknown'}</span>
             </div>
             <div style="font-size:12px;color:#a0a0b0;margin-bottom:8px;">
-                <i class="fas ${statusIcon}" style="color:${statusColor};margin-right:4px;"></i>${status}
+                <i class="fas ${statusIcon}" style="color:${statusColor};margin-right:4px;"></i>${esc(statusText)}
             </div>
+            ${p?.reason ? `<div style="font-size:11px;color:#606080;margin:-2px 0 8px 0;line-height:1.35;">${esc(String(p.reason).slice(0,180))}</div>` : ''}
             <div style="display:flex;gap:6px;">
                 <button onclick="app.testProviderKey('${name}')" style="padding:5px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:11px;">Test Key</button>
                 <button onclick="app.probeProvider('${name}')" style="padding:5px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:11px;">Probe</button>
@@ -1180,7 +1655,16 @@ const render = {
         }
         
         el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="font-size:10px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.25);"><th style="padding:10px;text-align:left;">Provider</th><th style="padding:10px;text-align:right;">Calls</th><th style="padding:10px;text-align:right;">Tokens</th><th style="padding:10px;text-align:right;">Cost</th><th style="padding:10px;text-align:center;">Success</th></tr></thead><tbody>' +
-            rows.map(r => `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px;font-weight:600;">${r.provider?.toUpperCase() || '—'}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${r.attempts || 0}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${r.tokens_total || 0}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">$${Number(r.total_estimated_cost_usd || 0).toFixed(3)}</td><td style="padding:10px;text-align:center;"><span style="padding:2px 8px;border-radius:4px;font-size:11px;background:${(r.success_rate || 0) >= 0.9 ? 'rgba(34,197,94,0.15)' : 'rgba(250,204,21,0.15)'};color:${(r.success_rate || 0) >= 0.9 ? '#4ade80' : '#facc15'};">${Math.round((r.success_rate || 0) * 100)}%</span></td></tr>`).join('') +
+            rows.map(r => {
+                const calls = Number(r.calls ?? r.attempts ?? 0);
+                const attempts = Number(r.attempts ?? 0);
+                const hasDbOnlyHistory = calls > attempts;
+                const successRate = Number(r.success_rate || 0);
+                const successLabel = hasDbOnlyHistory ? 'N/A' : `${Math.round(successRate * 100)}%`;
+                const successBg = hasDbOnlyHistory ? 'rgba(148,163,184,0.12)' : (successRate >= 0.9 ? 'rgba(34,197,94,0.15)' : 'rgba(250,204,21,0.15)');
+                const successColor = hasDbOnlyHistory ? '#94a3b8' : (successRate >= 0.9 ? '#4ade80' : '#facc15');
+                return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px;font-weight:600;">${r.provider?.toUpperCase() || '—'}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${calls.toLocaleString()}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${Number(r.tokens_total || 0).toLocaleString()}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">$${Number(r.total_estimated_cost_usd || 0).toFixed(3)}</td><td style="padding:10px;text-align:center;"><span title="${hasDbOnlyHistory ? 'Historical DB usage; runtime success counters reset after restart' : 'Runtime success rate'}" style="padding:2px 8px;border-radius:4px;font-size:11px;background:${successBg};color:${successColor};">${successLabel}</span></td></tr>`;
+            }).join('') +
             '</tbody></table>';
     },
     
@@ -1188,19 +1672,28 @@ const render = {
         const sumEl = $('llmRoutingSummary'), riskEl = $('llmPredictiveRisk');
         const modeSel = $('llmRoutingMode');
         
-        if (modeSel && routing?.mode) modeSel.value = routing.mode;
-        
+        const routingCfg = (routing && routing.routing) ? routing.routing : routing;
+        if (modeSel && routingCfg?.mode) modeSel.value = routingCfg.mode;
+        if (app && typeof app.onRoutingModeChange === 'function') app.onRoutingModeChange();
         if (sumEl) {
-            sumEl.innerHTML = routing ? `<div style="padding:10px;background:rgba(0,0,0,0.2);border-radius:6px;"><div style="font-size:12px;color:#a0a0b0;">Mode: <span style="color:#fff;font-weight:600;">${routing.mode || 'priority'}</span></div><div style="font-size:12px;color:#a0a0b0;margin-top:4px;">Cost ceiling: $${routing.cost_ceiling_usd || 0.005}/call</div></div>` : 'Loading...';
+            if (routingCfg && !(routingCfg.status === 'error')) {
+                sumEl.innerHTML = `<div style="padding:10px;background:rgba(0,0,0,0.2);border-radius:6px;"><div style="font-size:12px;color:#a0a0b0;">Mode: <span style="color:#fff;font-weight:600;">${esc(String(routingCfg.mode || 'priority').replaceAll('_',' '))}</span></div><div style="font-size:12px;color:#a0a0b0;margin-top:4px;">Daily cost ceiling: $${Number(routingCfg.cost_ceiling_usd ?? 10).toFixed(2)}</div></div>`;
+            } else {
+                sumEl.innerHTML = '<div style="padding:10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;font-size:12px;color:#fca5a5;">Unable to load routing strategy (check login/session).</div>';
+            }
         }
         
-        if (riskEl && risk) {
-            if (risk.risk_score != null) {
+        if (riskEl) {
+            if (risk && risk.risk_score != null) {
                 const score = Math.round(risk.risk_score);
                 const color = score >= 70 ? '#ef4444' : score >= 40 ? '#facc15' : '#22c55e';
-                riskEl.innerHTML = `<div style="display:flex;align-items:center;gap:16px;"><div style="text-align:center;"><div style="font-size:32px;font-weight:700;color:${color};">${score}</div><div style="font-size:10px;color:#606080;text-transform:uppercase;">Risk Score</div></div><div style="flex:1;"><div style="font-size:14px;font-weight:600;color:${color};">${score >= 70 ? 'HIGH' : score >= 40 ? 'ELEVATED' : 'NORMAL'} RISK</div><div style="font-size:12px;color:#a0a0b0;">${risk.recommendation || 'Monitoring...'}</div><div style="margin-top:8px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;"><div style="width:${score}%;height:100%;background:${color};"></div></div></div></div>`;
+                const patterns = Array.isArray(risk.top_patterns) && risk.top_patterns.length ? ` Patterns: ${risk.top_patterns.join(', ')}.` : '';
+                const rec = risk.recommendation || `${String(risk.trend || 'stable').replaceAll('_',' ')} risk trend over last ${Number(risk.window_size || 100)} alerts.${patterns}`;
+                riskEl.innerHTML = `<div style="display:flex;align-items:center;gap:16px;"><div style="text-align:center;"><div style="font-size:32px;font-weight:700;color:${color};">${score}</div><div style="font-size:10px;color:#606080;text-transform:uppercase;">Risk Score</div></div><div style="flex:1;"><div style="font-size:14px;font-weight:600;color:${color};">${score >= 70 ? 'HIGH' : score >= 40 ? 'ELEVATED' : 'NORMAL'} RISK</div><div style="font-size:12px;color:#a0a0b0;">${esc(rec)}</div><div style="margin-top:8px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden;"><div style="width:${score}%;height:100%;background:${color};"></div></div></div></div>`;
+            } else if (risk && (risk.status === 'error' || risk.status_code)) {
+                riskEl.innerHTML = '<div style="text-align:center;padding:20px;color:#fca5a5;"><i class="fas fa-exclamation-triangle" style="font-size:20px;margin-bottom:8px;"></i><div style="font-size:12px;">Risk forecast unavailable (session/auth issue)</div><div style="font-size:11px;margin-top:4px;">Re-login and refresh the LLM Control tab.</div></div>';
             } else {
-                riskEl.innerHTML = '<div style="text-align:center;padding:20px;color:#606080;"><i class="fas fa-chart-area" style="font-size:24px;margin-bottom:8px;opacity:0.5;"></i><div style="font-size:12px;">Collecting alert data...</div><div style="font-size:11px;margin-top:4px;">Risk forecast appears after processing 20+ alerts</div></div>';
+                riskEl.innerHTML = '<div style="text-align:center;padding:20px;color:#606080;"><i class="fas fa-chart-area" style="font-size:24px;margin-bottom:8px;opacity:0.5;"></i><div style="font-size:12px;">Collecting alert data...</div><div style="font-size:11px;margin-top:4px;">Risk forecast appears after alerts are processed and metrics refresh succeeds</div></div>';
             }
         }
     },
@@ -1208,13 +1701,140 @@ const render = {
     alertsTable(data, sevFilter) {
         const el=$('alertsTable'); if(!el) return;
         if (!data?.alerts) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">Failed to load alerts.</div>'; return; }
-        let rows=data.alerts;
-        if (sevFilter==='critical') rows=rows.filter(a=>a.severity>=8);
-        else if (sevFilter==='high') rows=rows.filter(a=>a.severity>=6&&a.severity<8);
-        else if (sevFilter==='medium') rows=rows.filter(a=>a.severity>=4&&a.severity<6);
-        else if (sevFilter==='low') rows=rows.filter(a=>a.severity<4);
+        let rawRows=data.alerts;
+        if (sevFilter==='critical') rawRows=rawRows.filter(a=>a.severity>=8);
+        else if (sevFilter==='high') rawRows=rawRows.filter(a=>a.severity>=6&&a.severity<8);
+        else if (sevFilter==='medium') rawRows=rawRows.filter(a=>a.severity>=4&&a.severity<6);
+        else if (sevFilter==='low') rawRows=rawRows.filter(a=>a.severity<4);
+        const rows = collapseAlerts(rawRows);
         if (!rows.length) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">No alerts match this filter.</div>'; return; }
-        el.innerHTML=`<div style="max-height:70vh;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.3);position:sticky;top:0;"><th style="padding:10px 14px;text-align:left;">Time</th><th style="padding:10px 14px;text-align:left;">Severity</th><th style="padding:10px 14px;text-align:left;">Source</th><th style="padding:10px 14px;text-align:left;">Rule</th><th style="padding:10px 14px;text-align:left;">Summary</th><th style="padding:10px 14px;text-align:left;">Container</th></tr></thead><tbody>${rows.map(a=>{const s=sevInfo(a.severity);return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#606080;">${fmtTime(a.timestamp)}</td><td style="padding:10px 14px;"><span class="sev-badge ${s.cls}">${s.label}</span></td><td style="padding:10px 14px;"><span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}</span></td><td style="padding:10px 14px;font-size:13px;font-weight:600;">${esc(a.rule||'—')}</td><td style="padding:10px 14px;font-size:12px;color:#a0a0b0;max-width:300px;">${esc((a.summary||'').substring(0,120))}${(a.summary||'').length>120?'…':''}</td><td style="padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#606080;">${esc(a.container_name||a.output_fields?.['container.name']||'—')}</td></tr>`;}).join('')}</tbody></table></div><div style="padding:10px 14px;font-size:12px;color:#606080;border-top:1px solid rgba(255,255,255,0.05);">Showing ${rows.length} alert${rows.length!==1?'s':''}</div>`;
+        el.innerHTML=`
+            <div style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06);border-radius:8px;background:rgba(255,255,255,0.02);font-size:12px;line-height:1.5;color:#a0a0b0;">
+                <strong style="color:#fff;">Readable Alert View</strong> — duplicate alerts are grouped and rows show <em>where</em> the alert came from (namespace/pod/container).
+                <span style="color:#94a3b8;">Rows tagged “Platform” come from monitoring/security infrastructure (Grafana, Prometheus, Falco, Suricata) rather than city service applications.</span>
+            </div>
+            <div style="max-height:70vh;overflow-y:auto;">
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="font-size:11px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.3);position:sticky;top:0;">
+                            <th style="padding:10px 14px;text-align:left;">Time</th>
+                            <th style="padding:10px 14px;text-align:left;">Severity</th>
+                            <th style="padding:10px 14px;text-align:left;">Detector</th>
+                            <th style="padding:10px 14px;text-align:left;">Rule</th>
+                            <th style="padding:10px 14px;text-align:left;">Where (namespace/pod)</th>
+                            <th style="padding:10px 14px;text-align:left;">What happened</th>
+                            <th style="padding:10px 14px;text-align:left;">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map(a=>{
+                            const s=sevInfo(a.severity);
+                            const ns=alertNamespace(a) || '—';
+                            const pod=alertPod(a) || '—';
+                            const ctr=alertContainer(a);
+                            const sid=alertSignatureId(a);
+                            const proc=alertProc(a);
+                            const file=alertFile(a);
+                            const platform=isPlatformAlert(a);
+                            const guide=ruleHelpMeta(a);
+                            const bg = platform ? 'rgba(148,163,184,0.03)' : 'transparent';
+                            const repeat = Number(a._repeat_count || 1);
+                            const summary = String(a.summary || '');
+                            const shortSummary = summary.length > 180 ? summary.substring(0,180) + '…' : summary;
+                            const sourceLabel = `${a.source||'falco'}${ns && ns!=='—' ? ' · '+ns : ''}`;
+                            const analysisObj = (a && typeof a.analysis === 'object' && a.analysis) ? a.analysis : {};
+                            const traceObj = (analysisObj && typeof analysisObj._llm_trace === 'object') ? analysisObj._llm_trace : null;
+                            const llmEngine = a.llm_engine || analysisObj._llm_engine || analysisObj.llm_engine || analysisObj.provider || analysisObj.engine || traceObj?.provider || '';
+                            const hasAnalysis = !!(a.analysis_present || (analysisObj && Object.keys(analysisObj).length));
+                            let analysisChip = '';
+                            if (llmEngine === 'cached') {
+                                analysisChip = '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;background:rgba(250,204,21,0.12);color:#facc15;font-size:10px;font-weight:700;">Cached analysis</span>';
+                            } else if (llmEngine && llmEngine !== 'none') {
+                                analysisChip = `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;background:rgba(0,255,136,0.12);color:#4ade80;font-size:10px;font-weight:700;">Analyzed · ${esc(String(llmEngine).toUpperCase())}</span>`;
+                            } else if (hasAnalysis) {
+                                analysisChip = '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;background:rgba(34,197,94,0.08);color:#86efac;font-size:10px;font-weight:700;">Analyzed (legacy row - provider missing)</span>';
+                            } else {
+                                analysisChip = '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;background:rgba(148,163,184,0.10);color:#94a3b8;font-size:10px;">No analysis</span>';
+                            }
+                            let llmTraceBlock = '';
+                            if (traceObj) {
+                                const promptSys = String(traceObj.system_prompt || '');
+                                const promptUsr = String(traceObj.user_prompt || '');
+                                const rawResp = String(traceObj.raw_response_text || '');
+                                const traceMeta = `${String(traceObj.provider || llmEngine || 'unknown').toUpperCase()} · ${esc(String(traceObj.model || 'unknown'))} · ${Number(traceObj.latency_ms || 0)}ms`;
+                                const parsedSeverity = a.severity != null ? String(a.severity) : (analysisObj.severity != null ? String(analysisObj.severity) : '—');
+                                const parsedThreat = String(a.threat_type || analysisObj.threat_type || 'Unknown');
+                                const parsedConfRaw = analysisObj.confidence ?? analysisObj.confidence_score;
+                                const parsedConf = (typeof parsedConfRaw === 'number')
+                                    ? `${Math.round(parsedConfRaw <= 1 ? parsedConfRaw * 100 : parsedConfRaw)}%`
+                                    : '—';
+                                const parsedActions = Array.isArray(a.automated_actions) && a.automated_actions.length
+                                    ? a.automated_actions
+                                    : (Array.isArray(analysisObj.automated_actions) ? analysisObj.automated_actions : []);
+                                llmTraceBlock = `
+                                    <details style="margin-top:8px;border:1px solid rgba(0,240,255,0.14);border-radius:8px;background:rgba(0,240,255,0.03);">
+                                        <summary style="cursor:pointer;padding:8px 10px;color:var(--accent-cyan);font-size:11px;font-weight:700;">View Full LLM Trace</summary>
+                                        <div style="padding:8px 10px 10px;">
+                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:8px;">${traceMeta}</div>
+                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Parsed Output</div>
+                                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:6px;margin-bottom:8px;">
+                                                <div style="padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-size:10px;color:#cbd5e1;"><span style="color:#94a3b8;">Severity</span><br><strong>${esc(parsedSeverity)}/10</strong></div>
+                                                <div style="padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-size:10px;color:#cbd5e1;"><span style="color:#94a3b8;">Threat</span><br><strong>${esc(parsedThreat)}</strong></div>
+                                                <div style="padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-size:10px;color:#cbd5e1;"><span style="color:#94a3b8;">Confidence</span><br><strong>${esc(parsedConf)}</strong></div>
+                                                <div style="padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-size:10px;color:#cbd5e1;"><span style="color:#94a3b8;">Actions</span><br><strong>${esc(parsedActions.length ? parsedActions.join(', ') : 'none')}</strong></div>
+                                            </div>
+                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">System Prompt</div>
+                                            <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0 0 8px 0;">${esc(promptSys)}</pre>
+                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">User Prompt</div>
+                                            <pre style="white-space:pre-wrap;max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0 0 8px 0;">${esc(promptUsr)}</pre>
+                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Raw LLM Response</div>
+                                            <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0;">${esc(rawResp)}</pre>
+                                        </div>
+                                    </details>`;
+                            }
+                            const contextParts = [];
+                            if (proc) contextParts.push('process: ' + proc);
+                            if (file) contextParts.push('file: ' + file);
+                            if (sid) contextParts.push('sid: ' + sid);
+                            const platformNote = platform ? 'Platform component alert (monitoring/security stack).' : '';
+                            const guideColor = guide?.tone === 'bad' ? '#fda4af' : guide?.tone === 'warn' ? '#fde68a' : '#94a3b8';
+                            return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);background:${bg};">
+                                <td style="padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#606080;vertical-align:top;">${fmtTime(a.timestamp)}</td>
+                                <td style="padding:10px 14px;vertical-align:top;"><span class="sev-badge ${s.cls}" title="${esc(s.label)}">${esc(s.label)}</span></td>
+                                <td style="padding:10px 14px;vertical-align:top;">
+                                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                                        <span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(sourceLabel)}</span>
+                                        ${platform?'<span style="padding:2px 7px;background:rgba(148,163,184,0.12);color:#94a3b8;border-radius:4px;font-size:10px;">Platform</span>':''}
+                                        ${guide?.tone==='muted'?'<span style="padding:2px 7px;background:rgba(148,163,184,0.10);color:#94a3b8;border-radius:4px;font-size:10px;">Likely Noise</span>':''}
+                                    </div>
+                                </td>
+                                <td style="padding:10px 14px;vertical-align:top;font-size:13px;font-weight:600;">
+                                    ${esc(a.rule||'—')}
+                                    ${sid ? `<div style="margin-top:4px;font-size:10px;color:#94a3b8;font-family:'JetBrains Mono',monospace;">Suricata SID ${esc(sid)}</div>` : ''}
+                                </td>
+                                <td style="padding:10px 14px;vertical-align:top;font-size:12px;color:#c0c0d0;min-width:220px;">
+                                    <div><span style="color:#94a3b8;">Namespace:</span> ${esc(ns)}</div>
+                                    <div><span style="color:#94a3b8;">Pod:</span> ${esc(pod)}</div>
+                                    <div><span style="color:#94a3b8;">Container:</span> <span style="font-family:'JetBrains Mono',monospace;color:#a0a0b0;">${esc(ctr)}</span></div>
+                                </td>
+                                <td style="padding:10px 14px;vertical-align:top;font-size:12px;color:#a0a0b0;max-width:420px;line-height:1.45;">
+                                    ${shortSummary ? `<div>${esc(shortSummary)}</div>` : '<div>—</div>'}
+                                    ${guide?.short ? `<div style="margin-top:6px;color:${guideColor};font-size:11px;">${esc(guide.short)}</div>` : ''}
+                                    ${guide?.detail ? `<div style="margin-top:4px;color:#94a3b8;font-size:11px;">${esc(guide.detail)}</div>` : ''}
+                                    <div style="margin-top:6px;">${analysisChip}</div>
+                                    ${contextParts.length ? `<div style="margin-top:6px;color:#94a3b8;font-family:'JetBrains Mono',monospace;font-size:11px;">${esc(contextParts.join(' · '))}</div>` : ''}
+                                    ${platformNote ? `<div style="margin-top:6px;color:#94a3b8;font-size:11px;">${esc(platformNote)}</div>` : ''}
+                                    ${llmTraceBlock}
+                                </td>
+                                <td style="padding:10px 14px;vertical-align:top;font-family:'JetBrains Mono',monospace;font-size:12px;color:${repeat>1?'#facc15':'#94a3b8'};">x${repeat}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div style="padding:10px 14px;font-size:12px;color:#606080;border-top:1px solid rgba(255,255,255,0.05);">
+                Showing ${rows.length} grouped row${rows.length!==1?'s':''} from ${rawRows.length} raw alert${rawRows.length!==1?'s':''}.
+            </div>`;
     },
     iot(data) {
         const {devices}=data;
@@ -1237,7 +1857,8 @@ const render = {
         const statsEl=$('k8sStats');
         if (statsEl) {
             const c=health?.components||{};
-            statsEl.innerHTML=`<div class="stat-card"><div class="stat-label">Cluster API</div><div class="stat-value" style="font-size:20px;color:${c.kubernetes==='connected'?'#4ade80':'#f87171'};">${c.kubernetes==='connected'?'Connected':c.kubernetes||'Offline'}</div></div><div class="stat-card"><div class="stat-label">Database</div><div class="stat-value" style="font-size:20px;color:${c.database==='connected'?'#4ade80':'#ffaa00'};">${c.database==='memory-fallback'?'In-Memory':c.database||'—'}</div><div class="stat-sub">${c.database==='memory-fallback'?'Using in-memory store':'PostgreSQL persistent storage'}</div></div><div class="stat-card"><div class="stat-label">Falco</div><div class="stat-value" style="font-size:20px;color:${c.falco==='enabled'?'#4ade80':'#f87171'};">${c.falco||'—'}</div><div class="stat-sub">Runtime detection</div></div><div class="stat-card"><div class="stat-label">Suricata</div><div class="stat-value" style="font-size:20px;color:${c.suricata==='enabled'?'#4ade80':'#f87171'};">${c.suricata||'—'}</div><div class="stat-sub">Network detection</div></div>`;
+            const db = dbStatusMeta(c.database);
+            statsEl.innerHTML=`<div class="stat-card"><div class="stat-label">Cluster API</div><div class="stat-value" style="font-size:20px;color:${c.kubernetes==='connected'?'#4ade80':'#f87171'};">${c.kubernetes==='connected'?'Connected':'Disconnected'}</div><div class="stat-sub">Kubernetes control plane access</div></div><div class="stat-card"><div class="stat-label">Database</div><div class="stat-value" style="font-size:20px;color:${db.tone==='ok'?'#4ade80':db.tone==='warn'?'#facc15':'#f87171'};">${esc(db.label)}</div><div class="stat-sub">${esc(db.detail)}</div></div><div class="stat-card"><div class="stat-label">Falco (Runtime)</div><div class="stat-value" style="font-size:20px;color:${c.falco==='enabled'?'#4ade80':'#f87171'};">${c.falco==='enabled'?'Enabled':'Disabled'}</div><div class="stat-sub">Container/process behavior detection</div></div><div class="stat-card"><div class="stat-label">Suricata (Network)</div><div class="stat-value" style="font-size:20px;color:${c.suricata==='enabled'?'#4ade80':'#f87171'};">${c.suricata==='enabled'?'Enabled':'Disabled'}</div><div class="stat-sub">Packet inspection / IDS signatures</div></div>`;
         }
         const podsEl=$('podsTable');
         if (podsEl) {
@@ -1280,6 +1901,71 @@ const app = {
     currentTab: 'overview',
     lastData:   {},
     pollTimer:  null,
+
+    setNotice(message, tone='info', durationMs=2500) {
+        try {
+            let host = $('toastHost');
+            if (!host) {
+                host = document.createElement('div');
+                host.id = 'toastHost';
+                host.style.position = 'fixed';
+                host.style.right = '16px';
+                host.style.bottom = '16px';
+                host.style.zIndex = '9999';
+                host.style.display = 'flex';
+                host.style.flexDirection = 'column';
+                host.style.gap = '8px';
+                host.style.maxWidth = '420px';
+                document.body.appendChild(host);
+            }
+            const colors = {
+                info: ['rgba(0,240,255,0.12)', 'rgba(0,240,255,0.28)', '#9cecff'],
+                warn: ['rgba(250,204,21,0.12)', 'rgba(250,204,21,0.24)', '#fde68a'],
+                error:['rgba(239,68,68,0.12)', 'rgba(239,68,68,0.24)', '#fecaca']
+            };
+            const [bg, bd, fg] = colors[tone] || colors.info;
+            const el = document.createElement('div');
+            el.style.background = bg;
+            el.style.border = `1px solid ${bd}`;
+            el.style.color = fg;
+            el.style.borderRadius = '10px';
+            el.style.padding = '10px 12px';
+            el.style.fontSize = '12px';
+            el.style.lineHeight = '1.4';
+            el.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
+            el.textContent = String(message || '');
+            host.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                el.style.transition = 'opacity .2s ease';
+                setTimeout(() => el.remove(), 220);
+            }, Math.max(800, Number(durationMs||2500)));
+        } catch (_) {
+            console.log('[notice]', tone, message);
+        }
+    },
+
+    async withBusyButton(btnId, busyText, fn) {
+        const btn = $(btnId);
+        const prevHtml = btn ? btn.innerHTML : '';
+        const prevDisabled = btn ? btn.disabled : false;
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i>${esc(busyText || 'Working…')}`;
+                btn.style.opacity = '0.8';
+                btn.style.cursor = 'wait';
+            }
+            return await fn();
+        } finally {
+            if (btn) {
+                btn.disabled = prevDisabled;
+                btn.innerHTML = prevHtml;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        }
+    },
 
     async login() {
         const user=($('loginUser')?.value||'').trim(), pass=($('loginPass')?.value||'').trim();
@@ -1331,6 +2017,10 @@ const app = {
             // Pending actions are not fetched in refreshAll() — load them on demand.
             this.refreshGovernance(false);
         }
+        if (tab==='llm-control') {
+            // LLM Control data is not fetched in refreshAll() — load on demand.
+            this.refreshLLMControl(false);
+        }
         this._renderTab(tab);
     },
 
@@ -1350,7 +2040,8 @@ const app = {
         if (res?.status === 'success') {
             this.setNotice(`Automation mode set: ${String(mode).toUpperCase()}`, 'info', 2000);
         } else {
-            this.setNotice(res?.reason || 'Failed to change mode', 'warn', 3500);
+            const msg = res?.detail || res?.reason || (res?.status_code===401 ? 'Session expired. Please log in again.' : 'Failed to change mode');
+            this.setNotice(msg, 'warn', 3500);
         }
         await this.refreshGovernance(false);
         // Refresh pills in header too
@@ -1376,32 +2067,49 @@ const app = {
     },
 
     async refreshLLMControl(probe=false) {
-        await this.withBusyButton('liveProbeBtn', probe?'Probing…':'Refreshing…', async () => {
-            const [control, comparison, healthSummary, routing, risk, usageToday, usageWeek] = await Promise.all([
-                api.getLLMControl(probe),
-                api.getLLMProviderComparison(),
-                api.getLLMProviderHealthSummary(),
-                api.getLLMRoutingStrategy(),
-                api.getLLMPredictiveRisk(),
-                api.getLLMUsage('today'),
-                api.getLLMUsage('week'),
-            ]);
-            this.lastData.llmControl = control;
-            this.lastData.llmComparison = comparison;
-            this.lastData.llmHealthSummary = healthSummary;
-            this.lastData.llmRouting = routing;
-            this.lastData.llmRisk = risk;
-            this.lastData.llmUsage = usageToday;
-            this.lastData.llmUsageWeek = usageWeek;
-            
-            render.llmControl(control||{}, comparison, healthSummary, usageToday, usageWeek);
-            render.llmUsageCompare(null, control, comparison);
-            render.llmRouting(routing, risk);
-            
-            if (probe) {
-                this.setNotice('Provider health check complete', 'info', 2000);
-            }
-        });
+        try {
+            this.logLLMEvent(`${probe ? 'Probe' : 'Refresh'} requested`);
+            await this.withBusyButton('liveProbeBtn', probe?'Probing…':'Refreshing…', async () => {
+                const [control, comparison, healthSummary, routing, risk, usageToday, usageWeek] = await Promise.all([
+                    api.getLLMControl(probe),
+                    api.getLLMProviderComparison(),
+                    api.getLLMProviderHealthSummary(),
+                    api.getLLMRoutingStrategy(),
+                    api.getLLMPredictiveRisk(),
+                    api.getLLMUsage('today'),
+                    api.getLLMUsage('week'),
+                ]);
+                this.lastData.llmControl = control;
+                this.lastData.llmComparison = comparison;
+                this.lastData.llmHealthSummary = healthSummary;
+                this.lastData.llmRouting = routing;
+                this.lastData.llmRisk = risk;
+                this.lastData.llmUsage = usageToday;
+                this.lastData.llmUsageWeek = usageWeek;
+
+                render.llmControl(control||{}, comparison, healthSummary, usageToday, usageWeek);
+                render.llmUsageCompare(null, control, comparison);
+                render.llmRouting(routing, risk);
+                const badge = $('llmConnectivityBadge');
+                if (badge) {
+                    badge.innerHTML = '<i class="fas fa-circle" style="font-size:8px;margin-right:4px;"></i>Connected';
+                }
+
+                const providerCount = Array.isArray(comparison?.providers) ? comparison.providers.length : 0;
+                const calls = Number(comparison?.summary?.calls || 0);
+                const riskScore = Number(risk?.risk_score || 0);
+                this.logLLMEvent(`LLM Control refreshed: ${providerCount} providers, ${calls} calls, risk ${riskScore.toFixed(1)}`);
+
+                if (probe) {
+                    this.logLLMEvent('Provider health probe complete');
+                    this.setNotice('Provider health check complete', 'info', 2000);
+                }
+            });
+        } catch (e) {
+            console.error('LLM Control refresh failed:', e);
+            this.logLLMEvent(`LLM Control refresh failed: ${String(e?.message || e)}`, 'error');
+            this.setNotice('LLM Control refresh failed: ' + String(e?.message || e), 'error', 4500);
+        }
     },
     
     onRoutingModeChange() {
@@ -1448,7 +2156,10 @@ const app = {
             if (res?.status === 'success') {
                 if (statusEl) statusEl.innerHTML = '<span style="color:#4ade80;"><i class="fas fa-check-circle mr-1"></i>Success</span>';
                 if (metaEl) metaEl.textContent = `${res.provider?.toUpperCase() || 'Unknown'} · ${res.latency_ms}ms · ${res.tokens || 0} tokens · $${Number(res.estimated_cost_usd || 0).toFixed(4)}`;
-                if (contentEl) contentEl.textContent = res.summary || res.response || 'No response content';
+                const analysisSummary = (res.analysis && typeof res.analysis === 'object')
+                    ? [res.analysis.threat_type, (res.analysis.severity != null ? `severity ${res.analysis.severity}/10` : null), (res.analysis.confidence != null ? `confidence ${Math.round((res.analysis.confidence<=1?res.analysis.confidence*100:res.analysis.confidence))}%` : null)].filter(Boolean).join(' · ')
+                    : '';
+                if (contentEl) contentEl.textContent = res.summary || res.response || analysisSummary || 'Provider responded (no summary text returned)';
             } else {
                 if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;"><i class="fas fa-times-circle mr-1"></i>Failed</span>';
                 if (metaEl) metaEl.textContent = res?.provider?.toUpperCase() || 'Unknown';
@@ -1472,25 +2183,48 @@ const app = {
         };
         const res = await api.setLLMRoutingStrategy(payload);
         if (res?.status === 'ok') {
+            this.logLLMEvent(`Routing strategy updated: mode=${payload.mode || 'priority'}, ceiling=$${Number(payload.cost_ceiling_usd || 0).toFixed(2)}`);
             this.setNotice('Routing strategy updated', 'info');
             await this.refreshLLMControl(false);
         } else {
+            this.logLLMEvent(`Routing strategy update failed: ${res?.error || res?.detail || 'unknown error'}`, 'error');
             this.setNotice('Failed to update routing strategy', 'error');
         }
     },
     
     async testProviderKey(provider) {
+        this.logLLMEvent(`Testing provider key: ${String(provider).toUpperCase()}`);
         this.setNotice(`Testing ${provider} API key...`, 'info');
-        await this.runLLMTest();
+        const res = await api.testProviderByName(provider, 'Analyze: suspicious outbound connection');
+        if (res?.status === 'success') {
+            this.logLLMEvent(`${String(provider).toUpperCase()} test OK (${res.latency_ms}ms)`);
+            this.setNotice(`${String(provider).toUpperCase()} test OK (${res.latency_ms}ms)`, 'info', 3000);
+        } else {
+            this.logLLMEvent(`${String(provider).toUpperCase()} test failed: ${res?.error || res?.message || 'unknown error'}`, 'warn');
+            this.setNotice(`${String(provider).toUpperCase()} test failed: ${res?.error || res?.message || 'unknown error'}`, 'warn', 4500);
+        }
+        await this.refreshLLMControl(false);
     },
     
     async probeProvider(provider) {
+        this.logLLMEvent(`Probe provider: ${String(provider).toUpperCase()}`);
         this.setNotice(`Probing ${provider}...`, 'info');
-        await this.refreshLLMControl(true);
+        const res = await api.testProviderByName(provider, 'LLM health probe event');
+        if (res?.status === 'success') {
+            this.logLLMEvent(`${String(provider).toUpperCase()} probe OK (${res.latency_ms || '?'}ms)`);
+            this.setNotice(`${String(provider).toUpperCase()} probe OK`, 'info', 2500);
+        } else {
+            this.logLLMEvent(`${String(provider).toUpperCase()} probe failed`, 'warn');
+            this.setNotice(`${String(provider).toUpperCase()} probe failed`, 'warn', 3500);
+        }
+        await this.refreshLLMControl(false);
     },
     
     async retryAllProviders() {
+        this.logLLMEvent('Retry/reset all providers requested');
         this.setNotice('Resetting all providers...', 'info');
+        const res = await api.retryAllLLMProviders();
+        this.logLLMEvent(`Retry/reset all providers: ${res?.status || 'done'}`);
         await this.refreshLLMControl(false);
     },
     
@@ -1499,19 +2233,34 @@ const app = {
         if (log) log.innerHTML = '<span style="color:#606080;">// Events cleared</span>';
     },
 
+    logLLMEvent(message, level='info') {
+        const log = $('llmEventLog');
+        if (!log) return;
+        const ts = new Date().toLocaleTimeString();
+        const color = level === 'error' ? '#f87171' : (level === 'warn' ? '#fbbf24' : '#a0e9ff');
+        const line = `<span style="color:#606080;">[${ts}]</span> <span style="color:${color};">${String(message || '').replace(/</g,'&lt;')}</span>`;
+        const wasPlaceholder = /Events cleared|Events appear here/i.test(log.textContent || '');
+        log.innerHTML = wasPlaceholder ? line : `${line}\n${log.innerHTML}`;
+    },
+
     async refreshAll() {
-        const [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits]=await Promise.all([
-            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(50),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits()
+        const [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits,govPending,dedup,rateLimiter]=await Promise.all([
+            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(50),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits(),api.getGovPending(),api.getDedupStats(),api.getAlertRateLimiterStatus()
         ]);
-        this.lastData={health,metrics,pipeline,alerts,iot:{devices:iot},gov,llmDiag,credits};
+        this.lastData={health,metrics,pipeline,alerts,iot:{devices:iot},gov,llmDiag,credits,govPending,dedup,rateLimiter};
         this._renderTab(this.currentTab);
+        if (this.currentTab === 'llm-control') {
+            // refreshAll() does not fetch LLM Control bundle; load it explicitly.
+            this.refreshLLMControl(false);
+        }
         const crit=(alerts?.alerts||[]).filter(a=>a.severity>=8).length;
         const badge=$('alertBadge'); if(badge){badge.textContent=crit;badge.style.display=crit>0?'inline':'none';}
-        render.credits(credits);
+        render.llmProviders(health, credits);
     },
 
     async refreshCredits() {
-        const c=await api.getCredits(); render.credits(c);
+        const [h, c] = await Promise.all([api.getHealth(), api.getCredits()]);
+        render.llmProviders(h, c);
     },
 
     _renderTab(tab) {
@@ -1538,7 +2287,24 @@ const app = {
 // ── Bootstrap ─────────────────────────────────────────────────────────
 (function(){
     const saved=localStorage.getItem(CFG.TOKEN_KEY);
-    if(saved){ api.token=saved; app._showDashboard(); }
+    if (!saved) return;
+    (async () => {
+        api.token = saved;
+        // Validate saved token before auto-opening the dashboard. Expired tokens
+        // otherwise make automation/LLM control actions look "broken" (401s).
+        const probe = await api._fetch('/api/governance/mode');
+        if (probe && typeof probe === 'object' && probe.mode) {
+            app._showDashboard();
+        } else {
+            api.token = '';
+            localStorage.removeItem(CFG.TOKEN_KEY);
+            const errEl = $('loginError');
+            if (errEl) {
+                errEl.textContent = 'Session expired. Please log in again.';
+                errEl.style.display = 'block';
+            }
+        }
+    })();
 })();
 </script>
 

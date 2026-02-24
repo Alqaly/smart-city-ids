@@ -392,8 +392,14 @@ class CreditChecker:
                         response_time_ms=round(response_time_ms, 2),
                     )
                 elif response.status_code == 404:
-                    # Billing endpoint not available - try models endpoint as health check
-                    return await self._health_check_only(provider, api_key, config)
+                    # Billing endpoint not available - this is NORMAL for most providers
+                    # Try models endpoint as health check and return 'ok' if reachable
+                    health_info = await self._health_check_only(provider, api_key, config)
+                    if health_info.api_reachable:
+                        # API is reachable but billing info not available - this is normal
+                        health_info.status = "ok"
+                        health_info.error_message = None  # Clear error since this is normal
+                    return health_info
                 else:
                     return CreditInfo(
                         provider=provider,

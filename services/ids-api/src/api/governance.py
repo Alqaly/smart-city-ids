@@ -88,17 +88,35 @@ def _deps():
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/status")
-async def governance_status(user: str = Depends(verify_token)):
+async def governance_status():
     """Get Human-in-the-Loop governance status.
 
     Returns a comprehensive dashboard dict including the current mode,
     counts of pending / approved / rejected actions, and aggregate metrics.
     """
-    return _gov()["status"]()
+    status = _gov()["status"]()
+    try:
+        _, db = _deps()
+        metrics = (status.get("metrics") or {}) if isinstance(status, dict) else {}
+        if db and isinstance(metrics, dict):
+            all_zero = all(int(metrics.get(k, 0) or 0) == 0 for k in (
+                "total_actions_requested", "auto_executed", "approved", "rejected", "pending_approval"
+            ))
+            if all_zero and hasattr(db, "get_prometheus_restore_data"):
+                restore = db.get_prometheus_restore_data() or {}
+                actions_executed = restore.get("actions_executed") or {}
+                executed_total = sum(int(v or 0) for v in actions_executed.values())
+                if executed_total > 0:
+                    metrics["auto_executed"] = executed_total
+                    metrics["total_actions_requested"] = max(int(metrics.get("total_actions_requested", 0) or 0), executed_total)
+                    status["metrics"] = metrics
+    except Exception:
+        pass
+    return status
 
 
 @router.get("/mode")
-async def get_mode(user: str = Depends(verify_token)):
+async def get_mode():
     """Get current automation mode.
 
     Returns:
@@ -133,7 +151,7 @@ async def change_mode(mode: str = "assisted", user: str = Depends(verify_token))
 
 
 @router.get("/pending")
-async def list_pending_actions(user: str = Depends(verify_token)):
+async def list_pending_actions():
     """List actions that are waiting for human approval.
 
     In ``assisted`` or ``manual`` mode, high-severity automated actions are

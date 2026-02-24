@@ -428,6 +428,56 @@ api_call() {
     fi
 }
 
+resolve_ids_api_url() {
+    # Order:
+    #  1) explicit IDS_API_URL
+    #  2) local port-forward (:8000)
+    #  3) local NodePort (:30800)
+    #  4) detected NodePort from cluster service
+    local preferred="${IDS_API_URL:-}"
+    if [[ -n "$preferred" ]] && curl -fsS --max-time 2 "${preferred%/}/health" >/dev/null 2>&1; then
+        echo "${preferred%/}"
+        return 0
+    fi
+
+    local candidates=(
+        "http://localhost:8000"
+        "http://127.0.0.1:8000"
+        "http://localhost:30800"
+        "http://127.0.0.1:30800"
+    )
+    local c
+    for c in "${candidates[@]}"; do
+        if curl -fsS --max-time 2 "${c}/health" >/dev/null 2>&1; then
+            echo "$c"
+            return 0
+        fi
+    done
+
+    if command -v kubectl >/dev/null 2>&1; then
+        local node_ip ids_port
+        node_ip="$(get_node_ip 2>/dev/null || echo "localhost")"
+        ids_port="$(get_service_nodeport ids-api-service smart-city 30800 2>/dev/null || echo "30800")"
+        local derived="http://${node_ip}:${ids_port}"
+        if curl -fsS --max-time 2 "${derived}/health" >/dev/null 2>&1; then
+            echo "$derived"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+ids_login_token() {
+    local base_url="$1"
+    local user="${2:-admin}"
+    local pass="${3:-admin}"
+    curl -fsS -X POST "${base_url%/}/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" 2>/dev/null \
+        | jq -r '.access_token // empty' 2>/dev/null || true
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FILE OPERATIONS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -518,4 +568,5 @@ export -f confirm confirm_destructive
 export -f pkill_safe
 export -f timer_start timer_elapsed timer_format
 export -f api_call backup_file version_gte
+export -f resolve_ids_api_url ids_login_token
 export -f print_help print_banner init_script cleanup_on_exit

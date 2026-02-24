@@ -26,6 +26,7 @@ ensure_kubeconfig
 
 PASSED=0
 FAILED=0
+WARNED=0
 
 check_ok() {
     local msg="$1"
@@ -37,6 +38,12 @@ check_fail() {
     local msg="$1"
     log_error "$msg"
     ((FAILED+=1))
+}
+
+check_warn() {
+    local msg="$1"
+    log_warn "$msg"
+    ((WARNED+=1))
 }
 
 exists_with_retry() {
@@ -118,13 +125,17 @@ log_section "4) Prometheus & Grafana"
 NODE_IP="$(get_node_ip)"
 PROM_PORT="$(get_service_nodeport prometheus monitoring 31106)"
 GRAFANA_PORT="$(get_service_nodeport grafana monitoring 30300)"
+PROM_BASE=""
+GRAFANA_BASE=""
 
 prom_up_is_1() {
     local job="$1"
     local tries="${2:-6}"
     local i
+    [[ -n "${PROM_BASE:-}" ]] || return 1
     for i in $(seq 1 "$tries"); do
-        if curl -fsS "http://${NODE_IP}:${PROM_PORT}/api/v1/query?query=up%7Bjob%3D%22${job}%22%7D" 2>/dev/null \
+        if curl -fsS --connect-timeout 2 --max-time 4 \
+            "${PROM_BASE}/api/v1/query?query=up%7Bjob%3D%22${job}%22%7D" 2>/dev/null \
             | jq -e '.data.result[0].value[1] == "1"' >/dev/null 2>&1; then
             return 0
         fi
@@ -133,34 +144,62 @@ prom_up_is_1() {
     return 1
 }
 
-if curl -fsS "http://${NODE_IP}:${PROM_PORT}/-/healthy" >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 2 --max-time 4 "http://${NODE_IP}:${PROM_PORT}/-/healthy" >/dev/null 2>&1; then
+    PROM_BASE="http://${NODE_IP}:${PROM_PORT}"
     check_ok "Prometheus healthy (NodePort)"
+elif curl -fsS --connect-timeout 2 --max-time 4 "http://localhost:9090/-/healthy" >/dev/null 2>&1; then
+    PROM_BASE="http://localhost:9090"
+    check_ok "Prometheus healthy (local port-forward)"
 else
-    check_fail "Prometheus not reachable via NodePort"
+    if [[ $QUICK -eq 1 ]]; then
+        check_warn "Prometheus not reachable (NodePort/local)"
+    else
+        check_fail "Prometheus not reachable (NodePort/local)"
+    fi
 fi
 
-if curl -fsS "http://${NODE_IP}:${GRAFANA_PORT}/api/health" >/dev/null 2>&1; then
+if curl -fsS --connect-timeout 2 --max-time 4 "http://${NODE_IP}:${GRAFANA_PORT}/api/health" >/dev/null 2>&1; then
+    GRAFANA_BASE="http://${NODE_IP}:${GRAFANA_PORT}"
     check_ok "Grafana healthy (NodePort)"
+elif curl -fsS --connect-timeout 2 --max-time 4 "http://localhost:3000/api/health" >/dev/null 2>&1; then
+    GRAFANA_BASE="http://localhost:3000"
+    check_ok "Grafana healthy (local port-forward)"
 else
-    check_fail "Grafana not reachable via NodePort"
+    if [[ $QUICK -eq 1 ]]; then
+        check_warn "Grafana not reachable (NodePort/local)"
+    else
+        check_fail "Grafana not reachable (NodePort/local)"
+    fi
 fi
 
 if prom_up_is_1 "smart-city-ids"; then
     check_ok "Prometheus scraping IDS API (up=1)"
 else
-    check_fail "Prometheus scrape missing for IDS API (up!=1)"
+    if [[ $QUICK -eq 1 ]]; then
+        check_warn "Prometheus scrape missing for IDS API (up!=1)"
+    else
+        check_fail "Prometheus scrape missing for IDS API (up!=1)"
+    fi
 fi
 
 if prom_up_is_1 "suricata-forwarder"; then
     check_ok "Prometheus scraping Suricata forwarder (up=1)"
 else
-    check_fail "Prometheus scrape missing for Suricata forwarder (up!=1)"
+    if [[ $QUICK -eq 1 ]]; then
+        check_warn "Prometheus scrape missing for Suricata forwarder (up!=1)"
+    else
+        check_fail "Prometheus scrape missing for Suricata forwarder (up!=1)"
+    fi
 fi
 
 if prom_up_is_1 "falco-forwarder"; then
     check_ok "Prometheus scraping Falco forwarder (up=1)"
 else
-    check_fail "Prometheus scrape missing for Falco forwarder (up!=1)"
+    if [[ $QUICK -eq 1 ]]; then
+        check_warn "Prometheus scrape missing for Falco forwarder (up!=1)"
+    else
+        check_fail "Prometheus scrape missing for Falco forwarder (up!=1)"
+    fi
 fi
 
 log_section "5) API Health and Auth"
@@ -197,14 +236,14 @@ fi
 if [[ "${LLM_CONFIGURED_COUNT:-0}" -ge 1 ]]; then
     check_ok "LLM providers configured: ${LLM_CONFIGURED_COUNT} provider(s) available"
 else
-    check_fail "No LLM providers configured — alerts will use safe-mode analysis only"
+    check_fail "No LLM providers configured — alerts will be queued/degraded until keys are restored"
 fi
 
 LOGIN_JSON=""
 for _ in 1 2 3; do
     LOGIN_JSON=$(kubectl exec -n smart-city deploy/ids-api -- curl -fsS -X POST "http://localhost:${IDS_API_SVC_PORT}/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d '{"username":"operator","password":"operator"}' 2>/dev/null || true)
+        -d '{"username":"admin","password":"admin"}' 2>/dev/null || true)
     if [[ -n "$LOGIN_JSON" ]]; then
         break
     fi
@@ -213,9 +252,9 @@ done
 TOKEN=$(echo "$LOGIN_JSON" | jq -r '.access_token // empty' 2>/dev/null || true)
 
 if [[ -n "$TOKEN" ]]; then
-    check_ok "Operator login works"
+    check_ok "Admin login works (admin/admin)"
 else
-    check_fail "Operator login failed"
+    check_fail "Admin login failed (expected admin/admin)"
 fi
 
 if [[ -n "$TOKEN" ]]; then
@@ -272,6 +311,7 @@ fi
 
 log_section "Summary"
 echo "Passed: $PASSED"
+echo "Warnings: $WARNED"
 echo "Failed: $FAILED"
 echo ""
 

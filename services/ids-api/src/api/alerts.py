@@ -332,8 +332,56 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     )
 
     # ===================================================================
-    # Stage 2: Deduplication (LLM cost reduction) — rate limiting removed;
-    # dedup cache (300s TTL) is the sole flood-protection mechanism.
+    # Stage 2: Alert-level rate limiting (per-rule / per-source flood control)
+    # ===================================================================
+    # Deduplication alone prevents LLM cost explosions, but it still allows
+    # duplicate alerts to flood the DB, SSE stream, and dashboard. Re-enable
+    # the alert-level rate limiter here so repeated signatures (e.g. Suricata
+    # HTTP flood) are recorded in `throttled_alerts` and suppressed from the
+    # main alert stream once they exceed configured thresholds.
+    if d.get("alert_rate_limiter") and source in ("falco", "suricata"):
+        try:
+            should_process, throttle_reason = d["alert_rate_limiter"].should_process(
+                {"rule": alert.rule, "source": source}
+            )
+        except Exception as rl_exc:
+            should_process, throttle_reason = True, None
+            logger.warning(f"Alert rate limiter failed open for rule={alert.rule}: {rl_exc}")
+
+        if not should_process:
+            reason_val = getattr(throttle_reason, "value", str(throttle_reason or "unknown"))
+            PROM_ALERTS_PROCESSED_TOTAL.labels(result="throttled").inc()
+            PROM_ALERTS_THROTTLED_TOTAL.labels(reason=reason_val).inc()
+            d["audit"](
+                "ALERT_THROTTLED",
+                trace_id=request_trace_id,
+                status="throttled",
+                payload={"rule": alert.rule, "source": source, "reason": reason_val},
+            )
+            try:
+                d["db"].add_throttled_alert(
+                    alert={**alert.dict(), "source": source},
+                    throttle_reason=reason_val,
+                )
+            except Exception as db_exc:
+                logger.warning(f"Failed to persist throttled alert ({alert.rule}): {db_exc}")
+
+            logger.warning(f"Alert throttled [{source}] rule={alert.rule} reason={reason_val}")
+            return AlertResponse(
+                status="throttled",
+                alert_id=f"throttled-{int(time.time()*1000)}",
+                trace_id=request_trace_id,
+                severity=0,
+                summary=f"Suppressed duplicate alert burst ({reason_val})",
+                threat_type="Throttled",
+                analysis={"status": "throttled", "reason": reason_val, "_llm_engine": "none"},
+                actions_taken=[],
+                processing_time_ms=int((time.perf_counter() - started) * 1000),
+                llm_engine="none",
+            )
+
+    # ===================================================================
+    # Stage 3: Deduplication (LLM cost reduction)
     # ===================================================================
     # The deduplicator computes a content hash over the alert payload and
     # checks whether an identical alert was analyzed within a configurable
@@ -468,6 +516,19 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
 
     # Get LLM-recommended actions
     llm_recommended_actions = analysis.get("automated_actions", []) if isinstance(analysis, dict) else []
+    
+    # Update governance metrics for tracking in Automation tab
+    def _update_governance_metrics(action_executed=True):
+        try:
+            from governance import governance
+            governance._metrics["total_actions_requested"] += 1
+            if action_executed:
+                governance._metrics["auto_executed"] += 1
+            else:
+                governance._metrics["rejected"] += 1
+        except Exception:
+            pass
+    
     def _try_action(action_type, target, action_label=None):
         """Try to execute a K8s action with governance checks and verbose logging."""
         label = action_label or f"{action_type}({target})"
@@ -475,6 +536,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         if can_exec:
             actions_taken.append(label)
             d["metrics"]["automated_actions"] += 1
+            _update_governance_metrics(action_executed=True)
             PROM_ACTIONS_EXECUTED_TOTAL.labels(action=action_type).inc()
             PROM_AUTOMATED_DECISIONS.labels(action_type=action_type).inc()
             PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
@@ -507,6 +569,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         else:
             blocked_label = f"BLOCKED:{action_type}({target}):{reason}"
             actions_taken.append(blocked_label)
+            _update_governance_metrics(action_executed=False)
             PROM_ACTIONS_BLOCKED_TOTAL.labels(action=action_type, reason="blocked").inc()
             action_records.append({
                 "action_type": action_type,
@@ -634,6 +697,21 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     # result.  This record is written to both the relational database
     # (SQLite/Postgres) for durable storage and the in-memory alerts_db
     # list for fast retrieval by GET /api/alerts.
+    analysis_for_store = analysis
+    if isinstance(analysis, dict):
+        analysis_for_store = dict(analysis)
+        # Persist the engine used inside the JSON analysis payload so the
+        # dashboard can display it even if the SQL schema lacks a llm_engine
+        # column (backward-compatible with existing deployments).
+        analysis_for_store["_llm_engine"] = llm_used
+        analysis_for_store["_analysis_source"] = (
+            "cached" if llm_used == "cached" else ("llm" if llm_used not in ("none", "", None) else "none")
+        )
+        try:
+            analysis_for_store["_analysis_latency_ms"] = int(llm_latency * 1000)
+        except Exception:
+            pass
+
     alert_record = {
         "timestamp": alert.time,
         "source": source,
@@ -646,7 +724,8 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         "recommendations": analysis.get("recommendations", []),
         "automated_actions": actions_taken,
         "raw_alert": alert.dict(),
-        "analysis": analysis,
+        "analysis": analysis_for_store,
+        "llm_engine": llm_used,
     }
     alert_id = d["db"].add_alert(alert_record)  # returns auto-generated unique ID
     alert_record["id"] = alert_id
@@ -663,7 +742,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         alert_id,
         {
             "model": llm_used,
-            "analysis": analysis,
+            "analysis": analysis_for_store,
             "analysis_time_ms": int(llm_latency * 1000),
             "confidence_score": analysis.get("confidence") if isinstance(analysis, dict) else None,
             "analyzed_at": datetime.now(),
@@ -866,8 +945,10 @@ async def process_alert(alert: Alert, request: Request, token=Depends(verify_tok
 
     try:
         resp = await _process_alert_core(alert, "/api/alerts", started, d)
-        # Broadcast the result to all SSE-connected dashboard clients
-        await d["broadcast"]({"type": "alert_processed", "source": d["detect_source"](alert), "endpoint": "/api/alerts", "trace_id": resp.trace_id, **resp.dict()})
+        # Do not flood SSE with throttled duplicates; they are tracked via
+        # metrics/throttled_alerts and represented by surviving alert rows.
+        if resp.status != "throttled":
+            await d["broadcast"]({"type": "alert_processed", "source": d["detect_source"](alert), "endpoint": "/api/alerts", "trace_id": resp.trace_id, **resp.dict()})
         return resp
     except Exception as e:
         # On processing failure, still persist the raw alert so no data is
@@ -954,15 +1035,16 @@ async def process_alert_internal(
 
     try:
         resp = await _process_alert_core(alert, "/api/alerts/internal", started, d)
-        # Broadcast with enriched payload for internal dashboard consumers
-        await d["broadcast"]({
-            "type": "alert_processed", "source": d["detect_source"](alert),
-            "endpoint": "/api/alerts/internal", "rule": alert.rule,
-            "priority": alert.priority, "output": alert.output,
-            "output_fields": alert.output_fields,
-            "container_name": (alert.output_fields or {}).get("container.name", ""),
-            "trace_id": resp.trace_id, **resp.dict(),
-        })
+        # Broadcast only non-throttled alerts to avoid UI/SSE storms.
+        if resp.status != "throttled":
+            await d["broadcast"]({
+                "type": "alert_processed", "source": d["detect_source"](alert),
+                "endpoint": "/api/alerts/internal", "rule": alert.rule,
+                "priority": alert.priority, "output": alert.output,
+                "output_fields": alert.output_fields,
+                "container_name": (alert.output_fields or {}).get("container.name", ""),
+                "trace_id": resp.trace_id, **resp.dict(),
+            })
         return resp
     except Exception as e:
         # Persist raw alert on failure (mirrors authenticated endpoint logic)
@@ -1021,9 +1103,42 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None):
     from api._state import db, alert_trace_id
 
     alerts = db.get_alerts(limit=limit, source=source)
+    missing_engine_ids = []
+    for a in alerts:
+        if a.get("id") and not a.get("llm_engine"):
+            missing_engine_ids.append(int(a["id"]))
+    analysis_models_by_alert = {}
+    if missing_engine_ids and hasattr(db, "get_latest_analysis_models"):
+        try:
+            analysis_models_by_alert = db.get_latest_analysis_models(missing_engine_ids) or {}
+        except Exception:
+            analysis_models_by_alert = {}
     for a in alerts:
         if "trace_id" not in a or not a.get("trace_id"):
             a["trace_id"] = alert_trace_id(a.get("id", "unknown"))
+        # Backfill analysis metadata for dashboard rendering. Older alerts may
+        # not have llm_engine as a top-level field even when they were analyzed.
+        analysis = a.get("analysis")
+        if isinstance(analysis, str):
+            try:
+                analysis = json_mod.loads(analysis)
+                a["analysis"] = analysis
+            except Exception:
+                analysis = {}
+        if not isinstance(analysis, dict):
+            analysis = {}
+        a["analysis_present"] = bool(analysis)
+        if not a.get("llm_engine"):
+            engine = (
+                analysis.get("_llm_engine")
+                or analysis.get("llm_engine")
+                or analysis.get("provider")
+                or analysis.get("engine")
+            )
+            if not engine and a.get("id"):
+                engine = analysis_models_by_alert.get(int(a["id"]))
+            if engine:
+                a["llm_engine"] = engine
     total = db.get_alert_count(source=source)
     return {
         "total": total,

@@ -605,7 +605,11 @@ async def get_rate_limiter_status():
     _, _, alert_rate_limiter = _deps()
     if not alert_rate_limiter:
         return {"error": "Rate limiter not initialized"}
-    stats = alert_rate_limiter.get_stats()
+    stats = alert_rate_limiter.get_stats() or {}
+    total_received = int(stats.get("total_received", 0))
+    total_throttled = int(stats.get("total_throttled", 0))
+    total_processed = int(stats.get("total_processed", 0))
+    throttle_rate = float(stats.get("throttle_rate_percent", 0.0))
     return {
         "config": {
             "window_seconds": alert_rate_limiter.window_seconds,
@@ -614,14 +618,15 @@ async def get_rate_limiter_status():
             "max_global": alert_rate_limiter.max_global,
         },
         "stats": {
-            "total_received": stats.total_received,
-            "total_throttled": stats.total_throttled,
-            "total_processed": stats.total_processed,
-            "throttle_rate_percent": round(stats.throttle_rate * 100, 2),
-            "throttle_reasons": dict(stats.throttle_reasons),
+            "total_received": total_received,
+            "total_throttled": total_throttled,
+            "total_processed": total_processed,
+            "throttle_rate_percent": throttle_rate,
+            "throttle_reasons": stats.get("throttle_reasons", {}),
+            "current_windows": stats.get("current_windows", {}),
         },
         # Flag unhealthy if more than half of alerts are being throttled.
-        "status": "healthy" if stats.throttle_rate < 0.5 else "high_throttle_rate",
+        "status": "healthy" if throttle_rate < 50.0 else "high_throttle_rate",
     }
 
 
@@ -638,6 +643,9 @@ async def reset_rate_limiter():
     _, _, alert_rate_limiter = _deps()
     if not alert_rate_limiter:
         return {"error": "Rate limiter not initialized"}
+    if hasattr(alert_rate_limiter, "clear_all"):
+        alert_rate_limiter.clear_all()
+        return {"status": "success", "message": "Rate limiter counters and windows reset"}
     alert_rate_limiter.reset()
     return {"status": "success", "message": "Rate limiter counters reset"}
 
@@ -710,9 +718,35 @@ async def export_llm_stats():
 async def _build_provider_comparison_payload():
     stats = await export_llm_stats()
     diagnostics = await _build_llm_diagnostics()
+    usage_totals_by_provider: dict[str, dict] = {}
+
+    # Runtime counters reset on pod restart. Merge DB-backed usage totals so
+    # the dashboard comparison remains meaningful across restarts.
+    try:
+        from api._state import db, LLM_COST_PER_1K_TOKENS
+        usage = None
+        if db and hasattr(db, "get_llm_usage_today"):
+            usage = db.get_llm_usage_today()
+        for row in (usage or {}).get("providers", []) or []:
+            prov = str(row.get("provider") or "").strip().lower()
+            if not prov:
+                continue
+            prompt_tokens = int(row.get("prompt_tokens") or 0)
+            completion_tokens = int(row.get("completion_tokens") or 0)
+            tokens_total = prompt_tokens + completion_tokens
+            rate = float(LLM_COST_PER_1K_TOKENS.get(prov, 0.0))
+            usage_totals_by_provider[prov] = {
+                "calls": int(row.get("calls") or 0),
+                "prompt_tokens_total": prompt_tokens,
+                "completion_tokens_total": completion_tokens,
+                "tokens_total": tokens_total,
+                "total_estimated_cost_usd": round((tokens_total / 1000.0) * rate, 6) if rate > 0 else 0.0,
+            }
+    except Exception:
+        usage_totals_by_provider = {}
 
     engines = stats.get("engines", {})
-    names = sorted(set(engines.keys()) | set(diagnostics.keys()))
+    names = sorted(set(engines.keys()) | set(diagnostics.keys()) | set(usage_totals_by_provider.keys()))
 
     rows = []
     totals = {
@@ -726,17 +760,18 @@ async def _build_provider_comparison_payload():
     for name in names:
         engine = engines.get(name, {})
         diag = diagnostics.get(name, {})
-        calls = int(engine.get("total_requests", 0))
+        usage = usage_totals_by_provider.get(name, {})
+        calls = int(engine.get("total_requests", 0)) or int(usage.get("calls", 0))
         successes = int(engine.get("successes", 0))
         failures = int(engine.get("failures", 0))
         success_rate = engine.get("success_rate")
         if success_rate is None:
             success_rate = (successes / calls) if calls else 0.0
 
-        prompt_tokens = int(engine.get("prompt_tokens_total", 0))
-        completion_tokens = int(engine.get("completion_tokens_total", 0))
-        total_tokens = int(engine.get("tokens_total", prompt_tokens + completion_tokens))
-        total_cost_usd = float(engine.get("total_estimated_cost_usd", 0.0))
+        prompt_tokens = int(engine.get("prompt_tokens_total", 0)) or int(usage.get("prompt_tokens_total", 0))
+        completion_tokens = int(engine.get("completion_tokens_total", 0)) or int(usage.get("completion_tokens_total", 0))
+        total_tokens = int(engine.get("tokens_total", prompt_tokens + completion_tokens)) or int(usage.get("tokens_total", 0))
+        total_cost_usd = float(engine.get("total_estimated_cost_usd", 0.0)) or float(usage.get("total_estimated_cost_usd", 0.0))
 
         totals["calls"] += calls
         totals["tokens"] += total_tokens
@@ -748,6 +783,7 @@ async def _build_provider_comparison_payload():
             "configured": bool(diag.get("configured", False)),
             "status": diag.get("status", "unknown"),
             "model": diag.get("model") or "",
+            "calls": calls,
             "attempts": int(diag.get("attempts", 0)),
             "successes": successes,
             "failures": failures,
@@ -1069,12 +1105,29 @@ async def get_llm_routing_strategy(_=Depends(verify_token)):
     """Get active LLM routing strategy and recent routing decisions."""
     try:
         from api._state import db
-        config = db.get_system_config('llm_cost_ceiling', {
+        cost_cfg = db.get_system_config('llm_cost_ceiling', {
             "max_daily_usd": 10.0,
             "current_daily_usd": 0.0,
             "last_reset": None
         })
-        return {"status": "ok", "routing": {"cost_ceiling_usd": config.get("max_daily_usd")}}
+        routing_cfg = db.get_system_config('llm_routing_strategy', {
+            "mode": "priority",
+            "ab_enabled": False,
+            "provider_a": None,
+            "provider_b": None,
+            "split_percent_a": 50,
+        })
+        return {
+            "status": "ok",
+            "routing": {
+                "mode": routing_cfg.get("mode", "priority"),
+                "ab_enabled": bool(routing_cfg.get("ab_enabled", False)),
+                "provider_a": routing_cfg.get("provider_a"),
+                "provider_b": routing_cfg.get("provider_b"),
+                "split_percent_a": int(routing_cfg.get("split_percent_a", 50) or 50),
+                "cost_ceiling_usd": cost_cfg.get("max_daily_usd"),
+            },
+        }
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -1084,17 +1137,45 @@ async def set_llm_routing_strategy(payload: RoutingStrategyPayload, _=Depends(ve
     """Update runtime LLM routing strategy (priority/cost_optimized/ab_test/severity_adaptive)."""
     try:
         from api._state import db
-        config = db.get_system_config('llm_cost_ceiling', {
+        cost_cfg = db.get_system_config('llm_cost_ceiling', {
             "max_daily_usd": 10.0,
             "current_daily_usd": 0.0,
             "last_reset": None
         })
+        routing_cfg = db.get_system_config('llm_routing_strategy', {
+            "mode": "priority",
+            "ab_enabled": False,
+            "provider_a": None,
+            "provider_b": None,
+            "split_percent_a": 50,
+        })
         
         if payload.cost_ceiling_usd is not None:
-            config["max_daily_usd"] = payload.cost_ceiling_usd
-            db.set_system_config('llm_cost_ceiling', config)
-            
-        return {"status": "ok", "routing": {"cost_ceiling_usd": config.get("max_daily_usd")}}
+            cost_cfg["max_daily_usd"] = payload.cost_ceiling_usd
+            db.set_system_config('llm_cost_ceiling', cost_cfg)
+        if payload.mode:
+            routing_cfg["mode"] = str(payload.mode)
+        if payload.ab_enabled is not None:
+            routing_cfg["ab_enabled"] = bool(payload.ab_enabled)
+        if payload.provider_a is not None:
+            routing_cfg["provider_a"] = payload.provider_a
+        if payload.provider_b is not None:
+            routing_cfg["provider_b"] = payload.provider_b
+        if payload.split_percent_a is not None:
+            routing_cfg["split_percent_a"] = int(payload.split_percent_a)
+        db.set_system_config('llm_routing_strategy', routing_cfg)
+
+        return {
+            "status": "ok",
+            "routing": {
+                "mode": routing_cfg.get("mode", "priority"),
+                "ab_enabled": bool(routing_cfg.get("ab_enabled", False)),
+                "provider_a": routing_cfg.get("provider_a"),
+                "provider_b": routing_cfg.get("provider_b"),
+                "split_percent_a": int(routing_cfg.get("split_percent_a", 50) or 50),
+                "cost_ceiling_usd": cost_cfg.get("max_daily_usd"),
+            },
+        }
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

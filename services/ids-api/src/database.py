@@ -746,6 +746,34 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting alerts: {e}")
             return list(reversed(self._memory_alerts[-limit:]))
+
+    def get_latest_analysis_models(self, alert_ids: List[int]) -> Dict[int, str]:
+        """Return latest recorded analysis model/provider for each alert id."""
+        ids = [int(i) for i in (alert_ids or []) if str(i).isdigit()]
+        if not ids:
+            return {}
+
+        if self.use_memory or not self._ensure_connection():
+            out: Dict[int, str] = {}
+            for row in sorted(self._memory_analysis_results, key=lambda r: int(r.get("id", 0) or 0), reverse=True):
+                aid = int(row.get("alert_id") or 0)
+                if aid in ids and aid not in out and row.get("model"):
+                    out[aid] = str(row.get("model"))
+            return out
+
+        try:
+            with self._cursor(RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT DISTINCT ON (alert_id) alert_id, model
+                    FROM analysis_results
+                    WHERE alert_id = ANY(%s)
+                    ORDER BY alert_id, id DESC
+                """, (ids,))
+                rows = cur.fetchall() or []
+                return {int(r["alert_id"]): str(r["model"]) for r in rows if r.get("model")}
+        except Exception as e:
+            logger.error(f"Error getting latest analysis models: {e}")
+            return {}
     
     def get_alert_count(self, source: Optional[str] = None) -> int:
         """Get total alert count."""

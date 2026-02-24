@@ -118,9 +118,9 @@ function showDashboard() {
  */
 function onNewSSEAlert() {
   // Lightweight: only re-fetch overview metrics; not full tab data
-  fetchOverviewBundle().then(([h, m, cb, safety, prod, gov, dedup, alerts, dash, llmDiag, pipeline]) => {
+  fetchOverviewBundle().then(([h, m, cb, safety, prod, gov, dedup, alerts, dash, llmDiag, pipeline, rateLimiter]) => {
     const llmFromHealth = deriveLLM(h);
-    renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDiag);
+    renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDiag, dedup, rateLimiter, pipeline);
     renderPipelineOverview(pipeline);
     renderAlertFeed(alerts);
     updateTopBar(h, gov, llmFromHealth, llmDiag);
@@ -136,11 +136,11 @@ function onNewSSEAlert() {
  * refreshes data for the active tab only.
  */
 function refreshAll() {
-  fetchOverviewBundle().then(([h, m, cb, safety, prod, gov, dedup, alerts, dash, llmDiag, pipeline]) => {
+  fetchOverviewBundle().then(([h, m, cb, safety, prod, gov, dedup, alerts, dash, llmDiag, pipeline, rateLimiter]) => {
     const llmFromHealth = deriveLLM(h);
 
     // ── Always: overview panels + top bar ──
-    renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDiag);
+    renderOverview(m, h, cb, safety, prod, gov, llmFromHealth, llmDiag, dedup, rateLimiter, pipeline);
     renderPipelineOverview(pipeline);
     renderAlertFeed(alerts);
     renderLLMOverview(llmFromHealth, cb, llmDiag);

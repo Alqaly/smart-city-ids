@@ -90,6 +90,7 @@ export const api = {
   getSafety:           () => requestNoAuth('/api/safety'),
   getProductionStatus: () => requestNoAuth('/api/production-status'),
   getDedupStats:       () => requestNoAuth('/api/deduplicator-stats'),
+  getAlertRateLimiterStatus: () => requestNoAuth('/api/rate-limiter/status'),
   getAlerts:           (limit = 30) => requestNoAuth(`/api/alerts?limit=${limit}`),
   getPipelineOverview: () => requestNoAuth('/api/pipeline-overview'),
   getLLMDiagnostics:   () => requestNoAuth('/api/llm/diagnostics'),
@@ -192,7 +193,7 @@ export const api = {
  * hammering all endpoints every 10 seconds.
  */
 export async function fetchOverviewBundle() {
-  const [health, metrics, cb, safety, prod, gov, dedup, alerts, dashboard, llmDiag, pipeline] =
+  const [health, metrics, cb, safety, prod, gov, dedup, alerts, dashboard, llmDiag, pipeline, rateLimiter] =
     await Promise.all([
       api.getHealth(),
       api.getMetrics(),
@@ -205,6 +206,7 @@ export async function fetchOverviewBundle() {
       api.getOperatorDashboard(),
       api.getLLMDiagnostics(),
       api.getPipelineOverview(),
+      api.getAlertRateLimiterStatus(),
     ]);
-  return [health, metrics, cb, safety, prod, gov, dedup, alerts, dashboard, llmDiag, pipeline];
+  return [health, metrics, cb, safety, prod, gov, dedup, alerts, dashboard, llmDiag, pipeline, rateLimiter];
 }

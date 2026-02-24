@@ -20,6 +20,45 @@ import { store, ALL_PROVIDERS } from '../state.js';
 import { api } from '../api.js';
 import { $, esc, shortTime, sevBadge } from '../utils.js';
 
+function alertSignatureId(a) {
+  const f = (a && a.output_fields) ? a.output_fields : {};
+  return a?.sid || a?.signature_id || f.sid || f.signature_id || '';
+}
+
+function ruleHelpMeta(a) {
+  const source = String(a?.source || '').toLowerCase();
+  const rule = String(a?.rule || '');
+  const ns = String(a?.namespace || a?.k8s_ns || a?.k8s_namespace || a?.output_fields?.['k8s.ns.name'] || '').toLowerCase();
+  const container = String(a?.container_name || a?.container || a?.output_fields?.['container.name'] || '').toLowerCase();
+  const isMonitoring = ns === 'monitoring' || ns === 'falco-system' || container.includes('grafana') || container.includes('prometheus');
+
+  if (source === 'suricata' && rule === 'SMARTCITY HTTP flood') {
+    return {
+      summary: 'High-rate HTTP flood/DoS signature. Multiple hits usually mean one noisy source repeatedly exceeded the rate threshold.',
+      tone: 'warn',
+    };
+  }
+  if (source === 'suricata' && /SQLi|UNION SELECT|DROP TABLE|OR 1=1/i.test(rule)) {
+    return {
+      summary: 'SQL injection signature matched in web traffic.',
+      tone: 'warn',
+    };
+  }
+  if (source === 'falco' && /Sensitive File Read/i.test(rule) && isMonitoring) {
+    return {
+      summary: 'Likely platform noise from monitoring stack (e.g., Grafana/Prometheus reading certs/config). Validate path and timing before escalation.',
+      tone: 'muted',
+    };
+  }
+  if (source === 'falco' && /Shell in Container|Terminal shell/i.test(rule)) {
+    return {
+      summary: 'Interactive shell launched inside a container. Expected only during maintenance/debugging.',
+      tone: 'warn',
+    };
+  }
+  return null;
+}
+
 // ── Module-level SSE state ───────────────────────────────────────────────
 let _sse = null;
 let _incidentPage = 1;
@@ -83,15 +122,25 @@ export function loadAlerts() {
       const idx = start + localIdx;
       const recs = a.recommendations || [];
       const an = a.analysis || {};
+      const guide = ruleHelpMeta(a);
       const traceId = a.trace_id || ('alert-' + (a.id || idx));
       const alertId = a.id || 0;
       const engineLabel = an.analysis_engine || an.engine || '';
+      const sid = alertSignatureId(a);
+      const whereParts = [
+        a.namespace || a.k8s_ns || a.k8s_namespace || a.output_fields?.['k8s.ns.name'],
+        a.pod_name || a.k8s_pod || a.output_fields?.['k8s.pod.name'],
+        a.container_name || a.container || a.output_fields?.['container.name'],
+      ].filter(Boolean);
 
       html += `<tr>` +
         `<td>${shortTime(a.timestamp)}</td>` +
         `<td><code style="font-size:11px">${esc(traceId)}</code></td>` +
         `<td><span class="badge ${a.source === 'falco' ? 'badge-info' : 'badge-purple'}">${esc(a.source || '-')}</span></td>` +
-        `<td>${esc(a.rule || '')}</td>`;
+        `<td>${esc(a.rule || '')}` +
+          (guide?.tone === 'muted' ? `<div style="margin-top:4px"><span style="display:inline-block;padding:2px 7px;background:rgba(148,163,184,0.10);color:#94a3b8;border-radius:4px;font-size:10px;">Likely Platform Noise</span></div>` : '') +
+          (sid ? `<div style="margin-top:4px;font-size:10px;color:var(--text3);font-family:monospace;">Suricata SID ${esc(String(sid))}</div>` : '') +
+        `</td>`;
 
       // MITRE ATT&CK technique column
       const mitreId = an.mitre_technique || (a.output_fields && a.output_fields['mitre.technique']) || '';
@@ -112,6 +161,8 @@ export function loadAlerts() {
 
       html += `<td>${esc(a.threat_type || '-')}</td>` +
         `<td style="white-space:normal;max-width:400px;line-height:1.4">${esc(a.summary || '')}` +
+          (whereParts.length ? `<div style="font-size:10px;color:var(--text3);margin-top:3px">Where: ${esc(whereParts.join(' / '))}</div>` : '') +
+          (guide?.summary ? `<div style="font-size:10px;color:${guide.tone === 'muted' ? 'var(--text3)' : 'var(--yellow)'};margin-top:3px">${esc(guide.summary)}</div>` : '') +
           (engineLabel ? `<div style="font-size:10px;color:var(--text3);margin-top:2px"><span class="ai-badge">&#x1F916; ${esc(engineLabel)}</span></div>` : '') +
         `</td>` +
         `<td>` +

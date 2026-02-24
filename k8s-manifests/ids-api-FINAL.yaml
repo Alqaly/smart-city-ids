@@ -119,7 +119,10 @@ spec:
     kind: Deployment
     name: ids-api
   minReplicas: 1
-  maxReplicas: 4
+  # Demo-safe default: keep IDS API single-replica because dedup/rate-limit
+  # state is currently in-memory per pod. Increase only after moving those
+  # controls to shared state (e.g., Redis/Postgres-backed counters).
+  maxReplicas: 1
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 30

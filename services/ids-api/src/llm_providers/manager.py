@@ -87,6 +87,8 @@ class LLMManager:
             for provider in self.providers
         }
         self.cooldown_seconds = int(os.getenv("LLM_PROVIDER_COOLDOWN_SECONDS", "900"))
+        # Backward-compatible alias used by older error-handling branches.
+        self.rate_limit_cooldown_seconds = self.cooldown_seconds
         # Auth failures (401/403) should not trigger long cooldowns.
         # Instead we temporarily disable the provider to stop tight retry loops.
         self.auth_disable_seconds = int(os.getenv("LLM_PROVIDER_AUTH_DISABLE_SECONDS", "300"))
@@ -232,9 +234,10 @@ class LLMManager:
     def reset_all_provider_states(self):
         """Resets the status of all providers to operational."""
         reset_providers = []
-        for name in self.provider_states:
+        for key in self.provider_states:
+            name = key if isinstance(key, str) else getattr(key, "NAME", str(key))
             self.update_provider_state(name, "operational", "Manually reset by operator")
-            reset_providers.append(name)
+            reset_providers.append(str(name))
         logger.info(f"Operator manually reset state for all providers: {', '.join(reset_providers)}")
         return {"reset_providers": reset_providers}
 
@@ -403,7 +406,7 @@ class LLMManager:
                 else:
                     async with self.state_lock:
                         self.runtime_stats[provider.NAME]["failures"] += 1
-                        self.runtime_stats[provider.NAME]["last_latency_ms"] = result.get("latency_ms")
+                        self.runtime_stats[provider.NAME]["last_latency_ms"] = None
                         self.runtime_stats[provider.NAME]["last_error"] = last_error
                 logger.warning(f"{provider.NAME} exception: {e}")
         

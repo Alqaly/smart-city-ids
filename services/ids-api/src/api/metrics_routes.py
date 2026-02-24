@@ -133,7 +133,16 @@ async def health():
         )
 
     # ── Database and optional subsystem status ────────────────────────────
-    db_status = "postgresql" if not d["db"].use_memory else "memory-fallback"
+    # Database status: connected (green), memory-fallback (yellow), or error (red)
+    try:
+        db_stats = d["db"].get_stats()
+        if getattr(d["db"], "use_memory", False):
+            db_status = "memory-fallback"  # Memory fallback functional but not persistent
+        else:
+            db_status = "connected"  # PostgreSQL is connected
+    except Exception as e:
+        db_status = "error"
+    
     suricata_status = "enabled" if Config.SURICATA_ENABLED else "disabled"
 
     return {
@@ -277,19 +286,64 @@ async def pipeline_overview():
     human_review = d["fatigue"]["human_review_required_total"]
     auto_handled = d["fatigue"]["auto_handled_total"]
     actions_total = gov.get("metrics", {}).get("approved", 0) + gov.get("metrics", {}).get("auto_executed", 0)
+    falco_count = by_source.get("falco", 0)
+    suricata_count = by_source.get("suricata", 0)
+
+    def _stage_state(count: int, label: str) -> tuple[str, str]:
+        if count > 0:
+            return "green", f"{label} active"
+        return "idle", f"{label} idle (no recent events)"
 
     return {
         "stages": [
             # Stage 1: Falco runtime security alerts.
-            {"id": "falco", "label": "Falco Alerts", "rate_per_minute": round(by_source.get("falco", 0) / total_minutes, 2), "p95_latency_ms": 0, "status": "green"},
+            {
+                "id": "falco",
+                "label": "Falco Alerts",
+                "rate_per_minute": round(falco_count / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": _stage_state(falco_count, "Falco")[0],
+                "status_text": _stage_state(falco_count, "Falco")[1],
+            },
             # Stage 2: Suricata network IDS alerts.
-            {"id": "suricata", "label": "Suricata Alerts", "rate_per_minute": round(by_source.get("suricata", 0) / total_minutes, 2), "p95_latency_ms": 0, "status": "green" if by_source.get("suricata", 0) > 0 else "yellow"},
+            {
+                "id": "suricata",
+                "label": "Suricata Alerts",
+                "rate_per_minute": round(suricata_count / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": _stage_state(suricata_count, "Suricata")[0],
+                "status_text": _stage_state(suricata_count, "Suricata")[1],
+            },
             # Stage 3: Ingest and fingerprint-based deduplication.
-            {"id": "ingest", "label": "IDS Ingest + Dedup", "rate_per_minute": round(total_alerts / total_minutes, 2), "p95_latency_ms": 0, "status": "green", "dedup_hit_rate_percent": dedup_stats.get("hit_rate_percent", 0)},
+            {
+                "id": "ingest",
+                "label": "IDS Ingest + Dedup",
+                "rate_per_minute": round(total_alerts / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": "green" if total_alerts > 0 else "idle",
+                "status_text": "Ingest active" if total_alerts > 0 else "Waiting for alerts",
+                "dedup_hit_rate_percent": dedup_stats.get("hit_rate_percent", 0),
+            },
             # Stage 4: LLM or rule-based analysis.
-            {"id": "llm", "label": "LLM / Rule-Based Analysis", "rate_per_minute": round(llm_requests / total_minutes, 2), "p95_latency_ms": int(llm_p95 * 1000), "status": "green" if llm_requests > 0 else "yellow"},
+            {
+                "id": "llm",
+                "label": "LLM / Rule-Based Analysis",
+                "rate_per_minute": round(llm_requests / total_minutes, 2),
+                "p95_latency_ms": int(llm_p95 * 1000),
+                "status": "green" if llm_requests > 0 else "idle",
+                "status_text": "Analysis active" if llm_requests > 0 else "No LLM analyses yet",
+            },
             # Stage 5: HITL governance decisions and K8s automated actions.
-            {"id": "gov", "label": "Governance + K8s Actions", "rate_per_minute": round(actions_total / total_minutes, 2), "p95_latency_ms": 0, "status": "green", "human_review_required": human_review, "auto_handled": auto_handled},
+            {
+                "id": "gov",
+                "label": "Governance + K8s Actions",
+                "rate_per_minute": round(actions_total / total_minutes, 2),
+                "p95_latency_ms": 0,
+                "status": "green" if (actions_total > 0 or human_review > 0 or auto_handled > 0) else "idle",
+                "status_text": "Actions/approvals recorded" if (actions_total > 0 or human_review > 0 or auto_handled > 0) else "No actions yet",
+                "human_review_required": human_review,
+                "auto_handled": auto_handled,
+            },
         ],
         # Alert fatigue reduction metrics — core dissertation contribution.
         "alert_fatigue": {
@@ -394,6 +448,7 @@ async def llm_usage(window: str = "today"):
 
     # Estimate cost from token totals (provider-specific per-1k token rate).
     providers_out = []
+    seen_providers = set()
     total_cost = 0.0
     for row in usage.get("providers", []) or []:
         prov = (row.get("provider") or "unknown").strip().lower() or "unknown"
@@ -412,6 +467,33 @@ async def llm_usage(window: str = "today"):
             "estimated_cost_usd": cost,
             "rate_per_1k_tokens_usd": rate,
         })
+        seen_providers.add(prov)
+
+    # Ensure the dashboard always shows all configured providers, even if
+    # they had zero calls in the selected window.
+    try:
+        from api._state import llm_manager
+        configured = []
+        if llm_manager and hasattr(llm_manager, "get_status"):
+            configured = list((llm_manager.get_status() or {}).get("providers", []) or [])
+        for prov in configured:
+            key = str(prov or "").strip().lower()
+            if not key or key in seen_providers:
+                continue
+            providers_out.append({
+                "provider": key,
+                "calls": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "tokens": 0,
+                "estimated_cost_usd": 0.0,
+                "rate_per_1k_tokens_usd": float(LLM_COST_PER_1K_TOKENS.get(key, 0.0)),
+            })
+            seen_providers.add(key)
+    except Exception:
+        pass
+
+    providers_out.sort(key=lambda r: str(r.get("provider", "")))
 
     totals = usage.get("totals", {}) or {}
     out_totals = {
