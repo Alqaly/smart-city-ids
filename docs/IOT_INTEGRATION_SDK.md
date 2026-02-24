@@ -19,15 +19,17 @@
                                           └────────────────────────────┘
 ```
 
-There are **two integration paths**:
+There are **three practical integration paths**:
 
 | Path | Endpoint | Purpose | When to Use |
 |------|----------|---------|-------------|
 | **Telemetry** | `POST /api/iot/sensor` | Send device data + anomaly events | Normal sensor data; alerts generated on threshold |
+| **Registry + Heartbeat** | `POST /api/iot/devices/register` + `POST /api/iot/devices/heartbeat` | Track logical devices independent of pod count | Fleet onboarding, 100+ logical devices, external hardware |
 | **Alert (Cluster-Internal)** | `POST /api/alerts/internal` | Forwarder-only ingest to IDS pipeline | Falco/Suricata forwarders running *inside* the cluster |
 
 Important:
 - For a conference/public demo where **anyone can connect their own device**, the supported path is **Telemetry** (`/api/iot/sensor`).
+- For more realistic fleet counting (logical devices vs pods), use **Registry + Heartbeat** first, then send telemetry.
 - `/api/alerts/internal` requires the shared secret header `X-IDS-Internal-Token` and is intended for **in-cluster** forwarders (Falco/Suricata), not arbitrary external devices.
 
 ### Base URL (how to reach the IDS API)
@@ -43,6 +45,48 @@ Optionally, scripts may also start a local port-forward:
 ---
 
 ## 2. API Contract
+
+### 2.0 Device Registry Path (recommended for real fleet onboarding)
+
+Register a logical device:
+
+```json
+{
+  "device_id": "building-temp-sensor-01",
+  "device_type": "temperature_sensor",
+  "schema_version": "1.0",
+  "metadata": {
+    "location": "server-room-b2",
+    "vendor": "AcmeSensors",
+    "firmware": "v1.2.3"
+  },
+  "capability_profile": {
+    "protocols": ["rest"],
+    "sensors": ["temperature", "humidity"],
+    "expected_ranges": {
+      "temperature_c": {"min": -10, "max": 90}
+    }
+  }
+}
+```
+
+Heartbeat example:
+
+```json
+{
+  "device_id": "building-temp-sensor-01",
+  "status": "online",
+  "timestamp": "2026-02-24T17:00:00Z",
+  "metadata": {
+    "ip": "192.168.1.44",
+    "battery_pct": 92
+  }
+}
+```
+
+Why this matters:
+- This lets the dashboard/API count **logical devices** separately from Kubernetes pods.
+- It supports 100+ devices per emulator pod without faking counts by replica scaling.
 
 ### 2.1 Telemetry Path — `/api/iot/sensor`
 
@@ -144,6 +188,28 @@ class SmartCityDevice:
         self.event_times = []
         self.total_alerts = 0
         self.last_heartbeat = 0
+        self.schema_version = "1.0"
+
+    def register_device(self):
+        """Register logical device metadata/capabilities with IDS."""
+        payload = {
+            "device_id": self.device_id,
+            "device_type": self.device_type,
+            "schema_version": self.schema_version,
+            "metadata": {},
+            "capability_profile": {
+                "protocols": ["rest"],
+                "sensors": [self.device_type],
+            },
+        }
+        try:
+            r = requests.post(f"{self.ids_url}/api/iot/devices/register", json=payload, timeout=10)
+            if r.status_code == 200:
+                logger.info("Device registered")
+                return r.json()
+        except Exception as e:
+            logger.error(f"Register error: {e}")
+        return None
 
     # ── Override these in your subclass ──────────────────────────
     def read_sensor(self):
@@ -213,6 +279,18 @@ class SmartCityDevice:
 
     def send_heartbeat(self):
         """Send periodic heartbeat to confirm device is alive."""
+        try:
+            requests.post(
+                f"{self.ids_url}/api/iot/devices/heartbeat",
+                json={
+                    "device_id": self.device_id,
+                    "status": "online",
+                    "metadata": {"uptime_alerts": self.total_alerts},
+                },
+                timeout=5,
+            )
+        except Exception:
+            pass
         self.send_telemetry(
             {"status": "alive", "uptime_alerts": self.total_alerts},
             event_type="heartbeat"
@@ -291,6 +369,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     sensor = TemperatureSensor(ids_url=args.ids_url)
+    sensor.register_device()
     sensor.run(interval_sec=args.interval)
 ```
 
@@ -330,6 +409,8 @@ spec:
         env:
         - name: IDS_API_URL
           value: "http://ids-api-service:8000"
+        - name: DEVICE_COUNT
+          value: "50"   # logical devices emulated by this pod (if app supports it)
         volumeMounts:
         - name: app-code
           mountPath: /app
@@ -481,6 +562,10 @@ After deploying, tell the IDS API about your new device by adding it to the tele
 
 Then update the dashboard HTML in `services/ids-api/static/index.html` to add a service card.
 
+Note on counting:
+- `GET /api/iot/devices` now exposes a hybrid view with logical devices + pod-enriched devices.
+- Prefer **Registry + Heartbeat** for defensible fleet counts in exams/demos.
+
 ---
 
 ## 7. Integration Checklist
@@ -535,17 +620,23 @@ Each emulator exposes:
 
 To scale this system for production use:
 
-1. **Horizontal Pod Autoscaler**: Add HPA manifests for each IoT emulator
-2. **Namespace isolation**: Deploy per-org device fleets in separate namespaces
-3. **RBAC**: Scope API keys per device type / organization
-4. **Helm Chart**: Package the full stack into a Helm chart for one-command deployment
-5. **Device Registry**: Use the `/api/iot/devices` endpoint for fleet management
+1. **Logical device scaling first**: Increase `DEVICE_COUNT` / device multiplier env vars per emulator pod
+2. **Horizontal Pod Autoscaler**: Add HPA manifests for each IoT emulator
+3. **Namespace isolation**: Deploy per-org device fleets in separate namespaces
+4. **RBAC / per-device auth**: Scope API keys or signed tokens per device type / organization
+5. **Helm Chart**: Package the full stack into a Helm chart for one-command deployment
+6. **Device Registry**: Use `/api/iot/devices/register` + `/api/iot/devices/heartbeat` for logical fleet management
 
 ```bash
-# Example: Scale any emulator
+# Example: scale logical devices per pod (street lighting / env sensor support this now)
+kubectl set env deployment/street-lighting -n smart-city DEVICE_COUNT=300
+kubectl set env deployment/env-sensor -n smart-city ENV_SENSOR_STATION_COUNT=20
+kubectl set env deployment/parking-system -n smart-city PARKING_SLOT_MULTIPLIER=3
+
+# Example: Scale pods too
 kubectl scale deployment traffic-camera -n smart-city --replicas=10
 kubectl scale deployment parking-system -n smart-city --replicas=10
 
-# Monitor fleet
-curl http://localhost:30800/api/iot/devices | jq '.total_devices'
+# Monitor fleet (hybrid)
+curl http://localhost:30800/api/iot/devices | jq '{total, logical_total, pod_backed_total, counting_mode}'
 ```

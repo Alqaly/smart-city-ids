@@ -16,13 +16,14 @@ Luminaire specs based on real smart city LED fixtures:
 """
 
 from flask import Flask, request, jsonify
+import os
 import time, random, math, threading
 from datetime import datetime, timezone
 
 app = Flask(__name__)
 
 # ── Luminaire Fleet ──
-NUM_LUMINAIRES = 120
+NUM_LUMINAIRES = max(1, int(os.environ.get("DEVICE_COUNT", os.environ.get("NUM_LUMINAIRES", "120"))))
 ZONES = ["main-road", "residential", "park", "highway", "pedestrian", "parking-lot"]
 LUMINAIRE_MODELS = [
     {"model": "SL-LED-150W", "wattage": 150, "lumens": 21000, "cct": 4000, "cri": 72, "driver": "DALI-2 D4i"},

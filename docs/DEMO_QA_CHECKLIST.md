@@ -4,6 +4,7 @@ Last updated: 2026-02-24
 
 Related prep docs:
 - `docs/EXAMINER_QA_30.md` — concise, code-backed answers for common examiner questions
+- `docs/EXAMINER_IOT_QA_20.md` — IoT emulation/deployment/detection questions with live `kubectl` verification commands
 - `docs/ARCHITECTURE.md` — full technical architecture reference
 
 ## Pre-Demo (Required)

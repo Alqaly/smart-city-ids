@@ -20,6 +20,7 @@ Protocols:
 """
 
 from flask import Flask, request, jsonify
+import os
 import time, random, math, struct, threading, json
 from datetime import datetime, timezone
 
@@ -58,6 +59,26 @@ STATIONS = {
         "modbus_unit_id": 5,
     },
 }
+
+# Allow per-pod logical fleet sizing for research/demo scaling experiments.
+_env_station_count = int(os.environ.get("DEVICE_COUNT", os.environ.get("ENV_SENSOR_STATION_COUNT", str(len(STATIONS)))))
+if _env_station_count > 0 and _env_station_count != len(STATIONS):
+    _all_station_items = list(STATIONS.items())
+    if _env_station_count < len(_all_station_items):
+        STATIONS = dict(_all_station_items[:_env_station_count])
+    else:
+        # Expand by cloning templates with unique IDs / unit IDs.
+        expanded = dict(_all_station_items)
+        next_idx = len(_all_station_items) + 1
+        while len(expanded) < _env_station_count:
+            base_key, base_cfg = _all_station_items[(next_idx - 1) % len(_all_station_items)]
+            sid = f"ENV-STN-{next_idx:03d}"
+            cfg = json.loads(json.dumps(base_cfg))
+            cfg["name"] = f"{cfg['name']} #{next_idx}"
+            cfg["modbus_unit_id"] = next_idx
+            expanded[sid] = cfg
+            next_idx += 1
+        STATIONS = expanded
 
 # ── Modbus Register Map (IEC 61131 style) ──
 # Register address → (name, unit, scale_factor, data_type)

@@ -56,6 +56,22 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 
 ---
 
+## Current vs Target Architecture (Examiner Follow-Up)
+
+This table is intentionally explicit: it separates what is implemented now from the next research-grade iteration.
+
+| Area | Current (implemented) | Target (next iteration) | Why it matters |
+|---|---|---|---|
+| IoT device counting | Pod-derived / demo-profile count in IDS state | Persistent logical device registry (`register` / `heartbeat`) | Defensible fleet-size metrics at 100+ devices |
+| IoT emulation scale | Pods emulate multiple devices; some services expose internal fleets | Explicit `device_count` per emulator + registry-backed inventory | Better realism without 1 pod = 1 device overhead |
+| Dedup + alert throttling | In-memory in `ids-api` (demo pinned to 1 replica) | Shared state (Redis or equivalent) across replicas | Correct behavior when scaling `ids-api` > 1 |
+| LLM provider resilience | Circuit breaker + cooldown + failover chain + operator reset/test UI | Same, plus stronger provider scoring / adaptive routing persistence | Improves reliability and explainability under quota/key failures |
+| Telemetry ingest auth | Demo-friendly telemetry path; internal alert path uses shared token | Per-device API key/signed token; optional mTLS gateway | Real IoT onboarding security model |
+| Scenario modeling | Attack scripts + detector rules + demo docs | ATT&CK-ICS staged scenario specs with expected telemetry + impact criteria | Research-grade methodology and examiner traceability |
+| Impact representation | Security alerts + pipeline metrics + action/audit logs | Domain impact KPIs (availability/integrity/safety) per scenario | Stronger operational relevance for smart city use cases |
+
+---
+
 ## Namespaces and Pod Inventory
 
 | Namespace | Component | Replicas | Purpose |

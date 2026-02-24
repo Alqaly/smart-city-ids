@@ -339,6 +339,39 @@ class CircuitBreaker:
             "recovery_timeout_sec": self.recovery_timeout,
         }
 
+    def reset(self, engine: Optional[str] = None) -> dict:
+        """Reset circuit breaker state.
+
+        The LLM UI uses "Retry All" / "Reset" actions to recover after an
+        operator fixes API keys or billing. Those endpoints call ``reset()``
+        when available, so the method must exist on the shared breaker.
+
+        Args:
+            engine: Optional provider name. If omitted, resets all tracked engines.
+
+        Returns:
+            Summary of reset engines and current states.
+        """
+        engines = [engine] if engine else list(self.engine_stats.keys())
+        reset_engines = []
+        for eng in engines:
+            if eng not in self.engine_stats:
+                continue
+            self.engine_stats[eng] = {"failures": 0, "successes": 0, "state": "closed"}
+            reset_engines.append(eng)
+
+        # Reset shared timers/counters used by OPEN/HALF_OPEN transitions.
+        self.last_failure_time = 0.0
+        self.half_open_calls = 0
+        self.failure_count = 0
+        self.success_count = 0
+        self.state = CircuitState.CLOSED
+
+        return {
+            "reset_engines": reset_engines,
+            "states": {k: v.get("state", "unknown") for k, v in self.engine_stats.items()},
+        }
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Request Queue (burst handling)

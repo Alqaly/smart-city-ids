@@ -11,6 +11,19 @@ Scope used:
 - `services/ids-api/src/api/*`, `services/ids-api/src/governance.py`
 - current dashboard (`services/ids-api/static/index.html`)
 
+## QA Master Guide
+
+Use this file as the **primary examiner Q&A script** (architecture, pipeline, LLM, dashboard, governance).
+
+Specialist deep dives (keep separate for speed during rehearsal):
+- `docs/EXAMINER_IOT_QA_20.md` — IoT emulation, deployments, endpoints, MQTT noise, `kubectl`-verified answers
+- `docs/DETECTION_TELEMETRY_ATTACK_QA.md` — detection/attack mechanics deep-dive questions
+- `docs/SCENARIOS/MQTT_FLOOD_LATERAL_IMPACT.md` — staged scenario spec (MITRE ATT&CK-ICS-style framing, expected telemetry, success criteria)
+
+Recommended usage:
+- Start in this file for most questions.
+- Switch to `docs/EXAMINER_IOT_QA_20.md` when the examiner focuses on IoT emulation realism, device modeling, or Kubernetes IoT deployment details.
+
 ## 1) What is the overall architecture of the Smart City IDS?
 - It is a Kubernetes-native IDS stack on K3s with four major layers:
 - Detection: Falco (runtime/syscall) and Suricata (network signatures)
@@ -191,6 +204,35 @@ Scope used:
 - Stronger RBAC for dashboard users (route-level role enforcement, not demo-only auth).
 - Better detector noise suppression (namespace/profile-specific Falco exceptions, default UI filters for platform alerts).
 - MTTR/MTTD trend dashboards and post-action verification/rollback metrics.
+
+---
+
+## Research Limitations + Roadmap (say this clearly in viva)
+
+Use this section when an examiner pushes from "working demo" to "research-grade production design".
+
+### Current implementation (defensible today)
+- Real Falco + Suricata detections feed a live IDS API pipeline (rate-limit, dedup, LLM, governance, K8s actions).
+- IoT emulation is realistic enough for protocol/API demonstrations (camera/FHIR/parking/MQTT/Modbus/OPC UA/TALQ), but not a full fleet management platform.
+- LLM provider failover/circuit-breaker/cooldown behavior is implemented and observable in the dashboard.
+
+### Known limitations (acknowledge directly)
+- Dashboard "device count" is currently pod-derived / demo-profile oriented, not a persistent logical device registry.
+- Deduplication and alert throttling state are in-memory, so `ids-api` horizontal scaling requires a shared store for consistency.
+- Scenario definitions are implemented as attack scripts + rules, but not yet fully formalized as ATT&CK-ICS stage-by-stage scenario specs across the whole catalog.
+- Device onboarding path supports telemetry ingestion, but not per-device auth + schema-versioned fleet registry as a production IoT platform would require.
+
+### Roadmap (research-grounded next steps)
+- Formalize scenarios as staged ATT&CK-ICS mappings with expected Falco/Suricata/IDS telemetry and impact criteria.
+- Add persistent logical device registry (`register` / `heartbeat`) and shift dashboard counts to logical devices.
+- Move dedup/throttle shared state to Redis (or equivalent) so multi-replica IDS API remains correct.
+- Add device profiles and schema versioning (expected ranges/protocol capabilities/location metadata).
+- Add per-device auth for telemetry ingress (API key or signed token), with mTLS gateway option for larger deployments.
+
+### Standards framing (what to cite verbally)
+- Threat modeling / scenario staging: MITRE ATT&CK for ICS (ATT&CK-ICS).
+- IoT device capability/security baseline framing: NISTIR 8259 / 8259A.
+- Detection engineering: Suricata thresholding + Falco custom rulesets and tuning.
 
 ---
 

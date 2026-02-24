@@ -4,6 +4,88 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [Unreleased] Research-Grade IoT Realism + Resilience Improvements — 2026-02-24
+
+### Summary
+
+Focused upgrades in response to examiner feedback on IoT realism, staged attack methodology, fleet scaling, and LLM provider resilience visibility. This batch improves the actual implementation (not just docs) while keeping the existing demo workflow intact.
+
+### Backend / API
+
+- **`services/ids-api/src/api/iot.py`**
+  - Added logical device registry endpoints:
+    - `POST /api/iot/devices/register`
+    - `POST /api/iot/devices/heartbeat`
+  - Extended `GET /api/iot/devices` with hybrid counting metadata:
+    - `logical_total`
+    - `pod_backed_total`
+    - `counting_mode`
+  - Enables logical fleet tracking independent of Kubernetes pod count (examiner-facing improvement for 100+ device discussions).
+
+- **`services/ids-api/src/infrastructure/middleware.py`**
+  - Added `CircuitBreaker.reset()` to support operator-driven breaker recovery (`Retry All Providers`) and eliminate stale `open` states.
+
+- **`services/ids-api/src/api/llm.py`**
+  - Fixed circuit-breaker metrics reset calls (signature mismatch causing `500` on retry-all).
+  - Manual provider tests now update shared breaker state so successful probe/test reflects in diagnostics/UI.
+
+### Attack Simulation / Detection Realism
+
+- **`scripts/run-live-attacks.sh`**
+  - Reworked network traffic generation to be less synthetic:
+    - burst windows
+    - jittered sleeps
+    - varied headers/params/session-like fields
+  - Expanded runtime/Falco-triggering behavior beyond file reads:
+    - shell + sensitive files
+    - curl/wget operator tooling attempts
+    - package-manager probing behavior
+    - non-fixed loop timing
+
+### IoT Emulator Scaling (Logical Devices Per Pod)
+
+- **`smart-city-services/street-lighting/app.py`**
+  - Added `DEVICE_COUNT` / `NUM_LUMINAIRES` env support for luminaire fleet size per pod.
+
+- **`smart-city-services/environmental-sensor/app.py`**
+  - Added `DEVICE_COUNT` / `ENV_SENSOR_STATION_COUNT` env support.
+  - Supports shrinking/expanding station fleets per pod by cloning station templates with unique IDs/unit IDs.
+
+- **`smart-city-services/parking-system/app.py`**
+  - Added `PARKING_SLOT_MULTIPLIER` / `DEVICE_COUNT_MULTIPLIER` env support for scaling slot counts per lot.
+
+### Documentation / Examiner Prep
+
+- **`docs/ARCHITECTURE.md`**
+  - Added “Current vs Target Architecture” table (current implementation vs research-grade roadmap).
+
+- **`docs/EXAMINER_QA_30.md`**
+  - Added “Research Limitations + Roadmap” viva section.
+  - Added scenario-spec link in the QA Master Guide.
+
+- **`docs/IOT_INTEGRATION_SDK.md`**
+  - Added registry + heartbeat onboarding path.
+  - Added schema version / capability profile examples.
+  - Added logical-device scaling guidance and hybrid device count examples.
+
+- **`docs/SCENARIOS/README.md`**
+  - Added a repeatable staged scenario template (goal, TTPs, telemetry, success criteria, limitations).
+
+- **`docs/SCENARIOS/MQTT_FLOOD_LATERAL_IMPACT.md`**
+  - Added staged ATT&CK-style scenario spec for MQTT/flood + lateral movement + impact pipeline validation.
+
+- **`docs/SCENARIOS/FHIR_TAMPER_CLINICAL_IMPACT.md`**
+  - Added staged ATT&CK-style scenario spec for healthcare/FHIR tamper + clinical impact narrative.
+
+### Validation Notes
+
+- `ids-api` redeployed and live-tested after changes.
+- New IoT registry/heartbeat endpoints validated against live NodePort (`localhost:30800`).
+- Emulator code for `parking-system`, `env-sensor`, and `street-lighting` redeployed via ConfigMap refresh + rollout restart.
+- Full demo/E2E validation executed separately (see latest terminal validation runs and demo scripts).
+
+---
+
 ## [v3.0.0] Attack Simulation Engine v2 — 67 Scenarios + 5 Campaigns
 
 ### Summary

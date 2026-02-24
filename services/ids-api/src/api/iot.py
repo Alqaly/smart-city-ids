@@ -41,6 +41,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 from infrastructure.metrics import (
     PROM_IOT_DEVICES_ACTIVE,      # Gauge: number of active IoT devices
@@ -53,6 +54,23 @@ from models.iot import IoTSensorData
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["iot"])
+
+
+class IoTDeviceRegisterRequest(BaseModel):
+    """Lightweight logical device registry record for external/edge onboarding."""
+    device_id: str = Field(..., min_length=1, max_length=128)
+    device_type: str = Field(..., min_length=1, max_length=64)
+    schema_version: str = Field(default="1.0")
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    capability_profile: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IoTDeviceHeartbeatRequest(BaseModel):
+    """Heartbeat from a logical device; updates last_seen and optional status."""
+    device_id: str = Field(..., min_length=1, max_length=128)
+    status: str = Field(default="online")
+    timestamp: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 # Avoid blocking the FastAPI event loop on slow/unreachable Kubernetes API calls.
 # The dashboard polls IoT endpoints frequently; if the in-cluster API is down,
@@ -296,6 +314,116 @@ async def receive_iot_sensor_data(data: IoTSensorData):
     return {"status": "received", "event_id": event_record["id"], "device_registered": data.device_id in iot_devices}
 
 
+@router.post("/api/iot/devices/register")
+async def register_iot_device_endpoint(data: IoTDeviceRegisterRequest):
+    """Register a logical IoT device independent of Kubernetes pod count.
+
+    This endpoint supports a research-grade fleet model where many logical
+    devices may be emulated by a single pod. It stores minimal registry data
+    in the existing DB-backed IoT device table and updates the in-memory
+    active device map used by the dashboard.
+    """
+    db, iot_devices, iot_events, _ = _deps()
+    now = datetime.now().isoformat()
+    md = {
+        **(data.metadata or {}),
+        "schema_version": data.schema_version,
+        "capability_profile": data.capability_profile or {},
+    }
+    created = db.register_iot_device(data.device_id, data.device_type, md)
+    current = iot_devices.get(data.device_id, {})
+    iot_devices[data.device_id] = {
+        "device_id": data.device_id,
+        "device_type": data.device_type,
+        "first_seen": current.get("first_seen", now),
+        "last_seen": now,
+        "event_count": int(current.get("event_count", 0)),
+        "status": "online",
+        "schema_version": data.schema_version,
+        "capability_profile": data.capability_profile or {},
+        "metadata": md,
+    }
+    # Track a registry event for auditability.
+    evt = {
+        "device_id": data.device_id,
+        "device_type": data.device_type,
+        "event_type": "register",
+        "value": {"created": bool(created), "schema_version": data.schema_version},
+        "timestamp": now,
+        "metadata": md,
+    }
+    try:
+        evt["id"] = db.add_iot_event(evt)
+        iot_events.append(evt)
+    except Exception:
+        pass
+    try:
+        PROM_IOT_DEVICES_ACTIVE.set(max(len(iot_devices), db.get_iot_device_count()))
+    except Exception:
+        PROM_IOT_DEVICES_ACTIVE.set(len(iot_devices))
+    return {
+        "status": "registered",
+        "device_id": data.device_id,
+        "created": bool(created),
+        "logical_device_count": len(iot_devices),
+    }
+
+
+@router.post("/api/iot/devices/heartbeat")
+async def iot_device_heartbeat_endpoint(data: IoTDeviceHeartbeatRequest):
+    """Update logical device liveness without sending full telemetry payloads."""
+    db, iot_devices, iot_events, _ = _deps()
+    now = data.timestamp or datetime.now().isoformat()
+    existing = iot_devices.get(data.device_id)
+    if not existing:
+        # Auto-register unknown devices as generic edge devices so heartbeats are useful.
+        db.register_iot_device(data.device_id, "unknown", data.metadata or {})
+        iot_devices[data.device_id] = {
+            "device_id": data.device_id,
+            "device_type": "unknown",
+            "first_seen": now,
+            "last_seen": now,
+            "event_count": 0,
+            "status": data.status,
+            "metadata": data.metadata or {},
+        }
+    else:
+        existing["last_seen"] = now
+        existing["status"] = data.status
+        if data.metadata:
+            merged = dict(existing.get("metadata") or {})
+            merged.update(data.metadata)
+            existing["metadata"] = merged
+
+    try:
+        PROM_IOT_DEVICE_HEARTBEATS.labels(
+            device_id=data.device_id,
+            device_type=iot_devices[data.device_id].get("device_type", "unknown"),
+        ).inc()
+    except Exception:
+        pass
+
+    try:
+        evt = {
+            "device_id": data.device_id,
+            "device_type": iot_devices[data.device_id].get("device_type", "unknown"),
+            "event_type": "heartbeat",
+            "value": {"status": data.status},
+            "timestamp": now,
+            "metadata": data.metadata or {},
+        }
+        evt["id"] = db.add_iot_event(evt)
+        iot_events.append(evt)
+    except Exception:
+        pass
+
+    return {
+        "status": "heartbeat_received",
+        "device_id": data.device_id,
+        "last_seen": now,
+    }
+
+
 @router.get("/api/iot/devices")
 async def get_iot_devices_endpoint():
     """List IoT devices with live operational fields for the dashboard.
@@ -379,7 +507,16 @@ async def get_iot_devices_endpoint():
 
     # Aggregate event rate across all devices.
     active_rate = round(sum(float(d.get("current_rate", 0.0) or 0.0) for d in devices), 2)
-    return {"devices": devices, "total": len(devices), "active_rate": active_rate}
+    logical_total = len(iot_devices)
+    pod_backed_total = sum(1 for d in devices if str(d.get("device", "")).startswith(tuple(p for p, _ in _IOT_POD_PREFIXES)))
+    return {
+        "devices": devices,
+        "total": len(devices),
+        "active_rate": active_rate,
+        "logical_total": logical_total,
+        "pod_backed_total": pod_backed_total,
+        "counting_mode": "hybrid_registry_plus_pods",
+    }
 
 
 @router.get("/api/iot/pods")

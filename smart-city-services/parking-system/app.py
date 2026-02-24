@@ -291,6 +291,13 @@ ZONES = {
     },
 }
 
+# Logical fleet scaling (sensors per pod) for larger IoT emulation without extra pods.
+_slot_scale = max(1, int(os.environ.get("DEVICE_COUNT_MULTIPLIER", os.environ.get("PARKING_SLOT_MULTIPLIER", "1"))))
+if _slot_scale != 1:
+    for _zone_name, _lots in ZONES.items():
+        for _lot_id, _lot_info in _lots.items():
+            _lot_info["capacity"] = int(_lot_info["capacity"]) * _slot_scale
+
 sensors = {}  # slot_id → ParkingSensor
 
 def _init_sensors():

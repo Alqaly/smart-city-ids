@@ -4,17 +4,17 @@
 # Tests all components end-to-end with verbose output
 # =============================================================================
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
+set +e
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# Color variables are already defined (readonly) in script-utils.sh.
+# Only define missing ones locally to avoid readonly collisions.
+: "${BLUE:=\033[0;34m}"
+: "${CYAN:=\033[0;36m}"
+: "${NC:=\033[0m}"
 
 VERBOSE=0
 if [[ "${1:-}" == "--verbose" || "${1:-}" == "-v" ]]; then
@@ -55,11 +55,11 @@ run_test() {
     
     if eval "$command" >/dev/null 2>&1; then
         log_pass "$name"
-        ((TESTS_PASSED++))
+        ((++TESTS_PASSED))
         return 0
     else
         log_fail "$name"
-        ((TESTS_FAILED++))
+        ((++TESTS_FAILED))
         return 1
     fi
 }
@@ -93,10 +93,10 @@ auth_curl_cmd() {
 log_info "Using IDS API: $API_BASE"
 if [[ -n "$AUTH_TOKEN" ]]; then
     log_pass "Admin login works (admin/admin)"
-    ((TESTS_PASSED++))
+    ((++TESTS_PASSED))
 else
     log_fail "Admin login failed (admin/admin)"
-    ((TESTS_FAILED++))
+    ((++TESTS_FAILED))
 fi
 
 # Test 1: Kubernetes Cluster
@@ -154,7 +154,7 @@ run_test "Alerts endpoint" "curl -sf '${API_BASE}/api/alerts?limit=1'"
 run_test "IoT devices endpoint" "curl -sf ${API_BASE}/api/iot/devices"
 run_test "Governance endpoint" "$(auth_curl_cmd '/api/governance/status')"
 run_test "LLM diagnostics" "curl -sf ${API_BASE}/api/llm/diagnostics"
-run_test "LLM metrics 24h" "curl -sf ${API_BASE}/api/llm/metrics/24h"
+run_test "LLM usage metrics (today)" "curl -sf '${API_BASE}/api/metrics/llm-usage?window=today'"
 run_test "Dashboard UI" "tmp=\$(curl -sf ${API_BASE}/ui) && grep -q 'Smart City IDS' <<<\"\$tmp\""
 
 if [[ $VERBOSE -eq 1 ]]; then
@@ -169,30 +169,30 @@ log_section "6. DATA VALIDATION"
 ALERT_COUNT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_alerts',0))" || echo 0)
 if [[ $ALERT_COUNT -gt 0 ]]; then
     log_pass "Alert count: $ALERT_COUNT"
-    ((TESTS_PASSED++))
+    ((++TESTS_PASSED))
 else
     log_fail "No alerts in system"
-    ((TESTS_FAILED++))
+    ((++TESTS_FAILED))
 fi
 
 # Check IoT count
 IOT_COUNT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('iot_devices_active',0))" || echo 0)
 if [[ $IOT_COUNT -eq 13 ]]; then
     log_pass "IoT device count: $IOT_COUNT"
-    ((TESTS_PASSED++))
+    ((++TESTS_PASSED))
 else
     log_fail "IoT count wrong: $IOT_COUNT (expected 13)"
-    ((TESTS_FAILED++))
+    ((++TESTS_FAILED))
 fi
 
 # Check LLM providers
 LLM_COUNT=$(curl -s "${API_BASE}/health" 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('components',{}).get('llm_providers',{})))" || echo 0)
 if [[ $LLM_COUNT -ge 1 ]]; then
     log_pass "LLM providers configured: $LLM_COUNT"
-    ((TESTS_PASSED++))
+    ((++TESTS_PASSED))
 else
     log_fail "LLM providers configured: $LLM_COUNT"
-    ((TESTS_FAILED++))
+    ((++TESTS_FAILED))
 fi
 
 # Test 7: HPA

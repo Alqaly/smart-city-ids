@@ -275,7 +275,7 @@ async def reset_llm_cooldowns(user: str = Depends(verify_token)):
     # Also reset circuit breaker state to avoid a stale OPEN state.
     if circuit_breaker and hasattr(circuit_breaker, "reset"):
         circuit_breaker.reset()
-        update_circuit_breaker_metrics(circuit_breaker)
+        update_circuit_breaker_metrics()
         out["circuit_breaker"] = "reset"
     return out
 
@@ -297,7 +297,7 @@ async def retry_all_providers(user: str = Depends(verify_token)):
 
     if circuit_breaker and hasattr(circuit_breaker, "reset"):
         circuit_breaker.reset()
-        update_circuit_breaker_metrics(circuit_breaker)
+        update_circuit_breaker_metrics()
         out["circuit_breaker"] = "reset"
 
     return out
@@ -867,7 +867,7 @@ async def llm_test_provider_by_name(
     _=Depends(verify_token),
 ):
     """Interactive single-provider test endpoint for operator console."""
-    llm_manager, _, _ = _deps()
+    llm_manager, circuit_breaker, _ = _deps()
     provider = (provider or "").strip().lower()
     if not llm_manager:
         return {"status": "error", "message": "LLM manager unavailable", "provider": provider}
@@ -897,6 +897,18 @@ async def llm_test_provider_by_name(
         estimated_cost = float(_estimate_cost_from_tokens(provider, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)))
     except Exception:
         estimated_cost = 0.0
+
+    # Manual provider tests are operator-driven recovery actions; reflect the
+    # outcome in the shared breaker so the dashboard status matches reality.
+    try:
+        if circuit_breaker and provider in getattr(circuit_breaker, "engine_stats", {}):
+            if result.get("status") == "success":
+                circuit_breaker.record_success(provider)
+            else:
+                circuit_breaker.record_failure(provider)
+            update_circuit_breaker_metrics()
+    except Exception:
+        pass
 
     return {
         "status": result.get("status", "unknown"),
