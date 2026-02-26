@@ -1,8 +1,6 @@
 # Security Model & Attack Justification
 
-**Version:** 1.0  
-**Status:** Capstone II Integration  
-**Last Updated:** 2026-02-02
+**Status:** Research/capstone security model documentation (time-bound examples; verify live config before citing runtime behavior)
 
 ---
 
@@ -164,7 +162,7 @@ A: No. These are emulated behaviors that trigger real detection rules. The behav
 A: 1) Ethical constraints prevent attacking real systems. 2) Reproducibility requires controlled injection. 3) MITRE-mapped emulation is accepted methodology in security research.
 
 **Q: How do you know Falco/Suricata rules are correct?**  
-A: Falco and Suricata rule sets are maintained by security communities (Falco Project, Emerging Threats) and map to known CVEs and attack techniques. We use unmodified rule sets.
+A: Falco and Suricata rule sets are based on community-maintained rules (Falco Project, Emerging Threats) plus project-specific custom rules/tuning for the smart-city demo environment. Runtime claims should be validated against the currently deployed manifests/rules.
 
 ---
 

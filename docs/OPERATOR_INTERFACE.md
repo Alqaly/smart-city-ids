@@ -352,7 +352,7 @@ Response time: 10-50x faster
 
 ### 3. Automation Safety
 - **Bad approach**: "We automated threat response"
-- **Good approach**: "We automated data gathering and analysis. Response decisions remain human-controlled with graduated automation levels (manual/assisted/autopilot). Critical decisions always get human review."
+- **Good approach**: "We automated data gathering and analysis. Response decisions remain human-controlled with graduated automation levels (manual/assisted/autonomous). Critical decisions always get human review."
 
 ### 4. Workload Reduction
 - **Bad approach**: "Dashboard shows everything"

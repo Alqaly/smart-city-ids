@@ -7,6 +7,7 @@ Falls back to in-memory storage if database is unavailable.
 import os
 import logging
 import contextlib
+import threading
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import time
@@ -47,6 +48,9 @@ class Database:
     def __init__(self):
         self._pool: Optional["psycopg2.pool.ThreadedConnectionPool"] = None
         self.use_memory = not PSYCOPG2_AVAILABLE
+        self._db_reconnect_interval_s = max(2, int(os.environ.get("DB_RECONNECT_INTERVAL_SECONDS", "10")))
+        self._db_monitor_started = False
+        self._db_last_mode = "memory" if self.use_memory else "postgresql"
         self._memory_alerts: List[Dict[str, Any]] = []
         self._memory_iot_events: List[Dict[str, Any]] = []
         self._memory_iot_devices: Dict[str, Dict[str, Any]] = {}
@@ -60,10 +64,16 @@ class Database:
 
         if PSYCOPG2_AVAILABLE:
             self._connect()
+            self._start_db_reconnect_monitor()
 
     def _connect(self):
         """Create the connection pool and initialise tables."""
         try:
+            if self._pool is not None:
+                try:
+                    self._pool.closeall()
+                except Exception:
+                    pass
             self._pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=_DB_MIN_CONN,
                 maxconn=_DB_MAX_CONN,
@@ -82,10 +92,51 @@ class Database:
                 self._pool.putconn(conn)
             self.use_memory = False
             self._init_tables()
+            self._log_db_mode_transition()
             logger.info(f"✅ PostgreSQL pool ready ({_DB_MIN_CONN}-{_DB_MAX_CONN} conns) at {DB_HOST}:{DB_PORT}/{DB_NAME}")
         except Exception as e:
             logger.warning(f"⚠️ Could not connect to PostgreSQL: {e}. Using in-memory storage.")
             self.use_memory = True
+            self._log_db_mode_transition()
+
+    def _log_db_mode_transition(self):
+        """Log only on storage mode transitions to reduce noise."""
+        mode = "memory" if self.use_memory else "postgresql"
+        if mode != self._db_last_mode:
+            if mode == "postgresql":
+                logger.warning("✅ Database recovered: switched from memory-fallback to PostgreSQL")
+            else:
+                logger.warning("⚠️ Database unavailable: switched to memory-fallback")
+            self._db_last_mode = mode
+
+    def _start_db_reconnect_monitor(self):
+        """Background monitor that retries PostgreSQL and auto-recovers from fallback.
+
+        This prevents the demo/user-facing dashboard from appearing to "lose"
+        history permanently after an IDS API restart race. If PostgreSQL is not
+        reachable at startup, the API may enter memory-fallback mode, but this
+        monitor keeps retrying and switches back automatically when DB recovers.
+        """
+        if self._db_monitor_started:
+            return
+        self._db_monitor_started = True
+
+        def _loop():
+            while True:
+                try:
+                    if self.use_memory:
+                        # In fallback mode, keep trying to restore PostgreSQL.
+                        self._connect()
+                    else:
+                        # In DB mode, verify liveness and reconnect if pool dies.
+                        self._ensure_connection()
+                    self._log_db_mode_transition()
+                except Exception as e:
+                    logger.debug(f"DB reconnect monitor iteration failed: {e}")
+                time.sleep(self._db_reconnect_interval_s)
+
+        t = threading.Thread(target=_loop, name="db-reconnect-monitor", daemon=True)
+        t.start()
 
     # ── Connection helpers ────────────────────────────────────────────
 
@@ -123,6 +174,8 @@ class Database:
             return True
         except Exception as e:
             logger.warning(f"Database pool check failed: {e} — attempting reconnect")
+            self.use_memory = True
+            self._log_db_mode_transition()
             self._connect()
             return not self.use_memory
 

@@ -82,7 +82,7 @@ alert tcp any any -> $MQTT_BROKER 1883 (
   - encrypted/tunneled channels or non-standard ports reduce signature certainty.
 
 ### Q8. Cryptominer XMRig config that triggers ET MALWARE and evasion via proxy pools
-- Current project reality: sample uses `xmrig ... stratum+tcp://pool.minexmr.com:3333` (`scripts/attack-iot-pipeline.sh`).
+- Current project reality: legacy sample payloads referenced `xmrig ... stratum+tcp://pool.minexmr.com:3333` in older demo scripts. Use `scripts/run-live-attacks.sh` as the current attack runner and validate payload examples against current script sources before citing.
 - Typical triggers:
   - plain Stratum handshake over `stratum+tcp`;
   - known pool domains/ports;
@@ -219,7 +219,8 @@ spec:
   - `services/ids-api/static/index.html`
   - `services/ids-api/static/js/modules/attacks.js`
 - Real/semireal attack pipeline payloads:
-  - `scripts/attack-iot-pipeline.sh`
+  - `scripts/run-live-attacks.sh` (current)
+  - historical references may appear in archived/legacy scripts
 - Protocol and register map context:
   - `docs/PROJECT_METRICS.md`
   - `docs/IOT_EMULATION_REPORT.md`

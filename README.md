@@ -1,305 +1,168 @@
 # Smart City IDS
 
-LLM-driven Intrusion Detection System for smart city IoT infrastructure. Runs on K3s with Falco + Suricata detection, multi-provider LLM analysis, and automated Kubernetes response.
+Kubernetes-native intrusion detection and response platform for smart-city-style IoT workloads, combining:
 
----
+- **Falco** (runtime/container detection)
+- **Suricata** (network detection)
+- **LLM-assisted alert analysis** (multi-provider routing/failover)
+- **Governance-controlled Kubernetes response actions** (manual / assisted / autonomous)
 
-## 🎓 DEMO DAY - Quick Start
+This repository contains both:
+- a working demonstrator/prototype system, and
+- capstone/defense documentation and supporting materials.
 
-**System Status: READY (demo-focused build)**
+## Scope (Important for External Reviewers)
+
+This is a **research/capstone prototype**, not a production SOC platform. Some parts are intentionally demo-oriented (IoT emulators, attack scripts, examiner prep docs), while core runtime components are real and testable.
+
+To avoid stale-claim confusion:
+- Use this `README.md` + [`docs/INDEX.md`](docs/INDEX.md) as the **current entry points**
+- Treat `docs/_archive/` and `docs/archive/` as **historical**
+- Validate runtime claims against live endpoints (`/health`, `/api/metrics`) and `kubectl`
+
+## What the System Does
+
+- Monitors IoT and platform workloads in Kubernetes
+- Ingests alerts from Falco and Suricata forwarders
+- Runs LLM analysis (provider failover supported; actual availability depends on keys/credits/quota)
+- Applies governance policies before automation
+- Stores alerts in PostgreSQL with memory fallback and auto-recovery to DB
+- Exposes a web dashboard (`/ui`) and operational APIs
+
+## Quick Start (Demo / Local Validation)
+
+### 1. Pre-check the environment
 
 ```bash
-# 1. Pre-demo check (run this first!)
 bash scripts/pre-demo-check.sh
-
-# 2. Open dashboard
-open http://localhost:30800/ui
-
-# 3. Run attack demo
-bash scripts/run-live-attacks.sh --duration 30
-
-# 4. Read full cheat sheet
-cat docs/DEMO_CHEAT_SHEET.md
 ```
 
-**Current Status:**
-- ✅ Dashboard: http://localhost:30800/ui
-- ✅ 6,577+ alerts processed
-- ✅ 13 IoT devices monitored  
-- ✅ Multi-provider LLM failover supported (provider health depends on current keys/credits)
-- ✅ All pipelines GREEN
+This now verifies:
+- cluster reachability
+- core pods
+- dashboard/API availability
+- login
+- **database persistence mode** (and detects `memory-fallback`)
 
----
-
-## What This Is
-
-A working IDS that:
-- Monitors intentionally vulnerable IoT services (traffic cameras, healthcare APIs, parking systems)
-- Detects threats via Falco (runtime syscalls) and Suricata (network signatures)
-- Analyzes alerts using LLM providers (xAI Grok-4, OpenAI, Anthropic, Gemini, Kimi) with automatic failover
-- Executes Kubernetes defensive actions (pod isolation, service scaling) based on severity
-- Provides human-in-the-loop governance with configurable automation modes
-- Requires at least one configured LLM API key at startup (`XAI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `KIMI_API_KEY`)
-
-## Architecture
-
-```
-Detection                    Analysis                    Response
-┌─────────┐                 ┌──────────┐                ┌──────────────┐
-│  Falco  │──→ Forwarder ──→│          │──→ severity≥8 →│ Isolate Pod  │
-│ (eBPF)  │                 │  IDS API │                │(NetworkPolicy)│
-└─────────┘                 │          │                └──────────────┘
-┌─────────┐                 │  LLM     │                ┌──────────────┐
-│Suricata │──→ Forwarder ──→│ Analysis │──→ severity≥6 →│  Scale Up    │
-│(network)│                 │          │                │ (5 replicas) │
-└─────────┘                 └──────────┘                └──────────────┘
-                                 │
-                            ┌────┴─────┐
-                            │Governance│ autonomous / assisted / manual
-                            └──────────┘
-```
-
-**4 namespaces · dynamic pod count · modular API surface · Prometheus instrumentation · multi-provider LLM failover**
-
----
-
-## Quick Start
-
-### Full Cluster Deploy
+### 2. Open the dashboard
 
 ```bash
-# Set at least one LLM key
-export XAI_API_KEY="xai-..."
-
-# Deploy everything
-./scripts/start-everything.sh
-
-# Verify
-kubectl get pods -n smart-city -w
+xdg-open http://localhost:30800/ui 2>/dev/null || open http://localhost:30800/ui
 ```
 
-### Run IDS API Locally
+Default demo credentials:
+- `admin / admin`
+
+### 3. Run a live attack demo (optional)
 
 ```bash
-export XAI_API_KEY="xai-..."
-cd services/ids-api/src
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+bash scripts/run-live-attacks.sh --duration 30 --show-alerts 3
 ```
 
-### Access Points
+## Access Points (Typical K3s NodePort Setup)
 
 | Service | URL |
 |---|---|
-| Operator Dashboard | http://localhost:30800/ui |
-| Health Check | http://localhost:30800/health |
-| Prometheus | http://localhost:31106 |
-| Grafana | http://localhost:30300 |
+| Dashboard | `http://localhost:30800/ui` |
+| Health | `http://localhost:30800/health` |
+| Metrics API | `http://localhost:30800/api/metrics` |
+| Prometheus | `http://localhost:31106` |
+| Grafana | `http://localhost:30300` |
 
-**Demo credentials**: `admin` / `admin`
+If you run `ids-api` locally with `uvicorn`, the UI/API may be on `http://localhost:8000`.
 
-## Key Documents
+## Project Layout (High Level)
 
-| Document | Purpose |
+| Path | Purpose |
 |---|---|
-| `CAPSTONE_2_REPORT.md` | Final capstone report (Markdown source) |
-| `CAPSTONE_2_REPORT.pdf` | Final capstone report (PDF submission) |
-| `VALIDATION_REPORT.md` | Validation evidence and demo fixes summary |
-| `docs/ARCHITECTURE.md` | System architecture and component design |
-| `docs/EXAMINER_QA_30.md` | Examiner Q&A prep (validated answers) |
-| `docs/FORCED_ARCHITECTURE_50Q.md` | Deep backup / gap-analysis style Q&A |
-| `docs/DEMO_CHEAT_SHEET.md` | Demo-day commands and talking points |
-| `scripts/README.md` | Script index (what to run, what is archived/disabled) |
+| `services/` | IDS API, forwarders, service components |
+| `smart-city-services/` | IoT emulators (traffic camera, healthcare, parking, etc.) |
+| `k8s-manifests/` | Kubernetes manifests and platform config |
+| `scripts/` | Deployment, validation, demo, and ops automation |
+| `docs/` | Technical docs, runbooks, Q&A, academic support, archives |
+| `CAPSTONE_2_REPORT.*` | Final report deliverables |
 
-### LLM API Keys — Single Source of Truth
+## Documentation (Authoritative Map)
 
-All five provider keys live in **one place**: the project-root `.env` file.
+Start here:
+- [`docs/INDEX.md`](docs/INDEX.md) — authoritative docs map + trust model
 
-```
-.env  ──(apply-llm-env-to-k8s-secret.sh)──►  K8s Secret "ids-secrets"
-                                                    ↓  secretKeyRef
-                                               ids-api deployment
-```
+Key docs by audience:
 
-**Why two places?**
-- **`.env`** — used for local runs (`uvicorn` directly) and as the canonical key store
-- **K8s Secret** — pods cannot read files from your laptop; the script syncs them
+### External expert / reviewer
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md)
+- [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
+- [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 
-**Update keys (any time):**
+### Demo / operator
+- [`docs/DEMO_DAY_RUNBOOK.md`](docs/DEMO_DAY_RUNBOOK.md)
+- [`docs/DEMO_QA_CHECKLIST.md`](docs/DEMO_QA_CHECKLIST.md)
+- [`docs/DEMO_CHEAT_SHEET.md`](docs/DEMO_CHEAT_SHEET.md)
+- [`docs/LLM_CONTROL_AND_TROUBLESHOOTING.md`](docs/LLM_CONTROL_AND_TROUBLESHOOTING.md)
+
+### Academic / defense
+- [`docs/EXAMINER_QA_30.md`](docs/EXAMINER_QA_30.md)
+- [`docs/EXAMINER_IOT_QA_20.md`](docs/EXAMINER_IOT_QA_20.md)
+- [`docs/ACADEMIC_CONTEXT.md`](docs/ACADEMIC_CONTEXT.md)
+- [`docs/CAPSTONE_EVIDENCE_MATRIX.md`](docs/CAPSTONE_EVIDENCE_MATRIX.md)
+
+## LLM Provider Notes (Operational Reality)
+
+The system supports multiple providers (e.g., Kimi, xAI, OpenAI, Anthropic, Gemini), but runtime health depends on:
+- valid API keys
+- quota / billing
+- model access permissions
+- provider-side outages
+
+The dashboard may show providers as:
+- configured but unusable (invalid key/quota)
+- in circuit breaker cooldown after repeated failures
+- operational but idle
+
+This is expected behavior in a multi-provider resilient design.
+
+## Database Persistence Behavior (Important)
+
+`ids-api` uses PostgreSQL as primary storage and can fall back to in-memory storage if DB is unavailable.
+
+Recent fix:
+- the service now **auto-retries DB connection and recovers back to PostgreSQL** after transient DB startup/race failures
+- `scripts/pre-demo-check.sh` reports degraded persistence explicitly
+
+Use this check before sharing screenshots/claims:
 
 ```bash
-# 1. Edit .env — set/update any of:
-#    KIMI_API_KEY, XAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY
-
-# 2. Push to cluster + restart pod
-bash scripts/apply-llm-env-to-k8s-secret.sh
-
-# 3. Verify end-to-end
-bash scripts/llm-manager.sh check
+curl -s http://localhost:30800/health | jq '{status, storage_type, components}'
 ```
 
-### Add / Rotate an LLM API Key (Operator Runbook)
+## Common Commands
 
-Use this when a provider shows `Key invalid`, `quota exceeded`, `circuit open`, or you want to enable a new provider.
-
-1. Update the key in `.env` (single source of truth)
-- One or more of:
-- `KIMI_API_KEY`
-- `XAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `GEMINI_API_KEY`
-- `OPENAI_API_KEY`
-
-2. Sync `.env` into the Kubernetes secret used by `ids-api`
 ```bash
-bash scripts/apply-llm-env-to-k8s-secret.sh
-```
-
-3. Redeploy `ids-api` so the new secret/env is loaded
-```bash
+# Deploy code changes (ConfigMap-based hot reload path)
 bash scripts/deploy-code.sh
+
+# Demo readiness (broader checks)
+bash scripts/demo-readiness.sh --quick
+
+# E2E validation (quick)
+bash scripts/e2e-verbose-test.sh --quick
+
+# Full scripted validation
+bash scripts/comprehensive-test.sh
 ```
 
-4. Reset provider failure state (cooldowns + circuit breakers)
-```bash
-TOKEN=$(curl -s http://localhost:30800/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
+## Sharing This Repository (Recommended)
 
-curl -s -X POST http://localhost:30800/api/llm/retry-all \
-  -H "Authorization: Bearer $TOKEN" | jq .
-```
+Before sharing with experts:
 
-5. Probe/test a provider directly (example: Kimi)
-```bash
-curl -s -X POST http://localhost:30800/api/llm/test/kimi \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Analyze: suspicious outbound connection"}' | jq .
-```
-
-6. Verify dashboard + diagnostics
-```bash
-curl -s http://localhost:30800/api/llm/diagnostics | jq .
-curl -s http://localhost:30800/api/metrics/llm-usage?window=today | jq .
-```
-
-Notes:
-- `retry-all` resets provider states and circuit breakers; it does **not** fix invalid keys or exhausted credits.
-- A provider can be configured but still unusable (bad key / no credits / quota / model access issue).
-- If only one provider is healthy (e.g. Kimi), failover still works but capacity/resilience is reduced.
-
-**Provider priority** (kimi is primary, others are fallbacks):
-
-```
-kimi → xai → anthropic → gemini → openai
-```
-
-Configure via `LLM_PRIORITY` in `.env` (then run `apply-llm-env-to-k8s-secret.sh`).
-
-**LLM diagnostics** (no auth needed):
-
-```bash
-curl http://localhost:30800/api/llm/diagnostics | python3 -m json.tool
-```
-
----
-
-## Run Attack Pipeline
-
-```bash
-# LIVE attacks only (real traffic against the running IoT services)
-./scripts/run-live-attacks.sh --duration 30
-
-# Run a specific live attack
-./scripts/run-live-attacks.sh --service traffic-camera --attack ddos --duration 30
-```
-
-### Demo Day (all-in-one)
-
-```bash
-# Bootstrap + verify + run attacks + validate
-./scripts/demo-day.sh --profile minimal
-```
-
-## Script Reference
-
-Use `scripts/README.md` for the current script inventory, recommended demo sequence, and disabled legacy stubs.
-
----
-
-## Deploy Code Changes
-
-No Docker builds required — code is mounted via ConfigMaps:
-
-```bash
-# Edit source files in services/ids-api/src/ or services/ids-api/static/
-# Then deploy:
-./scripts/deploy-code.sh
-```
-
----
-
-## Key Components
-
-| Component | Location | Lines | Description |
-|---|---|---|---|
-| IDS API | `services/ids-api/src/main.py` | current source | FastAPI app bootstrap + router wiring (`api/*` modules) |
-| LLM Manager | `services/ids-api/src/llm_manager.py` | 1091 | 6-provider failover with circuit breakers |
-| K8s Automation | `services/ids-api/src/k8s_automation.py` | 207 | Pod isolation, scaling, IP blocking |
-| Governance | `services/ids-api/src/governance.py` | 507 | HITL modes: autopilot/assisted/manual |
-| Database | `services/ids-api/src/database.py` | 912 | PostgreSQL (8 tables) + memory fallback |
-| Dashboard | `services/ids-api/static/index.html` | ~1700 | 7-tab operator SPA |
-| Falco Forwarder | `services/forwarders/falco/src/main.py` | 187 | Alert dedup + reshape |
-| Suricata Forwarder | `services/forwarders/suricata/src/main.py` | 453 | EVE log parsing + dedup |
-
----
-
-## Scripts
-
-| Script | Purpose |
-|---|---|
-| `start-everything.sh` | Deploy K3s cluster + all services |
-| `deploy-code.sh` | Hot-reload code via ConfigMaps (no Docker) |
-| `cleanup.sh` | Teardown and cleanup |
-| `check-setup.sh` | Pre-deploy requirements validation |
-| `demo-day.sh` | All-in-one: bootstrap + verify + attacks + validate |
-| `demo-readiness.sh` | Pre-demo health checks |
-| `one-command-ready.sh` | Bootstrap + seed demo data |
-| `run-live-attacks.sh` | LIVE attacks only (real traffic against IoT services) |
-| `scalability-test.sh` | Scale testing (10→1000 devices) |
-| `live-pipeline-log.sh` | Real-time pipeline observer |
-
----
-
-## Documentation
-
-Full technical docs in [docs/](docs/README.md):
-
-- [Architecture](docs/ARCHITECTURE.md) — system design, pod inventory, database schema, metrics
-- [API Reference](docs/API_REFERENCE.md) — code-aligned endpoint catalog, models, configuration
-- [How It Works](docs/HOW_IT_WORKS.md) — end-to-end alert processing walkthrough
-- [Development Guide](docs/DEVELOPMENT.md) — setup, testing, debugging, deployment
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Orchestration | K3s (lightweight Kubernetes) |
-| Runtime Detection | Falco (eBPF) |
-| Network Detection | Suricata (signature IDS) |
-| API Framework | FastAPI (Python 3.10+) |
-| LLM Providers | xAI Grok-4, OpenAI GPT-4, Anthropic Claude, Google Gemini, Moonshot Kimi |
-| Database | PostgreSQL + automatic memory fallback |
-| Monitoring | Prometheus + Grafana |
-| IoT Protocol | MQTT (Mosquitto) |
-| IoT Services | Flask (intentionally vulnerable) |
-
----
+1. Run `bash scripts/pre-demo-check.sh`
+2. Confirm DB is connected (not `memory-fallback`)
+3. Use [`docs/INDEX.md`](docs/INDEX.md) to direct them to current docs
+4. Avoid citing archived docs as current behavior
 
 ## License
 
-See [LICENSE](LICENSE).
+See [`LICENSE`](LICENSE).
+

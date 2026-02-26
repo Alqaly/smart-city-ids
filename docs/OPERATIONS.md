@@ -55,8 +55,8 @@ kubectl logs -n falco-system -l app=falco --tail=50
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 echo "Node IP: $NODE_IP"
 
-# Port forward for local access
-kubectl port-forward -n smart-city svc/ids-api 8000:8000
+# Port forward for local access (service name may be ids-api-service)
+kubectl port-forward -n smart-city svc/ids-api-service 8000:8000
 
 # Exec into pod for debugging
 kubectl exec -it -n smart-city <pod-name> -- /bin/sh
@@ -121,10 +121,13 @@ histogram_quantile(0.95, sum(rate(smartcity_ids_alert_processing_seconds_bucket[
 
 ### Pre-Demo Checklist
 
-- [ ] All pods running: `kubectl get pods -n smart-city`
-- [ ] Grafana accessible: http://NODE_IP:30300
-- [ ] IDS API responding: `curl http://NODE_IP:30800/health`
-- [ ] Fresh logs: `kubectl logs -n smart-city -l app=ids-api --tail=10`
+Use the maintained script first:
+
+```bash
+bash scripts/pre-demo-check.sh
+```
+
+It checks cluster health, API/UI reachability, login, and database persistence mode (including detection of `memory-fallback`).
 
 ### Demo Script: Full System Walkthrough
 
@@ -149,10 +152,10 @@ curl http://NODE_IP:30800/health | jq .
 
 **4. Demonstrate Attack Detection (5 min)**
 ```bash
-# Run DDoS simulation
-python attack-simulator/ddos_simulator.py http://NODE_IP:30800 5 10
+# Run live attack script (real Falco/Suricata detections)
+bash scripts/run-live-attacks.sh --duration 30 --show-alerts 3
 
-# Watch logs in real-time (in another terminal)
+# Watch logs in another terminal
 kubectl logs -n smart-city -l app=ids-api -f
 ```
 
@@ -161,10 +164,16 @@ kubectl logs -n smart-city -l app=ids-api -f
 - Explain severity scoring
 - Show automated action triggers
 
-**6. Demonstrate Automated Response (3 min)**
+**6. Demonstrate Automated Response / Governance (3 min)**
 ```bash
-# Generate high-severity alert
+# Get auth token
+TOKEN=$(curl -s http://NODE_IP:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
+
+# Generate a test alert (demo sanity / governance path)
 curl -X POST http://NODE_IP:30800/api/alerts \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "source": "demo",
@@ -177,7 +186,8 @@ curl -X POST http://NODE_IP:30800/api/alerts \
     }
   }'
 
-# Check if network policy was created
+# Check governance/actions and network policies (if action executed)
+curl -s http://NODE_IP:30800/api/governance/status -H "Authorization: Bearer $TOKEN" | jq .
 kubectl get networkpolicies -n smart-city
 ```
 

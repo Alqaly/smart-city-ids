@@ -90,9 +90,12 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 | GET | `/api/llm/providers` | No | Provider availability details |
 | GET | `/api/llm/providers/comparison` | No | Comparative provider view |
 | GET | `/api/llm/providers/health-summary` | No | Aggregated provider health summary |
+| POST | `/api/llm/retry-all` | Yes | Reset provider states/cooldowns and breaker latches (operator recovery) |
+| POST | `/api/llm/reset-cooldown` | Yes | Clear provider cooldown/auth-disable timers |
 | POST | `/api/llm/test/{provider}` | Yes | Send probe/test request to provider |
 | POST | `/api/llm/force/{provider}` | Yes | Force active provider selection |
-| GET | `/api/llm/metrics/24h` | Yes | Rolling LLM metrics window |
+| GET | `/api/llm/metrics/24h` | Yes | Runtime in-memory 24h-shaped metrics payload (resets on `ids-api` restart) |
+| GET | `/api/metrics/llm-usage?window=today|7d|...` | Yes | DB-backed LLM usage/cost/tokens by provider (preferred for reporting) |
 | GET | `/api/llm/routing/strategy` | Yes | Current routing strategy configuration |
 | POST | `/api/llm/routing/strategy` | Yes | Update routing strategy configuration |
 | GET | `/api/llm/predictive-risk` | Yes | Predictive risk analytics output |
@@ -131,7 +134,7 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 |---|---|---|---|
 | GET | `/api/governance/status` | Yes | Current mode, pending count, decision metrics |
 | GET | `/api/governance/mode` | Yes | Current automation mode |
-| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (`autonomous`/`assisted`/`manual`/`emergency`) |
+| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (`autonomous`/`assisted`/`manual`/`emergency`, depending policy/build) |
 | GET | `/api/governance/pending` | Yes | List pending actions awaiting approval |
 | POST | `/api/governance/approve/{action_id}` | Yes | Approve + execute pending action. Params: `operator`, `comment` |
 | POST | `/api/governance/reject/{action_id}` | Yes | Reject pending action. Params: `operator`, `reason` |
@@ -181,7 +184,7 @@ Note: Synthetic “chaos” demo endpoints were removed. Live demo runs should u
 real traffic/runtimes (Falco + Suricata) and the `scripts/run-live-attacks.sh`
 runner.
 
-Source inventory (generated from `services/ids-api/src/api/*.py`): **80 routes total** as of 2026-02-20 (30 auth-protected, 50 unauthenticated).
+Source inventory note: endpoint count and auth mix evolve as the operator UI/API changes. Treat the tables above as the maintained reference; verify against `services/ids-api/src/api/*.py` for exact route inventory.
 
 ---
 
@@ -310,7 +313,7 @@ All settings via environment variables. Source: `config.py` and `main.py`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_PRIORITY` | `xai,anthropic,openai,gemini,kimi` | Failover order |
+| `LLM_PRIORITY` | `kimi,xai,anthropic,openai` (default chain in current config) | Failover order (may be overridden by `LLM_PROVIDER_CHAIN`) |
 | `LLM_TEMPERATURE` | `0.3` | Sampling temperature |
 | `LLM_MAX_TOKENS` | `1000` | Max tokens per response |
 
@@ -327,7 +330,7 @@ All settings via environment variables. Source: `config.py` and `main.py`.
 |---|---|---|
 | `CRITICAL_SEVERITY_THRESHOLD` | `8` | Severity ≥ value → isolate pod |
 | `HIGH_SEVERITY_THRESHOLD` | `6` | Severity ≥ value → scale up |
-| `AUTOMATION_MODE` | `assisted` | autopilot / assisted / manual |
+| `AUTOMATION_MODE` | `assisted` | `autonomous` / `assisted` / `manual` / `emergency` (legacy aliases normalized) |
 | `ASSISTED_THRESHOLD` | `8` | Severity ≥ value requires approval in assisted mode |
 | `PROTECTED_SERVICES` | `healthcare-api,ids-api,postgres` | Never auto-isolated |
 | `ACTION_EXPIRY_SECONDS` | `300` | Pending action TTL |
@@ -360,6 +363,7 @@ All settings via environment variables. Source: `config.py` and `main.py`.
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `postgresql://postgres:idspassword@postgres:5432/smartcity_ids` | PostgreSQL connection |
+| `DB_RECONNECT_INTERVAL_SECONDS` | `10` | Background retry interval for auto-recovery from DB fallback |
 | `SECRET_KEY` | `smart-city-ids-demo-secret-change-in-production` | JWT signing key |
 | `APP_HOST` | `0.0.0.0` | Bind address |
 | `APP_PORT` | `8000` | Listen port |

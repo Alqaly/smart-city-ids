@@ -109,7 +109,7 @@ Every security event follows this path:
    (Removed) Synthetic dashboard/CLI injection path.
 
 2. INTAKE (`api/alerts.py`)
-   ├─ Rate limiter: per-rule (10/min), per-source (100/min), global (500/min)
+   ├─ Rate limiter: per-rule / per-source / global limits (config-driven; see `/api/rate-limiter/status`)
    │  └─ Exceeds → HTTP 429, stored in throttled_alerts table
    ├─ Request queue: max 100 concurrent
    │  └─ Full → HTTP 503
@@ -132,6 +132,7 @@ Every security event follows this path:
 5. PERSISTENCE (database.py)
    ├─ PostgreSQL: alerts, analysis_results, automation_actions, audit_logs
    ├─ Memory fallback if PostgreSQL unavailable
+   ├─ Background DB reconnect monitor auto-recovers from fallback when PostgreSQL returns
    └─ Prometheus counters restored from DB on restart
 ```
 
@@ -179,7 +180,7 @@ services/ids-api/
 │   ├── llm_engine_gemini.py    (149 lines)   Google Gemini engine
 │   └── llm_engine_kimi.py      (149 lines)   Moonshot Kimi engine
 ├── static/
-│   └── index.html              (~700 lines)  Operator dashboard SPA
+│   └── index.html              (large single-file SPA; size changes frequently)  Operator dashboard SPA
 └── requirements.txt
 
 services/forwarders/

@@ -5,7 +5,7 @@ This checklist provides reproducible steps to validate IDS performance and run r
 ## Objectives
 - Replay attack scenarios with ground-truth labels
 - Measure IDS detection (precision, recall, F1, AUC)
-- Validate automation safety (dry-run vs assisted vs autopilot)
+- Validate automation safety (dry-run vs assisted vs autonomous)
 
 ## 1) Environment
 - Ensure `KUBECONFIG` points to the demo cluster (single-node K3s)
@@ -68,7 +68,7 @@ Save results to `scalability-results/metrics_summary.json`.
 - Deduplicator hit-rate: >40% during storms
 
 ## 8) Safety checks
-- Verify `AUTOMATION_MODE=assisted` prevents autopilot isolation without approval
+- Verify `AUTOMATION_MODE=assisted` prevents autonomous isolation without approval
 - Check `k8s_automation` logs for `[DRY-RUN]` entries if using `dry-run`
 
 ## 9) Reporting

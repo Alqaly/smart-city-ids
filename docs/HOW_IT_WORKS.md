@@ -192,10 +192,11 @@ Every governance decision is recorded in the `audit_logs` table:
 
 ### Memory Fallback
 
-If PostgreSQL is unreachable at startup, the system falls back to in-memory storage:
+If PostgreSQL is unreachable, the system can fall back to in-memory storage:
 - Same API, same data model
 - Data is lost on pod restart
-- The `/health` and `/api/metrics` endpoints report `storage_type: "memory"` vs `"postgresql"`
+- `/health` exposes storage/database component status so operators can detect degraded persistence
+- The service now auto-retries PostgreSQL and can recover back from fallback without restarting `ids-api`
 
 ### Prometheus Counter Restoration
 
@@ -229,15 +230,15 @@ Synthetic attack injection was removed. Generate detections using LIVE attacks (
 
 ### CLI Pipeline Script
 
-`scripts/attack-iot-pipeline.sh` executes 12 real attack scenarios against the running cluster:
+The recommended live attack runner is `scripts/run-live-attacks.sh` (real traffic/runtime behaviors against the running cluster). Legacy synthetic attack scripts are archived/disabled.
 
-1. Shell spawn in traffic-camera pod
-2. `/etc/shadow` read in healthcare-api pod
-3. License plate data exfiltration
-4. Patient record exfiltration
-5. SUID privilege escalation
-6. DDoS flood simulation
-7. Port scan detection
+Representative scenarios include:
+
+1. Shell spawn in IoT/service pods (Falco runtime)
+2. Sensitive file read (`/etc/passwd`, `/etc/shadow`) in containers (Falco runtime)
+3. SQL injection payloads against HTTP services (Suricata network)
+4. HTTP flood / burst traffic (Suricata network)
+5. Lateral/service probing behavior and outbound connections (Falco + Suricata depending path)
 8. DNS exfiltration
 9. Lateral movement
 10. SQL injection probe

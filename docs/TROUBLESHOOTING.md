@@ -155,21 +155,35 @@ kubectl describe pod -n smart-city <pod-name>
 
 ### IDS API Returns 401 (Unauthorized)
 
-**Error:** `{"error": "Unauthorized", "status": 401}`
-
-**Cause:** Invalid or missing API key
+**Common causes:**
+- Missing/invalid JWT for protected endpoints (dashboard/API actions)
+- Invalid LLM provider API key (401 from provider), which is a **different** issue
 
 **Fix:**
 ```bash
-# Check .env file
-cat .env | grep API_KEY
+# For IDS API JWT auth (dashboard/admin endpoints): login and use Bearer token
+TOKEN=$(curl -s http://localhost:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
 
-# Verify secret is set
-kubectl get secret -n smart-city ids-secrets -o jsonpath='{.data.xai-api-key}' | base64 -d
+# Example protected call
+curl -s http://localhost:30800/api/governance/status \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
 
-# If wrong, update and redeploy
-nano .env
-./deploy.sh
+For LLM provider key issues (provider returns 401), verify and resync keys:
+
+```bash
+# Check .env keys
+grep 'API_KEY' .env
+
+# Sync .env -> K8s secret and restart ids-api
+bash scripts/apply-llm-env-to-k8s-secret.sh
+bash scripts/deploy-code.sh
+
+# Reset provider latches/circuit state after fixing keys
+curl -s -X POST http://localhost:30800/api/llm/retry-all \
+  -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
 ---
@@ -178,9 +192,18 @@ nano .env
 
 **Error:** `{"error": "Rate limited", "status": 429}`
 
-**Cause:** Too many requests to LLM API
+**Cause:** Could be one of:
+- Alert ingest rate limiter throttling (`/api/alerts`)
+- Provider-side quota/rate limiting (LLM API)
 
-**Fix:** Wait 1 minute, then retry. Or increase `LLM_TIMEOUT` in config.
+**Fix (diagnose first):**
+```bash
+# Alert ingest rate limiter status
+curl -s http://localhost:30800/api/rate-limiter/status | jq .
+
+# LLM provider diagnostics (cooldown/quota/auth state)
+curl -s http://localhost:30800/api/llm/diagnostics | jq .
+```
 
 ---
 
@@ -217,7 +240,16 @@ kubectl rollout restart deployment postgres -n smart-city
 
 # Wait 30 seconds for recovery
 sleep 30
-kubectl logs -n smart-city postgres --tail=20
+kubectl logs -n smart-city -l app=postgres --tail=20
+```
+
+If the dashboard suddenly appears to lose old alerts:
+- Check `/health` for DB/storage status
+- `ids-api` may be in memory fallback
+- Current builds auto-retry PostgreSQL and recover without restarting `ids-api`
+
+```bash
+curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
 ```
 
 ---

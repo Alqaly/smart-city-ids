@@ -89,6 +89,29 @@ else
     fail "Health endpoint failed or returned non-healthy"
 fi
 
+DB_COMPONENT_STATUS="$(echo "$HEALTH_JSON" | jq -r '.components.database // "unknown"' 2>/dev/null || echo unknown)"
+DB_STORAGE_STATUS="$(echo "$HEALTH_JSON" | jq -r '.storage_type // "unknown"' 2>/dev/null || echo unknown)"
+
+if [[ "$DB_COMPONENT_STATUS" == "connected" ]] && [[ "$DB_STORAGE_STATUS" == "connected" ]]; then
+    pass "Database persistence mode: PostgreSQL connected"
+else
+    warn "Database not fully connected (components.database=${DB_COMPONENT_STATUS}, storage_type=${DB_STORAGE_STATUS})"
+    warn "If this shows memory-fallback, ids-api will auto-retry DB now. Rechecking for 20s..."
+    for _ in {1..4}; do
+        sleep 5
+        HEALTH_JSON="$(api_json /health || true)"
+        DB_COMPONENT_STATUS="$(echo "$HEALTH_JSON" | jq -r '.components.database // "unknown"' 2>/dev/null || echo unknown)"
+        DB_STORAGE_STATUS="$(echo "$HEALTH_JSON" | jq -r '.storage_type // "unknown"' 2>/dev/null || echo unknown)"
+        if [[ "$DB_COMPONENT_STATUS" == "connected" ]] && [[ "$DB_STORAGE_STATUS" == "connected" ]]; then
+            pass "Database auto-recovered to PostgreSQL during pre-demo check"
+            break
+        fi
+    done
+    if [[ "$DB_COMPONENT_STATUS" != "connected" ]] || [[ "$DB_STORAGE_STATUS" != "connected" ]]; then
+        fail "Database still degraded (${DB_COMPONENT_STATUS}/${DB_STORAGE_STATUS}); dashboard may appear to lose historical alerts"
+    fi
+fi
+
 METRICS_JSON="$(api_json /api/metrics || true)"
 if [[ -n "$METRICS_JSON" ]]; then
     pass "Metrics endpoint reachable"

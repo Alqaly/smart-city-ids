@@ -75,10 +75,10 @@ kubectl rollout restart deployment/ids-api -n smart-city
 
 ```bash
 # In ConfigMap or environment:
-LLM_PRIORITY=xai,anthropic,openai,gemini,kimi
+LLM_PRIORITY=kimi,xai,anthropic,openai
 ```
 
-Default order: xai → anthropic → openai → gemini → kimi
+Current config default chain is `kimi -> xai -> anthropic -> openai` (and may be overridden by `LLM_PROVIDER_CHAIN` / runtime control actions).
 
 ---
 
@@ -90,7 +90,7 @@ Default order: xai → anthropic → openai → gemini → kimi
 | **Anthropic** | claude-3-5-sonnet | ⚡ Fast | $$$ | Limited | Strong reasoning |
 | **OpenAI** | gpt-4-turbo | ⚡ Fast | $$$ | No | Reliability |
 | **Gemini** | gemini-2.0-flash | ⚡⚡ Fastest | $ | **Yes** | Cost-effective |
-| **Kimi** | moonshot-v1-128k | 🐢 Slower | $ | Limited | Long context |
+| **Kimi** | moonshot-v1-8k (default in current config) | ⚡/⚡⚡ (provider/runtime dependent) | $ | Limited | Primary/default in current chain |
 
 ---
 
@@ -109,10 +109,10 @@ XAI_MODEL=grok-4-latest
 ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 OPENAI_MODEL=gpt-4-turbo-preview
 GEMINI_MODEL=gemini-2.0-flash
-KIMI_MODEL=moonshot-v1-128k
+KIMI_MODEL=moonshot-v1-8k
 
 # Behavior settings (optional)
-LLM_PRIORITY=xai,anthropic,openai,gemini,kimi
+LLM_PRIORITY=kimi,xai,anthropic,openai
 LLM_TEMPERATURE=0.3      # 0.0-1.0, lower = more consistent
 LLM_MAX_TOKENS=1000      # Max response length
 LLM_TIMEOUT=30           # API timeout in seconds
@@ -135,14 +135,17 @@ kubectl logs -n smart-city -l app=ids-api --tail=20 | grep -i "llm\|engine"
 Or check the health endpoint:
 
 ```bash
-curl -s http://localhost:8000/health | jq '.components.llm_providers'
+curl -s http://localhost:30800/health | jq '.components.llm_providers'
 # Expected: provider connectivity + circuit breaker state
 ```
 
 Or inspect detailed manager status:
 
 ```bash
-curl -s http://localhost:8000/api/llm/status | jq
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
+curl -s http://localhost:30800/api/llm/status -H "Authorization: Bearer $TOKEN" | jq
 # Includes:
 # - provider_count
 # - providers (in failover order)
@@ -191,8 +194,9 @@ Invalid API key. Verify:
 │  ┌──────────────────────────────────────┴─────────────┐ │
 │  │              LLM Engine Manager                     │ │
 │  │  ┌────────────────────────────────────────────────┐│ │
-│  │  │  Priority Chain: xai → anthropic → openai →    ││ │
-│  │  │                  gemini → kimi                 ││ │
+│  │  │  Priority Chain: config/runtime-defined        ││ │
+│  │  │  (example default: kimi → xai → anthropic →    ││ │
+│  │  │   openai)                                      ││ │
 │  │  └────────────────────────────────────────────────┘│ │
 │  │  ┌────────────────────────────────────────────────┐│ │
 │  │  │  Circuit Breaker: Per-engine failure tracking  ││ │
@@ -255,15 +259,15 @@ export KIMI_API_KEY="sk-..."
 export XAI_API_KEY="xai-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
 export GEMINI_API_KEY="AIza..."
-export LLM_PRIORITY="xai,anthropic,gemini"
-# Tries xai first, then anthropic, then gemini
+export LLM_PRIORITY="kimi,xai,anthropic"
+# Tries kimi first, then xai, then anthropic
 ```
 
 ### Startup Logs
 
 ```
 🔧 LLM Manager: 1 provider(s) available
-   ✅ kimi (moonshot-v1-128k)
+   ✅ kimi (moonshot-v1-8k)
 ✅ IDS API ready with 1 LLM provider(s)
 ```
 
@@ -284,7 +288,10 @@ Or with multiple:
 Use the `/api/llm/status` endpoint:
 
 ```bash
-curl http://localhost:8000/api/llm/status | jq
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
+curl -s http://localhost:30800/api/llm/status -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 **Response:**
@@ -295,7 +302,7 @@ curl http://localhost:8000/api/llm/status | jq
   "priority_order": ["kimi"],
   "details": {
     "kimi": {
-      "model": "moonshot-v1-128k",
+      "model": "moonshot-v1-8k",
       "attempts": 12,
       "successes": 12,
       "failures": 0,
@@ -369,7 +376,7 @@ if Config.NEWPROVIDER_API_KEY:
 4. **Update priority** in config:
 
 ```python
-LLM_PRIORITY = ['xai', 'anthropic', 'openai', 'gemini', 'kimi', 'newprovider']
+LLM_PRIORITY = ['kimi', 'xai', 'anthropic', 'openai', 'newprovider']
 ```
 
 ---
@@ -389,7 +396,7 @@ if engine:
 
 ```bash
 # API endpoint
-curl http://localhost:8000/api/llm/status | jq '.circuit_breaker_summary'
+curl -s http://localhost:30800/api/circuit-breaker/status | jq '.summary'
 
 # Or check circuit breaker directly
 curl http://localhost:8000/api/circuit-breaker/status | jq
@@ -398,8 +405,12 @@ curl http://localhost:8000/api/circuit-breaker/status | jq
 ### Reset Failing Engine
 
 ```bash
-# Reset specific engine's circuit breaker
-curl -X POST http://localhost:8000/api/circuit-breaker/reset/gemini
+# Reset specific engine's circuit breaker (query param)
+curl -s -X POST 'http://localhost:30800/api/circuit-breaker/reset?engine=gemini' | jq
+
+# Or reset providers + cooldown/circuit latches (operator-friendly)
+curl -s -X POST http://localhost:30800/api/llm/retry-all \
+  -H "Authorization: Bearer $TOKEN" | jq
 ```
 
 ---
@@ -411,5 +422,5 @@ curl -X POST http://localhost:8000/api/circuit-breaker/reset/gemini
 | `LLM_TIMEOUT` | 30s | Max wait for API response |
 | `LLM_TEMPERATURE` | 0.3 | Lower = more consistent analysis |
 | `LLM_MAX_TOKENS` | 1000 | Max response length |
-| `CIRCUIT_FAILURE_THRESHOLD` | 5 | Failures before opening circuit |
-| `CIRCUIT_RECOVERY_TIMEOUT` | 30s | Wait before retry after failure |
+| `CIRCUIT_BREAKER_THRESHOLD` | 5 | Failures before opening circuit |
+| `CIRCUIT_BREAKER_TIMEOUT` | 30s | Wait before retry after failure |

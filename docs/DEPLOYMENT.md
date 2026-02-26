@@ -95,10 +95,10 @@ The `scripts/start-everything.sh` script executes 8 phases:
 - CrashLoopBackOff → Application error, check pod logs
 - Pending → Insufficient resources, check `kubectl top nodes`
 
-### Phase 5: IoT Device Emulation
-- Generates 100 emulated IoT device manifests
-- Deploys devices in burst/high/medium classes
-- Configures MQTT publishing
+### Phase 5: IoT Services / Emulation Bring-up
+- Deploys core IoT emulator services (traffic camera, healthcare API, parking system, etc.)
+- Starts supporting IoT components (e.g., MQTT broker and any configured simulators)
+- Waits for service readiness so Falco/Suricata detections can be generated against real workloads
 
 **What can go wrong:**
 - Pods not starting → Insufficient resources
@@ -197,17 +197,15 @@ kubectl get pods -A -w
 kubectl rollout status deployment/ids-api -n smart-city
 ```
 
-### 5. Deploy IoT Devices
+### 5. Validate IoT Emulation
 
 ```bash
-# Generate device manifests
-for i in {1..30}; do
-  kubectl run "iot-device-$i" \
-    -n smart-city \
-    --image=smart-city/iot-device:latest \
-    --env="MQTT_BROKER=mqtt-broker:1883" \
-    --env="DEVICE_CLASS=high"
-done
+# Check emulator deployments/services
+kubectl get deploy,svc -n smart-city | grep -E 'traffic-camera|healthcare-api|parking-system|env-sensor|street-lighting|mqtt-broker'
+
+# Verify IDS API sees IoT telemetry/device inventory
+curl -s http://localhost:30800/api/iot/devices | jq .
+curl -s http://localhost:30800/api/iot/telemetry | jq .
 ```
 
 ---
@@ -223,7 +221,7 @@ kubectl get nodes
 
 # All pods running
 kubectl get pods -A
-# Output: ~45 pods total, all Running
+# Output: pod count varies by profile/replicas; focus on expected core services Running
 
 # All services accessible
 kubectl get svc -A
@@ -249,8 +247,8 @@ curl http://YOUR-IP:30300/api/health
 ### Test Alert Pipeline
 
 ```bash
-# 1. Trigger an alert
-python3 attack-simulator/ddos_simulator.py http://YOUR-IP:30800 2 5
+# 1. Trigger live detections
+bash scripts/run-live-attacks.sh --duration 10 --show-alerts 2
 
 # 2. Check IDS API logs
 kubectl logs -n smart-city -l app=ids-api --tail=20
@@ -271,8 +269,8 @@ curl http://YOUR-IP:30800/api/alerts?limit=5
 Edit `scripts/start-everything.sh` before running:
 
 ```bash
-# IoT Device Count (default: 30, can be 1-100)
-IoT_REPLICAS=30
+# IoT scaling is profile/manifests-driven; use `kubectl scale` / HPA / emulator env vars after deploy
+# (e.g., DEVICE_COUNT, ENV_SENSOR_STATION_COUNT, PARKING_SLOT_MULTIPLIER)
 
 # K3s Cluster Name
 CLUSTER_NAME="capstone"

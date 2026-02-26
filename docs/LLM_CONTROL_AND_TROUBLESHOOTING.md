@@ -65,12 +65,18 @@ This document explains the LLM provider dashboard behavior, failover chain, cool
 ## Recovery runbook (when providers are down)
 
 1. **Fix credentials/credits** at provider side (API keys, billing/quota).
-2. **Set env vars** on deployment (`XAI_API_KEY`, `OPENAI_API_KEY`, etc.).
-3. **Restart service** so new env values are loaded.
-4. **Reset cooldown/circuit** via API:
-   - `POST /api/circuit-breaker/reset`
-5. **Run Live Probe** from LLM Control to verify runtime health.
+2. **Update `.env` and sync K8s secret** (project standard path):
+   - `bash scripts/apply-llm-env-to-k8s-secret.sh`
+3. **Restart/redeploy `ids-api`** so new env values are loaded.
+4. **Reset provider state + breakers** via API/UI:
+   - `POST /api/llm/retry-all` (preferred)
+   - optional targeted breaker reset: `POST /api/circuit-breaker/reset`
+5. **Probe/Test** a provider from LLM Control to verify runtime health.
 6. **Set temporary fallback order** to most reliable providers until full recovery.
+
+Notes:
+- `retry-all` clears in-memory cooldown/circuit state; it does not fix invalid keys or exhausted credits.
+- A provider can be `configured` but unusable due quota/billing/model-access issues.
 
 ---
 

@@ -276,11 +276,9 @@ curl -s -X POST http://localhost:30800/api/analyst/chat \
 |---|---|
 | `scripts/start-everything.sh` | Full cluster deploy (namespaces → ConfigMaps → manifests → Falco) |
 | `scripts/deploy-code.sh` | Quick code deploy (ConfigMap update + pod restart) |
-| `scripts/attack-iot-pipeline.sh` | 12 real attack scenarios through full IDS pipeline |
-| `attack-simulations/ids-demo-showcase.sh` | Guided demo walkthrough |
-| `attack-simulations/generate-security-events.sh` | Generate Falco-style security events |
-| `attack-simulations/generate-network-attacks.sh` | Generate network attack patterns |
-| `attack-simulations/generate-advanced-attacks.sh` | Generate advanced multi-stage attacks |
+| `scripts/run-live-attacks.sh` | Live attack runner (real Falco/Suricata detections via traffic/runtime behaviors) |
+| `scripts/demo-day.sh` | Guided demo orchestration (checks + pipeline/demo flow) |
+| `docs/_archive/deprecated-scripts/*` | Historical/legacy attack helpers (archived, not current workflow) |
 | `attack-simulator/ddos_simulator.py` | Multi-threaded DDoS flood tool |
 | `attack-simulator/data_exfiltration.py` | Data exfiltration simulator |
 | `attack-simulator/privilege_escalation.py` | Privilege escalation simulator |
