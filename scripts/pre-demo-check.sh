@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Smart City IDS - Quick Pre-Demo Verification
-# Run this 5 minutes before the demo. Output is examiner-friendly.
+# Smart City IDS - Quick Readiness Verification
+# Run before evaluations/presentations. Output is operator/examiner-friendly.
 # =============================================================================
 
 set -euo pipefail
@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
-init_script "$0" "Smart City IDS Pre-Demo Check"
+init_script "$0" "Smart City IDS Readiness Check"
 
 ensure_commands kubectl curl jq python3 awk
 ensure_kubeconfig
@@ -39,7 +39,7 @@ log_section "1/8 Cluster Connectivity"
 if kubectl cluster-info >/dev/null 2>&1; then
     pass "Kubernetes API reachable"
 else
-    fail "Kubernetes API not reachable (start/restart k3s before demo)"
+    fail "Kubernetes API not reachable (start/restart k3s before proceeding)"
     echo ""
     echo "Try: sudo systemctl restart k3s"
     exit 1
@@ -103,7 +103,7 @@ else
         DB_COMPONENT_STATUS="$(echo "$HEALTH_JSON" | jq -r '.components.database // "unknown"' 2>/dev/null || echo unknown)"
         DB_STORAGE_STATUS="$(echo "$HEALTH_JSON" | jq -r '.storage_type // "unknown"' 2>/dev/null || echo unknown)"
         if [[ "$DB_COMPONENT_STATUS" == "connected" ]] && [[ "$DB_STORAGE_STATUS" == "connected" ]]; then
-            pass "Database auto-recovered to PostgreSQL during pre-demo check"
+            pass "Database auto-recovered to PostgreSQL during readiness check"
             break
         fi
     done
@@ -130,9 +130,9 @@ fi
 
 if [[ "$IOT_COUNT" =~ ^[0-9]+$ ]] && [[ "$IOT_COUNT" -gt 0 ]]; then
     if [[ "$IOT_COUNT" -eq 13 ]]; then
-        pass "IoT devices reported: 13 (expected demo baseline)"
+        pass "IoT devices reported: 13 (current reference profile)"
     else
-        warn "IoT devices reported: ${IOT_COUNT} (demo baseline is usually 13)"
+        warn "IoT devices reported: ${IOT_COUNT} (reference profile often reports 13)"
     fi
 else
     fail "IoT device count is zero"
@@ -179,7 +179,7 @@ log_section "8/8 Quick Pipeline Sanity"
 BEFORE_ALERTS="$TOTAL_ALERTS"
 curl -sS -X POST "${API_BASE}/api/alerts/internal" \
   -H "Content-Type: application/json" \
-  -d "{\"rule\":\"Demo Sanity Check\",\"source\":\"falco\",\"priority\":\"Warning\",\"time\":\"$(date -Iseconds)\",\"output\":\"Pre-demo pipeline test event\",\"output_fields\":{\"container.name\":\"pre-demo-check\"}}" \
+  -d "{\"rule\":\"Pipeline Sanity Check\",\"source\":\"falco\",\"priority\":\"Warning\",\"time\":\"$(date -Iseconds)\",\"output\":\"Readiness pipeline test event\",\"output_fields\":{\"container.name\":\"readiness-check\"}}" \
   >/dev/null 2>&1 || true
 sleep 2
 AFTER_ALERTS="$(api_json /api/metrics | jq -r '.total_alerts // 0' 2>/dev/null || echo "$BEFORE_ALERTS")"
@@ -201,10 +201,10 @@ echo "Login:   admin / admin"
 echo ""
 
 if [[ $FAILED -eq 0 ]]; then
-    echo "DEMO STATUS: READY"
+    echo "READINESS STATUS: READY"
     exit 0
 fi
 
-echo "DEMO STATUS: ATTENTION NEEDED"
+echo "READINESS STATUS: ATTENTION NEEDED"
 echo "Fix failed items above before the examiner session."
 exit 1

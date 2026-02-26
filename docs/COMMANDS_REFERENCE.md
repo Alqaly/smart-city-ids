@@ -188,7 +188,7 @@ curl -s -X POST http://localhost:8000/api/circuit-breaker/reset | python3 -m jso
 
 ```bash
 # Get rate limiter stats
-curl -s http://localhost:8000/api/rate-limiter/stats | python3 -m json.tool
+curl -s http://localhost:8000/api/rate-limiter/status | python3 -m json.tool
 
 # Reset rate limiter stats
 curl -s -X POST http://localhost:8000/api/rate-limiter/reset | python3 -m json.tool

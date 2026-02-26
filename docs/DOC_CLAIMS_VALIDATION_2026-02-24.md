@@ -1,5 +1,11 @@
 # Documentation Claims Validation Report (2026-02-24)
 
+> [!IMPORTANT]
+> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
+> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+
+
 Scope validated:
 - `docs/EXAMINER_QA_30.md`
 - `docs/ARCHITECTURE.md`

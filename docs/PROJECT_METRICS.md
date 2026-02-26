@@ -1,9 +1,19 @@
 # Smart City IDS — Project Metrics, Figures & Visualizations
 
+> [!IMPORTANT]
+> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
+> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+
+
 > Comprehensive metrics reference with tables, architecture diagrams, and performance data
 > for inclusion in academic reports and capstone presentations.
 >
 > Last updated: February 2026
+>
+> Status note: This document is a reporting snapshot and may include historical route/category names
+> (for example legacy `/api/demo*` references). Use `docs/API_REFERENCE.md` and `docs/INDEX.md`
+> for the current live API contract and documentation trust guidance.
 
 ---
 
@@ -487,7 +497,7 @@ CPU ──────── 8% ──── 12% ─── 17% ─── 25% ─
 | LLM Credits (`/api/llm/credits*`) | 2 |
 | Governance (`/api/governance*`) | 7 |
 | Operator (`/api/operator*`) | 7 |
-| IoT + Demo (`/api/iot*`, `/api/demo*`) | 11 |
+| IoT + Optional/Legacy UI Flows (`/api/iot*`, historical `/api/demo*`) | 11 |
 | Audit + Logs (`/api/audit*`, `/api/logs*`) | 4 |
 | Auth (`/api/auth*`) | 2 |
 | **Total** | **80** |

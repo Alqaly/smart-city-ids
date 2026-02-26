@@ -1,5 +1,11 @@
 # Capstone 70-Page Report Blueprint (IEEE Style)
 
+> [!IMPORTANT]
+> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
+> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+
+
 Date: 2026-02-20  
 Target length: 70 pages (body + figures + references; appendices optional extra)
 

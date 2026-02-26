@@ -1,5 +1,11 @@
 # Smart City IDS - Demo Readiness Report
 
+> [!IMPORTANT]
+> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
+> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+
+
 **Date:** February 3, 2026  
 **Prepared By:** Senior IIoT Security Engineer  
 **Target Audience:** Academic Supervisors & Students  

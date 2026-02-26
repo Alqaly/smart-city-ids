@@ -26,6 +26,10 @@ When in doubt, validate runtime claims against:
 - `GET /api/metrics`
 - Kubernetes live state (`kubectl get pods -A`, `kubectl get svc -n smart-city`)
 
+## Reviewer Safety (Current Verified)
+
+- [CURRENT_DOCS_VERIFIED.md](CURRENT_DOCS_VERIFIED.md) — live-verified docs and runtime checks for external reviewers
+
 ## Canonical Technical Docs (Current)
 
 | Document | Purpose |

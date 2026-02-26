@@ -1,5 +1,11 @@
 # IoT Device Emulation — Technical Report
 
+> [!IMPORTANT]
+> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
+> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+
+
 ## 1. Overview
 
 This document describes the design, implementation, and deployment of **protocol-accurate IoT device emulators** for the Smart City Intrusion Detection System (IDS) capstone project. The emulation layer replaces the prior simulation approach (random number generators) with realistic, standards-compliant protocol implementations that generate authentic network traffic and data patterns for intrusion detection analysis.
@@ -20,7 +26,7 @@ Realism scope note: this project prioritizes **protocol and application-layer fi
 | Protocol fidelity | None — plain JSON REST only | Industry-standard protocols (ONVIF, MQTT, FHIR, Modbus, DALI) |
 | Network traffic | Artificial HTTP payloads | Protocol-accurate frames, register maps, SOAP envelopes |
 | IDS relevance | Detects fake patterns | Tests against real-world protocol anomalies |
-| Academic credibility | Low — "toy" data | High — references ISO/IEC/IEEE/IETF standards |
+| Academic credibility | Low — oversimplified synthetic data | High — references ISO/IEC/IEEE/IETF standards |
 
 **Key distinction:** A *simulator* approximates behavior with random outputs. An *emulator* faithfully reproduces the interfaces, protocols, and data structures of the real device, allowing the IDS to be evaluated against authentic traffic patterns.
 

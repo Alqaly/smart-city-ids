@@ -1,5 +1,11 @@
 # Documentation Completion Report
 
+> [!IMPORTANT]
+> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
+> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+
+
 **Date:** January 2026  
 **Status:** ✅ COMPLETE AND READY FOR PUBLICATION  
 **Total Documentation:** 40+ active markdown files (76+ including archives), ~30,000+ words
