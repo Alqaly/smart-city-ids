@@ -95,6 +95,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 import hashlib
 import httpx
+from enum import Enum
 
 # Local imports for enhanced validation and retry
 try:
@@ -103,6 +104,45 @@ try:
     SCHEMA_VALIDATION_ENABLED = True
 except ImportError:
     SCHEMA_VALIDATION_ENABLED = False
+
+# Backward-compatible circuit breaker API used by legacy tests/importers.
+class CircuitState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreaker:
+    """Single-engine circuit breaker compatibility shim.
+
+    New runtime code uses the multi-engine breaker in infrastructure middleware.
+    This class preserves the legacy interface expected by older tests/modules.
+    """
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
+        self.failure_threshold = int(failure_threshold)
+        self.recovery_timeout = int(recovery_timeout)
+        self.failure_count = 0
+        self.last_failure_time = 0.0
+        self.state = CircuitState.CLOSED
+
+    def can_execute(self) -> bool:
+        if self.state == CircuitState.OPEN:
+            if (time.time() - self.last_failure_time) >= self.recovery_timeout:
+                self.state = CircuitState.HALF_OPEN
+                return True
+            return False
+        return True
+
+    def record_success(self):
+        self.failure_count = 0
+        self.state = CircuitState.CLOSED
+
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        if self.failure_count >= self.failure_threshold:
+            self.state = CircuitState.OPEN
     
 logger = logging.getLogger(__name__)
 

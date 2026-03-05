@@ -45,22 +45,25 @@ class LLMManager:
         Args:
             config: Optional shared config. If None, loads from environment.
         """
+        config_provided = config is not None
         self.config = config or ProviderConfig()
-        
-        # Try to load priority from database
-        try:
-            from api._state import db
-            db_priority = db.get_system_config('llm_priority')
-            if db_priority:
-                self.config.priority = db_priority
-                logger.info(f"Loaded LLM priority from database: {self.config.priority}")
-        except Exception as e:
-            logger.warning(f"Could not load LLM priority from database: {e}")
+
+        # Only hydrate priority from DB when no explicit config is supplied.
+        # Tests and callers that pass ProviderConfig expect that order to win.
+        if not config_provided:
+            try:
+                from api._state import db
+                db_priority = db.get_system_config('llm_priority')
+                if db_priority:
+                    self.config.priority = db_priority
+                    logger.info(f"Loaded LLM priority from database: {self.config.priority}")
+            except Exception as e:
+                logger.warning(f"Could not load LLM priority from database: {e}")
             
         discovered_providers = get_available_providers(self.config)
         self.providers = self._sort_providers_by_priority(discovered_providers)
         self.provider_states = {
-            name: {
+            provider.NAME: {
                 "status": "operational",  # operational, cooldown, auth_failed
                 "reason": "Ready (no requests yet)",
                 "last_error": None,
@@ -71,7 +74,7 @@ class LLMManager:
                 "successes": 0,
                 "failures": 0,
             }
-            for name in self.providers
+            for provider in self.providers
         }
         self.state_lock = asyncio.Lock()
         self.runtime_stats = {

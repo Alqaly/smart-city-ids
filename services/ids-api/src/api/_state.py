@@ -112,6 +112,18 @@ STATIC_DIR: Optional[str] = None
 # ``/api/alerts/history`` endpoint to serve results without a DB round-trip
 # for small deployments.
 alerts_db: List[Dict[str, Any]] = []
+MAX_ALERTS_MEMORY = max(100, int(os.getenv("MAX_ALERTS_MEMORY", "10000")))
+
+
+def append_alert_memory(alert_record: Dict[str, Any]) -> None:
+    """Append alert to in-memory cache with bounded growth.
+
+    This cache is only for fast dashboard/API reads. Durable history remains in DB.
+    """
+    alerts_db.append(alert_record)
+    overflow = len(alerts_db) - MAX_ALERTS_MEMORY
+    if overflow > 0:
+        del alerts_db[:overflow]
 
 # ``metrics_dict`` — aggregate counters shown on the operator dashboard.
 # ``started_at`` is captured at module-load time so uptime can be derived.
@@ -808,8 +820,14 @@ def is_protected_service(container_name: str) -> bool:
     """
     if not container_name:
         return False
-    # Iterate over the configured list of protected service name prefixes
-    for protected in Config.PROTECTED_SERVICES:
+    configured = [str(s).strip().lower() for s in getattr(Config, "PROTECTED_SERVICES", []) if str(s).strip()]
+    # Keep a safety baseline so test/runtime behavior does not depend on
+    # accidental mutation of Config.PROTECTED_SERVICES.
+    baseline = ["healthcare-api", "ids-api", "postgres"]
+    protected_services = list(dict.fromkeys(configured + baseline))
+
+    # Iterate over the protected service name prefixes
+    for protected in protected_services:
         if protected.lower() in container_name.lower():
             return True
     return False
@@ -847,7 +865,14 @@ def can_execute_action(
     # Check global automation mode from project configuration
     sev = int(severity or 0)
     conf = float(confidence or 0.0)
-    mode = str(Config.AUTOMATION_MODE or "assisted").strip().lower()
+    raw_mode = str(Config.AUTOMATION_MODE or "assisted").strip().lower()
+    mode = raw_mode
+
+    # Import governance controller to update metrics
+    try:
+        from governance import governance
+    except Exception:
+        governance = None
 
     # Backward-compatible mode aliases
     if mode in {"live", "autopilot"}:
@@ -855,11 +880,12 @@ def can_execute_action(
     elif mode in {"dry-run", "approval-required"}:
         mode = "manual"
 
-    # Import governance controller to update metrics
-    try:
-        from governance import governance
-    except Exception:
-        governance = None
+    # Explicit dry-run semantics for legacy tests/scripts:
+    # never execute actions and always return a DRY-RUN reason.
+    if raw_mode == "dry-run":
+        if governance:
+            governance._metrics["blocked_dry_run"] += 1
+        return False, f"DRY-RUN mode: {action} on {container_name} blocked"
 
     # Emergency mode: bypass confidence and approval gates for catastrophic events
     if (
@@ -1150,14 +1176,34 @@ def update_circuit_breaker_metrics():
 
 # Simple TTL cache: ``value`` is the last known active-device count,
 # ``last_refresh`` is the Unix timestamp of the last K8s API query.
-_iot_metric_cache = {"value": 0, "last_refresh": 0.0}
+_iot_metric_cache = {
+    "value": 0,
+    "last_refresh": 0.0,
+    "k8s_count": 0,
+    "db_count": 0,
+    "mem_count": 0,
+    "authoritative_source": "none",
+    "degraded": True,
+}
+
+
+def get_iot_metric_metadata() -> Dict[str, Any]:
+    """Return metadata for the cached IoT active-count metric."""
+    return {
+        "k8s_count": int(_iot_metric_cache.get("k8s_count", 0) or 0),
+        "db_count": int(_iot_metric_cache.get("db_count", 0) or 0),
+        "mem_count": int(_iot_metric_cache.get("mem_count", 0) or 0),
+        "authoritative_source": str(_iot_metric_cache.get("authoritative_source", "none")),
+        "degraded": bool(_iot_metric_cache.get("degraded", True)),
+        "cache_age_seconds": max(0, int(time.time() - float(_iot_metric_cache.get("last_refresh", 0.0) or 0.0))),
+    }
 
 
 def refresh_iot_active_metric() -> int:
     """Count active IoT pods via the Kubernetes API, with 120-second caching.
 
     The count is derived from three complementary sources and the
-    **maximum** is used as the authoritative value:
+    **maximum observed value** is used as the authoritative value:
 
     1. **K8s API** — list running pods in the ``smart-city`` namespace
        whose name starts with a known IoT-service prefix.
@@ -1170,6 +1216,12 @@ def refresh_iot_active_metric() -> int:
     Taking the maximum avoids under-reporting when one source is
     temporarily stale (e.g. the DB hasn't been updated yet, but pods are
     already running).
+
+    Important:
+        This function no longer fabricates an expected fallback value.
+        If Kubernetes/DB/registry sources are unavailable, the metric may
+        legitimately return 0 and should be treated as degraded telemetry,
+        not as a guaranteed fleet inventory count.
 
     Returns
     -------
@@ -1221,23 +1273,30 @@ def refresh_iot_active_metric() -> int:
     # --- Source 3: in-memory device registry ---
     mem_count = len(iot_devices)
 
-    # --- Source 4: Expected deployment count (fallback for portable deployments)
-    # When K8s API is not accessible from within pod (common in portable setups),
-    # use the expected count based on standard deployment manifests
-    expected_count = 13  # 2 traffic-camera + 2 healthcare-api + 2 parking-system + 3 env-sensor + 3 street-lighting + 1 mqtt-broker
-
-    # Use the highest value to avoid under-reporting, but prefer real counts when available
+    # Use the highest value across real sources to avoid under-reporting
+    # when one source is temporarily stale.
     active_count = max(k8s_count, db_count, mem_count)
-    
-    # Fallback logic: if K8s API returned 0 (likely unreachable from within pod), 
-    # use expected count as it's more accurate for demo purposes
-    if k8s_count == 0 and expected_count > active_count:
-        active_count = expected_count
+    source_counts = {
+        "k8s_pods": k8s_count,
+        "device_registry_db": db_count,
+        "device_registry_memory": mem_count,
+    }
+    authoritative_source = "none"
+    for name, count in source_counts.items():
+        if count == active_count and count > 0:
+            authoritative_source = name
+            break
+    degraded = (k8s_count == 0 and db_count == 0 and mem_count == 0)
 
     # Update the Prometheus gauge and refresh the TTL cache
     PROM_IOT_DEVICES_ACTIVE.set(active_count)
     _iot_metric_cache["value"] = active_count
     _iot_metric_cache["last_refresh"] = now
+    _iot_metric_cache["k8s_count"] = k8s_count
+    _iot_metric_cache["db_count"] = db_count
+    _iot_metric_cache["mem_count"] = mem_count
+    _iot_metric_cache["authoritative_source"] = authoritative_source
+    _iot_metric_cache["degraded"] = degraded
     return active_count
 
 

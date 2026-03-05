@@ -362,7 +362,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
             )
             try:
                 d["db"].add_throttled_alert(
-                    alert={**alert.dict(), "source": source},
+                    alert={**alert.model_dump(), "source": source},
                     throttle_reason=reason_val,
                 )
             except Exception as db_exc:
@@ -401,7 +401,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     is_security_source = source in ("falco", "suricata")
     
     if d["deduplicator"] and is_security_source:
-        should_analyze, cached_analysis = d["deduplicator"].should_analyze(alert.dict())
+        should_analyze, cached_analysis = d["deduplicator"].should_analyze(alert.model_dump())
         d["audit"](
             "DEDUP_CHECK",
             trace_id=request_trace_id,
@@ -430,7 +430,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         # Always use cloud LLM — no cost ceiling bypass, no local fallback
         logger.info("Analyzing alert with LLM...")
         d["audit"]("LLM_ANALYSIS_START", trace_id=request_trace_id, payload={"rule": alert.rule})
-        analysis, llm_used, llm_latency = await d["analyze"](alert.dict())
+        analysis, llm_used, llm_latency = await d["analyze"](alert.model_dump())
 
         # Update cost tracking
         if llm_used not in ("none", "cached"):
@@ -451,7 +451,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         d["fatigue"]["llm_triaged_total"] += 1
         # Cache the fresh analysis so future duplicates skip the LLM
         if d["deduplicator"] and is_security_source:
-            d["deduplicator"].cache_analysis(alert.dict(), analysis)
+            d["deduplicator"].cache_analysis(alert.model_dump(), analysis)
             logger.debug(f"Cached analysis for {source} alert: {alert.rule}")
 
     # --- Extract key fields from the LLM analysis for downstream logic ---
@@ -810,7 +810,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         "threat_type": analysis.get("threat_type", ""),
         "recommendations": analysis.get("recommendations", []),
         "automated_actions": actions_taken,
-        "raw_alert": alert.dict(),
+        "raw_alert": alert.model_dump(),
         "analysis": analysis_for_store,
         "llm_engine": llm_used,
     }
@@ -900,7 +900,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
     try:
         d["oi"].build_incident_for_operator(
             alert_id=alert_id,
-            alert_data=alert.dict(),
+            alert_data=alert.model_dump(),
             analysis=analysis,
             llm_model_used=llm_used,
             analysis_duration_ms=int(llm_latency * 1000),
@@ -1054,7 +1054,7 @@ async def process_alert(alert: Alert, request: Request, token=Depends(verify_tok
         # Do not flood SSE with throttled duplicates; they are tracked via
         # metrics/throttled_alerts and represented by surviving alert rows.
         if resp.status != "throttled":
-            await d["broadcast"]({"type": "alert_processed", "source": d["detect_source"](alert), "endpoint": "/api/alerts", "trace_id": resp.trace_id, **resp.dict()})
+            await d["broadcast"]({"type": "alert_processed", "source": d["detect_source"](alert), "endpoint": "/api/alerts", "trace_id": resp.trace_id, **resp.model_dump()})
         return resp
     except Exception as e:
         # On processing failure, still persist the raw alert so no data is
@@ -1069,7 +1069,7 @@ async def process_alert(alert: Alert, request: Request, token=Depends(verify_tok
             "priority": alert.priority, "severity": 0,
             "summary": f"Error processing alert: {str(e)}", "threat_type": "unknown",
             "recommendations": [], "automated_actions": [],
-            "raw_alert": alert.dict(), "analysis": {"error": str(e)},
+            "raw_alert": alert.model_dump(), "analysis": {"error": str(e)},
         }
         alert_id = d["db"].add_alert(alert_record)
         d["append_alert"]({**alert_record, "id": alert_id})
@@ -1149,7 +1149,7 @@ async def process_alert_internal(
                 "priority": alert.priority, "output": alert.output,
                 "output_fields": alert.output_fields,
                 "container_name": (alert.output_fields or {}).get("container.name", ""),
-                "trace_id": resp.trace_id, **resp.dict(),
+                "trace_id": resp.trace_id, **resp.model_dump(),
             })
         return resp
     except Exception as e:
@@ -1171,7 +1171,7 @@ async def process_alert_internal(
             "severity": 0,
             "summary": f"Error: {str(e)}", "threat_type": "unknown",
             "recommendations": [], "automated_actions": [],
-            "raw_alert": alert.dict(), "analysis": {"error": str(e)},
+            "raw_alert": alert.model_dump(), "analysis": {"error": str(e)},
         }
         alert_id = d["db"].add_alert(alert_record)
         d["append_alert"]({**alert_record, "id": alert_id})

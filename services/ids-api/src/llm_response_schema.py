@@ -164,7 +164,7 @@ class LLMAnalysisResponse(BaseModel):
             "unauthorized": "Unauthorized Access",
             "config error": "Configuration Error",
             "misconfiguration": "Configuration Error",
-            "denial of service": "Denial of Service",
+            "denial of service": "DDoS",
             "credential access": "Credential Access",
             "credential theft": "Credential Access",
             "lateral movement": "Lateral Movement",

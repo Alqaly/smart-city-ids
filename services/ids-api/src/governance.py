@@ -29,6 +29,11 @@ try:
 except Exception:
     db = None
 
+try:
+    from config import Config
+except Exception:
+    Config = None
+
 
 class AutomationMode(Enum):
     """
@@ -56,6 +61,25 @@ class AutomationMode(Enum):
     DRY_RUN = "manual"     # Map old "dry-run" to manual
 
 
+@dataclass(frozen=True)
+class AutoDecision:
+    """Compatibility wrapper for auto-execution decisions.
+
+    Behaves like:
+    - a boolean (`if decision:`) using `allowed`
+    - a 2-tuple (`allowed, reason = decision`) for existing code paths
+    """
+    allowed: bool
+    reason: str
+
+    def __bool__(self) -> bool:
+        return bool(self.allowed)
+
+    def __iter__(self):
+        yield self.allowed
+        yield self.reason
+
+
 @dataclass
 class PendingAction:
     """An action awaiting human approval."""
@@ -66,6 +90,7 @@ class PendingAction:
     reason: str
     recommended_by: str  # LLM engine that recommended it
     alert_id: Optional[str] = None
+    context: Dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     expires_at: Optional[float] = None
     status: str = "pending"  # pending, approved, rejected, expired, auto_executed
@@ -105,6 +130,7 @@ class GovernanceController:
     ASSISTED_MIN_CONFIDENCE = 0.70
     EMERGENCY_MIN_CONFIDENCE = 0.85
     EMERGENCY_SEVERITY = 10
+    AUTONOMOUS_FORCE_EXECUTION = False
     ACTION_EXPIRY_SECONDS = 300  # 5 minutes
     MAX_PENDING_ACTIONS = 100
     
@@ -128,6 +154,10 @@ class GovernanceController:
         self._assisted_min_confidence = float(os.getenv("ASSISTED_MIN_CONFIDENCE", str(self.ASSISTED_MIN_CONFIDENCE)))
         self._emergency_min_confidence = float(os.getenv("EMERGENCY_MIN_CONFIDENCE", str(self.EMERGENCY_MIN_CONFIDENCE)))
         self._emergency_severity = int(os.getenv("EMERGENCY_SEVERITY_THRESHOLD", str(self.EMERGENCY_SEVERITY)))
+        self._autonomous_force_execution = (
+            str(os.getenv("AUTONOMOUS_FORCE_EXECUTION", str(self.AUTONOMOUS_FORCE_EXECUTION))).strip().lower()
+            in ("1", "true", "yes", "on")
+        )
         self._action_expiry = int(os.getenv("ACTION_EXPIRY_SECONDS", str(self.ACTION_EXPIRY_SECONDS)))
         
         # State
@@ -154,7 +184,8 @@ class GovernanceController:
         logger.info(
             "GovernanceController initialized: "
             f"mode={self._mode.value}, autonomous={self._autonomous_min_confidence}, "
-            f"assisted={self._assisted_min_confidence}, emergency=sev{self._emergency_severity}/conf{self._emergency_min_confidence}"
+            f"assisted={self._assisted_min_confidence}, emergency=sev{self._emergency_severity}/conf{self._emergency_min_confidence}, "
+            f"autonomous_force_execution={self._autonomous_force_execution}"
         )
     
     def _parse_mode(self, mode_str: str) -> AutomationMode:
@@ -183,53 +214,95 @@ class GovernanceController:
         self._mode = value
         logger.warning(f"Automation mode changed: {old_mode.value} → {value.value}")
         self._log_audit("mode_change", {"old": old_mode.value, "new": value.value})
+
+    # Backward-compatible helper used by legacy tests/scripts.
+    def set_mode(self, value: AutomationMode | str):
+        if isinstance(value, str):
+            self.mode = self._parse_mode(value)
+        else:
+            self.mode = value
+        return self._mode
     
-    def should_auto_execute(self, action_type: str, severity: int,
-                           confidence: float = 0.0,
-                           target: Optional[str] = None) -> tuple[bool, str]:
+    def should_auto_execute(
+        self,
+        action_type: str,
+        severity: int,
+        confidence: Optional[float] = None,
+        target: Optional[str] = None,
+    ) -> AutoDecision:
         """
         Determine if an action should execute automatically.
         
         Returns:
             (should_execute, reason)
         """
-        self._metrics["total_actions_requested"] += 1
-        
+        # Legacy behavior for older callers/tests that pass only severity:
+        # make a severity-based decision when confidence is omitted.
+        if confidence is None:
+            if self._mode == AutomationMode.MANUAL:
+                return AutoDecision(False, "MANUAL mode: all actions require human approval")
+            if self._mode == AutomationMode.ASSISTED:
+                # Legacy behavior: lower severity auto, high severity approval.
+                if int(severity or 0) < 8:
+                    return AutoDecision(True, "ASSISTED mode (legacy severity path): low severity auto-execute")
+                return AutoDecision(False, "ASSISTED mode (legacy severity path): high severity requires approval")
+            if self._mode == AutomationMode.EMERGENCY:
+                return AutoDecision(int(severity or 0) >= int(self._emergency_severity), "EMERGENCY mode (legacy severity path)")
+            return AutoDecision(True, "AUTONOMOUS mode (legacy severity path)")
+
+        conf = float(confidence or 0.0)
+
         if (
             self._mode == AutomationMode.EMERGENCY
             and severity >= self._emergency_severity
-            and confidence >= self._emergency_min_confidence
+            and conf >= self._emergency_min_confidence
         ):
-            self._metrics["auto_executed"] += 1
-            return True, "EMERGENCY mode: severity/confidence threshold met"
+            return AutoDecision(True, "EMERGENCY mode: severity/confidence threshold met")
         
         if self._mode == AutomationMode.AUTONOMOUS:
-            if confidence >= self._autonomous_min_confidence:
-                self._metrics["auto_executed"] += 1
-                return True, f"AUTONOMOUS mode: confidence {confidence:.2f} >= {self._autonomous_min_confidence:.2f}"
-            return False, f"AUTONOMOUS mode: confidence {confidence:.2f} below threshold"
+            if self._autonomous_force_execution:
+                return AutoDecision(True, "AUTONOMOUS mode: force execution profile enabled")
+            if conf >= self._autonomous_min_confidence:
+                return AutoDecision(True, f"AUTONOMOUS mode: confidence {conf:.2f} >= {self._autonomous_min_confidence:.2f}")
+            return AutoDecision(False, f"AUTONOMOUS mode: confidence {conf:.2f} below threshold")
         
         elif self._mode == AutomationMode.ASSISTED:
-            if confidence >= self._autonomous_min_confidence:
-                self._metrics["auto_executed"] += 1
-                return True, "ASSISTED mode: high confidence auto-execute"
-            elif confidence >= self._assisted_min_confidence:
-                return False, (
-                    f"ASSISTED mode: confidence {confidence:.2f} in approval band "
+            if conf >= self._autonomous_min_confidence:
+                return AutoDecision(True, "ASSISTED mode: high confidence auto-execute")
+            elif conf >= self._assisted_min_confidence:
+                return AutoDecision(False, (
+                    f"ASSISTED mode: confidence {conf:.2f} in approval band "
                     f"[{self._assisted_min_confidence:.2f}, {self._autonomous_min_confidence:.2f})"
-                )
+                ))
             else:
-                return False, f"ASSISTED mode: confidence {confidence:.2f} below assisted threshold"
+                return AutoDecision(False, f"ASSISTED mode: confidence {conf:.2f} below assisted threshold")
         
         elif self._mode == AutomationMode.MANUAL:
-            return False, "MANUAL mode: all actions require human approval"
-        
-        return False, "Unknown mode"
+            return AutoDecision(False, "MANUAL mode: all actions require human approval")
+
+        return AutoDecision(False, "Unknown mode")
+
+    @property
+    def autonomous_force_execution(self) -> bool:
+        """Whether autonomous mode force-executes all LLM-recommended actions."""
+        return bool(self._autonomous_force_execution)
+
+    def set_autonomous_force_execution(self, enabled: bool) -> bool:
+        """Toggle full autonomous force-execution profile at runtime."""
+        with self._state_lock:
+            self._autonomous_force_execution = bool(enabled)
+        self._log_audit(
+            "autonomous_force_toggle",
+            {"enabled": bool(enabled), "mode": self._mode.value},
+        )
+        logger.warning("Autonomous force execution toggled: %s", bool(enabled))
+        return self._autonomous_force_execution
     
     def request_action(self, action_type: str, target: str, severity: int,
                       reason: str, recommended_by: str = "llm",
                       confidence: float = 0.0,
                       alert_id: Optional[str] = None,
+                      context: Optional[Dict[str, Any]] = None,
                       execute_callback: Optional[Callable] = None) -> Dict:
         """
         Request an automated action through the governance system.
@@ -246,9 +319,33 @@ class GovernanceController:
         Returns:
             Dict with status and action details
         """
-        should_execute, explanation = self.should_auto_execute(action_type, severity, confidence, target)
+        with self._state_lock:
+            self._metrics["total_actions_requested"] += 1
+
+        mode_name = self._mode.value
+        target_lower = str(target or "").lower()
+        protected_services = []
+        if Config is not None:
+            try:
+                protected_services = [str(s).strip().lower() for s in (Config.PROTECTED_SERVICES or []) if str(s).strip()]
+            except Exception:
+                protected_services = []
+        is_protected_target = any(ps and ps in target_lower for ps in protected_services)
+        emergency_bypass = (
+            mode_name == "emergency"
+            and int(severity or 0) >= int(self._emergency_severity)
+            and float(confidence or 0.0) >= float(self._emergency_min_confidence)
+        )
+
+        if is_protected_target and not emergency_bypass:
+            should_execute = False
+            explanation = "Protected target requires operator approval"
+        else:
+            should_execute, explanation = self.should_auto_execute(action_type, severity, confidence, target)
         
         if should_execute:
+            with self._state_lock:
+                self._metrics["auto_executed"] += 1
             # Execute immediately
             result = None
             if execute_callback:
@@ -266,6 +363,7 @@ class GovernanceController:
                 reason=reason,
                 recommended_by=recommended_by,
                 alert_id=alert_id,
+                context=context or {},
                 status="auto_executed",
                 execution_result=result
             )
@@ -289,6 +387,7 @@ class GovernanceController:
                 reason=reason,
                 recommended_by=recommended_by,
                 alert_id=alert_id,
+                context=context or {},
                 expires_at=time.time() + self._action_expiry
             )
             
@@ -335,6 +434,8 @@ class GovernanceController:
                 return {"status": "error", "reason": "Action not found or already processed"}
             
             action = self._pending_actions.pop(action_id)
+            if self._metrics["pending_approval"] > 0:
+                self._metrics["pending_approval"] -= 1
             
             if action.expires_at and time.time() > action.expires_at:
                 action.status = "expired"
@@ -390,6 +491,8 @@ class GovernanceController:
                 return {"status": "error", "reason": "Action not found or already processed"}
             
             action = self._pending_actions.pop(action_id)
+            if self._metrics["pending_approval"] > 0:
+                self._metrics["pending_approval"] -= 1
             action.status = "rejected"
             action.approved_by = rejected_by  # Reuse field for rejector
             action.approved_at = time.time()
@@ -424,15 +527,18 @@ class GovernanceController:
     def get_status(self) -> Dict:
         """Get governance system status."""
         self._cleanup_expired()
+        metrics = self._metrics.copy()
+        metrics["pending_approval"] = len(self._pending_actions)
         return {
             "mode": self._mode.value,
             "autonomous_min_confidence": self._autonomous_min_confidence,
+            "autonomous_force_execution": self._autonomous_force_execution,
             "assisted_min_confidence": self._assisted_min_confidence,
             "emergency_min_confidence": self._emergency_min_confidence,
             "emergency_severity": self._emergency_severity,
             "action_expiry_seconds": self._action_expiry,
             "pending_count": len(self._pending_actions),
-            "metrics": self._metrics.copy()
+            "metrics": metrics
         }
     
     def _generate_action_id(self) -> str:
@@ -453,6 +559,8 @@ class GovernanceController:
                 action = self._pending_actions.pop(aid)
                 action.status = "expired"
                 self._action_history.append(action)
+                if self._metrics["pending_approval"] > 0:
+                    self._metrics["pending_approval"] -= 1
                 self._metrics["expired"] += 1
                 logger.info(f"Action {aid} expired")
     
@@ -507,14 +615,20 @@ def set_automation_mode(mode: str) -> Dict:
 
 def request_automated_action(action_type: str, target: str, severity: int,
                             reason: str, execute_fn: Optional[Callable] = None,
-                            confidence: float = 0.0) -> Dict:
+                            confidence: float = 0.0,
+                            recommended_by: str = "llm",
+                            alert_id: Optional[str] = None,
+                            context: Optional[Dict[str, Any]] = None) -> Dict:
     """Request an automated action through governance."""
     return governance.request_action(
         action_type=action_type,
         target=target,
         severity=severity,
         reason=reason,
+        recommended_by=recommended_by,
+        alert_id=alert_id,
         confidence=confidence,
+        context=context,
         execute_callback=execute_fn
     )
 
@@ -536,3 +650,8 @@ def get_pending_actions() -> List[Dict]:
 def get_governance_status() -> Dict:
     """Get governance system status."""
     return governance.get_status()
+
+def set_autonomous_force_execution(enabled: bool) -> Dict:
+    """Enable/disable force-execution profile for autonomous mode."""
+    value = governance.set_autonomous_force_execution(bool(enabled))
+    return {"status": "success", "autonomous_force_execution": value}
