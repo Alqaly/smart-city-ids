@@ -92,6 +92,7 @@ Completed a live-stack hardening pass for governance mode validation, automation
   - Added optional `--enable-full-autonomy`.
   - `--enable-full-autonomy` now includes an explicit `autonomous_malicious` case to prove force-execution behavior (malicious path + audit trace) in the same run.
   - Added explicit audit-trace evidence output per mode.
+  - Added single-run lock (`flock`) to prevent concurrent governance tests from causing false restore-mode mismatches.
   - Added safe cleanup behavior:
     - rejects newly queued pending actions
     - restores original mode and autonomy-force state

@@ -9,6 +9,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
+# Prevent concurrent mode tests from stepping on each other.
+LOCK_FILE="${TMPDIR:-/tmp}/smart-city-ids-governance-mode-test.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "Another governance mode test is already running. Retry after it finishes." >&2
+    exit 1
+fi
+
 API_BASE=""
 AUTH_USER="${AUTH_USER:-admin}"
 AUTH_PASS="${AUTH_PASS:-admin}"
@@ -48,7 +56,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ensure_commands curl jq comm sed sort mktemp
+ensure_commands curl jq comm sed sort mktemp flock
 
 if [[ -z "$API_BASE" ]]; then
     API_BASE="$(resolve_ids_api_url || true)"
