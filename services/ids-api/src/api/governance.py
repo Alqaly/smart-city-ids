@@ -67,6 +67,7 @@ def _gov():
         get_governance_status,    # → dict with full dashboard data
         approve_pending_action,   # (id, operator, execute_fn, …) → dict
         reject_pending_action,    # (id, operator, reason) → dict
+        set_autonomous_force_execution,  # (enabled) -> dict
     )
     return {
         "governance": governance,
@@ -76,6 +77,7 @@ def _gov():
         "status": get_governance_status,
         "approve": approve_pending_action,
         "reject": reject_pending_action,
+        "set_force_autonomy": set_autonomous_force_execution,
     }
 
 
@@ -88,35 +90,17 @@ def _deps():
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/status")
-async def governance_status():
+async def governance_status(user: str = Depends(verify_token)):
     """Get Human-in-the-Loop governance status.
 
     Returns a comprehensive dashboard dict including the current mode,
     counts of pending / approved / rejected actions, and aggregate metrics.
     """
-    status = _gov()["status"]()
-    try:
-        _, db = _deps()
-        metrics = (status.get("metrics") or {}) if isinstance(status, dict) else {}
-        if db and isinstance(metrics, dict):
-            all_zero = all(int(metrics.get(k, 0) or 0) == 0 for k in (
-                "total_actions_requested", "auto_executed", "approved", "rejected", "pending_approval"
-            ))
-            if all_zero and hasattr(db, "get_prometheus_restore_data"):
-                restore = db.get_prometheus_restore_data() or {}
-                actions_executed = restore.get("actions_executed") or {}
-                executed_total = sum(int(v or 0) for v in actions_executed.values())
-                if executed_total > 0:
-                    metrics["auto_executed"] = executed_total
-                    metrics["total_actions_requested"] = max(int(metrics.get("total_actions_requested", 0) or 0), executed_total)
-                    status["metrics"] = metrics
-    except Exception:
-        pass
-    return status
+    return _gov()["status"]()
 
 
 @router.get("/mode")
-async def get_mode():
+async def get_mode(user: str = Depends(verify_token)):
     """Get current automation mode.
 
     Returns:
@@ -150,8 +134,19 @@ async def change_mode(mode: str = "assisted", user: str = Depends(verify_token))
     return result
 
 
+@router.post("/autonomy/force")
+async def set_autonomy_force(enabled: bool = False, user: str = Depends(verify_token)):
+    """Enable/disable full LLM autonomous force-execution profile.
+
+    When enabled, autonomous mode executes all recommended actions without
+    confidence gating (protected targets are still gated unless emergency
+    bypass criteria are met).
+    """
+    return _gov()["set_force_autonomy"](enabled)
+
+
 @router.get("/pending")
-async def list_pending_actions():
+async def list_pending_actions(user: str = Depends(verify_token)):
     """List actions that are waiting for human approval.
 
     In ``assisted`` or ``manual`` mode, high-severity automated actions are
@@ -204,34 +199,60 @@ async def approve_action(
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
 
-    # Build a closure that performs the actual K8s operation.
-    def execute():
-        """Execute the approved K8s action (isolate / scale / evict)."""
-        if k8s_automation:
-            if action.action_type == "isolate_pod":
-                return k8s_automation.isolate_pod(action.target)
-            elif action.action_type == "scale_up":
-                return k8s_automation.scale_deployment(action.target, 3)
-            elif action.action_type == "evict_pod":
-                return k8s_automation.evict_pod(action.target)
-        return {"success": False, "error": "K8s automation not available"}
-
-    # Approve and execute atomically via the governance engine.
-    result = g["approve"](action_id, operator, execute, operator_comment=comment)
+    # Approve in governance engine, then execute asynchronously in this route.
+    result = g["approve"](action_id, operator, None, operator_comment=comment)
 
     # Record metrics and persist audit trail on successful execution.
     if result.get("status") == "approved_and_executed":
+        execution_result = {"success": False, "error": "not_executed"}
+        if not k8s_automation:
+            execution_result = {"success": False, "error": "K8s automation not available"}
+        else:
+            try:
+                if action.action_type == "isolate_pod":
+                    await k8s_automation.isolate_pod(action.target, Config.K8S_NAMESPACE)
+                    execution_result = {"success": True}
+                elif action.action_type == "scale_up":
+                    await k8s_automation.scale_deployment(action.target, 3, Config.K8S_NAMESPACE)
+                    execution_result = {"success": True}
+                elif action.action_type == "block_ip":
+                    target_workload = None
+                    try:
+                        if isinstance(action.context, dict):
+                            target_workload = action.context.get("target_workload")
+                    except Exception:
+                        target_workload = None
+                    await k8s_automation.block_ip(
+                        action.target,
+                        Config.K8S_NAMESPACE,
+                        target_workload=target_workload,
+                    )
+                    execution_result = {"success": True}
+                elif action.action_type == "cordon_node":
+                    await k8s_automation.cordon_node(action.target)
+                    execution_result = {"success": True}
+                else:
+                    execution_result = {"success": False, "error": f"Unsupported action type: {action.action_type}"}
+            except Exception as exc:
+                execution_result = {"success": False, "error": str(exc)}
+
+        result["execution_result"] = execution_result
+        if execution_result.get("success"):
+            PROM_AUTOMATED_DECISIONS.labels(action_type=action.action_type).inc()
+            # Time-to-mitigation = seconds from action creation to approval/execution.
+            PROM_TIME_TO_MITIGATION.observe(max(0.0, time.time() - action.created_at))
+        else:
+            result["status"] = "approved_execution_failed"
+
         PROM_HUMAN_OVERRIDE_REQUESTS.labels(reason="approved").inc()
-        PROM_AUTOMATED_DECISIONS.labels(action_type=action.action_type).inc()
-        # Time-to-mitigation = seconds from action creation to approval.
-        PROM_TIME_TO_MITIGATION.observe(max(0.0, time.time() - action.created_at))
         # Persist to database for audit trail and compliance.
         db.add_automation_action({
             "alert_id": action.alert_id,
             "action_type": action.action_type,
             "target_resource": action.target,
             "target_namespace": Config.K8S_NAMESPACE,
-            "status": "approved_and_executed",
+            "status": "approved_and_executed" if execution_result.get("success") else "approved_execution_failed",
+            "error_message": execution_result.get("error"),
             "execution_time_ms": int(max(0.0, (time.time() - action.created_at)) * 1000),
             "mode": g["get_mode"](),
             "triggered_by": action.recommended_by,

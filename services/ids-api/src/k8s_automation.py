@@ -218,14 +218,25 @@ class K8sAutomation:
             logger.error(f"Failed to cordon node: {e}")
             raise
     
-    async def block_ip(self, ip_address: str, namespace: str = "smart-city"):
-        """Block source IP using NetworkPolicy"""
+    async def block_ip(self, ip_address: str, namespace: str = "smart-city", target_workload: Optional[str] = None):
+        """Block source IP for a specific workload using a scoped egress NetworkPolicy.
+
+        Safety:
+        - Never uses `podSelector: {}` to avoid namespace-wide lockouts.
+        - Requires `target_workload` so only affected pods are constrained.
+        """
         # Dry-run: log intent but do not execute
         if self.automation_mode == 'dry-run':
-            logger.info(f"[DRY-RUN] Would block IP: {ip_address} in {namespace}")
+            logger.info(
+                f"[DRY-RUN] Would block IP: {ip_address} in {namespace} "
+                f"(target_workload={target_workload})"
+            )
             return
 
         try:
+            if not target_workload:
+                raise ValueError("target_workload is required for safe IP blocking")
+
             policy_name = f"block-{ip_address.replace('.', '-')}"
             network_policy = client.V1NetworkPolicy(
                 metadata=client.V1ObjectMeta(
@@ -233,15 +244,15 @@ class K8sAutomation:
                     namespace=namespace
                 ),
                 spec=client.V1NetworkPolicySpec(
-                    pod_selector=client.V1LabelSelector(),
-                    policy_types=["Ingress"],
-                    ingress=[
-                        client.V1NetworkPolicyIngressRule(
-                            _from=[
+                    pod_selector=client.V1LabelSelector(match_labels={"app": target_workload}),
+                    policy_types=["Egress"],
+                    egress=[
+                        client.V1NetworkPolicyEgressRule(
+                            to=[
                                 client.V1NetworkPolicyPeer(
                                     ip_block=client.V1IPBlock(
-                                        cidr=f"{ip_address}/32",
-                                        _except=[]
+                                        cidr="0.0.0.0/0",
+                                        _except=[f"{ip_address}/32"]
                                     )
                                 )
                             ]
@@ -257,11 +268,11 @@ class K8sAutomation:
                 timeout_s=5.0,
             )
             
-            logger.info(f"✅ Blocked IP: {ip_address}")
+            logger.info(f"✅ Scoped IP block applied: {ip_address} (workload={target_workload})")
             
         except ApiException as e:
             if e.status == 409:
-                logger.warning(f"IP block already exists for {ip_address}")
+                logger.warning(f"IP block already exists for {ip_address} (workload={target_workload})")
             else:
                 logger.error(f"Failed to block IP: {e}")
                 raise

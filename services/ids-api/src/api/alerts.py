@@ -74,6 +74,7 @@ Design decisions:
 import asyncio
 import json as json_mod          # aliased to avoid shadowing common var names
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -159,14 +160,14 @@ def _deps():
         alert_trace_id,              # generates a deterministic trace ID for an alert
         analyze_with_fallback,       # calls primary LLM, falls back to secondary
         add_audit_event,             # enterprise timeline/audit log helper
-        can_execute_action,          # governance check: mode + protected-service guard
+        append_alert_memory,         # bounded in-memory alert cache append helper
         classify_decision_outcome,   # maps severity int → outcome label for metrics
         compute_human_review_required,  # threshold check: does a human need to approve?
         detect_alert_source,         # heuristic: "falco" | "suricata" | "unknown"
         sse_broadcast,               # fans out an event dict to all connected SSE queues
     )
     # --- Governance mode (autonomous / supervised / manual) ---
-    from governance import get_automation_mode
+    from governance import get_automation_mode, request_automated_action
 
     return {
         # State objects
@@ -185,12 +186,13 @@ def _deps():
         "trace_id": alert_trace_id,
         "analyze": analyze_with_fallback,
         "audit": add_audit_event,
-        "can_execute": can_execute_action,
+        "append_alert": append_alert_memory,
         "classify_outcome": classify_decision_outcome,
         "human_review": compute_human_review_required,
         "detect_source": detect_alert_source,
         "broadcast": sse_broadcast,
         "get_mode": get_automation_mode,
+        "request_action": request_automated_action,
     }
 
 
@@ -510,89 +512,174 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         or alert.output_fields.get("k8s.pod")
         or ""
     )
-    # Derive service name: strip hash suffix (e.g., "traffic-camera-abc123" → "traffic-camera")
-    service_name = "-".join(container_name.split("-")[:-2]) if container_name.count("-") >= 2 else container_name.split("-")[0] if container_name else ""
+    # Derive workload/service name safely:
+    # - Pod-like names: "<workload>-<rs-hash>-<pod-suffix>" -> "<workload>"
+    # - Plain service/workload names remain unchanged (e.g., "traffic-camera")
+    service_name = ""
+    if container_name:
+        parts = container_name.split("-")
+        looks_like_pod_name = (
+            len(parts) >= 3
+            and re.fullmatch(r"[a-z0-9]{6,}", parts[-2] or "") is not None
+            and re.fullmatch(r"[a-z0-9]{5,}", parts[-1] or "") is not None
+        )
+        service_name = "-".join(parts[:-2]) if looks_like_pod_name else container_name
     src_ip = alert.output_fields.get("fd.sip", alert.output_fields.get("src.ip", ""))
 
     # Get LLM-recommended actions
     llm_recommended_actions = analysis.get("automated_actions", []) if isinstance(analysis, dict) else []
     
-    # Update governance metrics for tracking in Automation tab
-    def _update_governance_metrics(action_executed=True):
-        try:
-            from governance import governance
-            governance._metrics["total_actions_requested"] += 1
-            if action_executed:
-                governance._metrics["auto_executed"] += 1
-            else:
-                governance._metrics["rejected"] += 1
-        except Exception:
-            pass
-    
-    def _try_action(action_type, target, action_label=None):
-        """Try to execute a K8s action with governance checks and verbose logging."""
+    async def _execute_k8s_action(action_type: str, target: str):
+        """Execute supported K8s actions when governance approves auto-execution."""
+        if not d["k8s"]:
+            return {"success": False, "error": "k8s_automation_unavailable"}
+        if action_type == "isolate_pod":
+            await d["k8s"].isolate_pod(target, Config.K8S_NAMESPACE)
+            return {"success": True}
+        if action_type == "scale_up":
+            await d["k8s"].scale_deployment(target, 3, Config.K8S_NAMESPACE)
+            return {"success": True}
+        if action_type == "block_ip":
+            workload_scope = service_name or container_name
+            await d["k8s"].block_ip(target, Config.K8S_NAMESPACE, target_workload=workload_scope)
+            return {"success": True}
+        if action_type == "cordon_node":
+            await d["k8s"].cordon_node(target)
+            return {"success": True}
+        return {"success": False, "error": f"unsupported_action:{action_type}"}
+
+    async def _try_action(action_type, target, action_label=None):
+        """Route LLM-recommended action through governance mode and execute if approved."""
         label = action_label or f"{action_type}({target})"
-        can_exec, reason = d["can_execute"](action_type, target, severity, confidence)
-        if can_exec:
-            actions_taken.append(label)
-            d["metrics"]["automated_actions"] += 1
-            _update_governance_metrics(action_executed=True)
-            PROM_ACTIONS_EXECUTED_TOTAL.labels(action=action_type).inc()
-            PROM_AUTOMATED_DECISIONS.labels(action_type=action_type).inc()
-            PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
-            if action_type == "isolate_pod":
-                PROM_K8S_PODS_ISOLATED_TOTAL.inc()
-            elif action_type == "scale_up":
-                PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=target).inc()
+        decision = d["request_action"](
+            action_type=action_type,
+            target=target,
+            severity=int(severity or 0),
+            reason=f"LLM recommended '{action_type}' for rule '{alert.rule}'",
+            recommended_by=llm_used,
+            confidence=float(confidence or 0.0),
+            alert_id=None,
+            context={
+                "target_workload": (service_name or container_name),
+                "rule": alert.rule,
+                "trace_id": request_trace_id,
+            },
+            execute_fn=None,
+        )
+
+        decision_status = str(decision.get("status") or "")
+        explanation = str(decision.get("explanation") or decision.get("reason") or "")
+        mode_now = d["get_mode"]()
+
+        if decision_status == "executed":
+            exec_result = await _execute_k8s_action(action_type, target)
+            if exec_result.get("success"):
+                actions_taken.append(label)
+                d["metrics"]["automated_actions"] += 1
+                PROM_ACTIONS_EXECUTED_TOTAL.labels(action=action_type).inc()
+                PROM_AUTOMATED_DECISIONS.labels(action_type=action_type).inc()
+                PROM_TIME_TO_MITIGATION.observe(time.perf_counter() - started)
+                if action_type == "isolate_pod":
+                    PROM_K8S_PODS_ISOLATED_TOTAL.inc()
+                elif action_type == "scale_up":
+                    PROM_K8S_SCALE_OPERATIONS.labels(operation="scale_up", service=target).inc()
+                action_records.append({
+                    "action_type": action_type,
+                    "target_resource": target,
+                    "target_namespace": Config.K8S_NAMESPACE,
+                    "status": "executed",
+                    "execution_time_ms": int((time.perf_counter() - started) * 1000),
+                    "mode": mode_now,
+                    "triggered_by": llm_used,
+                    "severity": severity,
+                    "reason": explanation or f"Governance auto-approved action in mode={mode_now}",
+                })
+                d["audit"](
+                    "ACTION_EXECUTED",
+                    trace_id=request_trace_id,
+                    severity=int(severity),
+                    payload={"action": action_type, "target": target, "mode": mode_now},
+                )
+            else:
+                err = str(exec_result.get("error") or "execution_failed")
+                blocked_label = f"FAILED:{action_type}({target}):{err}"
+                actions_taken.append(blocked_label)
+                PROM_ACTIONS_BLOCKED_TOTAL.labels(action=action_type, reason="execution_failed").inc()
+                action_records.append({
+                    "action_type": action_type,
+                    "target_resource": target,
+                    "target_namespace": Config.K8S_NAMESPACE,
+                    "status": "execution_failed",
+                    "error_message": err,
+                    "mode": mode_now,
+                    "triggered_by": llm_used,
+                    "severity": severity,
+                    "reason": f"Governance approved but K8s execution failed: {err}",
+                })
+                d["audit"](
+                    "ACTION_EXECUTED",
+                    trace_id=request_trace_id,
+                    severity=int(severity),
+                    status="error",
+                    payload={"action": action_type, "target": target, "error": err},
+                )
+                logger.warning(
+                    f"⚠️ ACTION APPROVED BUT FAILED: {action_type} → {target} "
+                    f"(error={err}, severity={severity}, mode={mode_now})"
+                )
+            return
+
+        if decision_status == "pending_approval":
+            actions_taken.append(f"PENDING:{label}")
             action_records.append({
                 "action_type": action_type,
                 "target_resource": target,
                 "target_namespace": Config.K8S_NAMESPACE,
-                "status": "executed",
-                "execution_time_ms": int((time.perf_counter() - started) * 1000),
-                "mode": d["get_mode"](),
+                "status": "pending_approval",
+                "mode": mode_now,
                 "triggered_by": llm_used,
                 "severity": severity,
-                "reason": f"LLM recommended '{action_type}' | Severity {severity}/10 | Threat: {threat_type}",
+                "reason": explanation or "Queued for operator approval",
             })
             d["audit"](
                 "ACTION_EXECUTED",
                 trace_id=request_trace_id,
                 severity=int(severity),
-                payload={"action": action_type, "target": target, "mode": d["get_mode"]()},
+                status="pending_approval",
+                payload={"action": action_type, "target": target, "mode": mode_now},
             )
             logger.info(
-                f"✅ ACTION EXECUTED: {action_type} → {target} "
-                f"(severity={severity}, threat={threat_type}, engine={llm_used}, "
-                f"mode={d['get_mode']()}, latency={int((time.perf_counter() - started) * 1000)}ms)"
+                f"⏳ ACTION QUEUED: {action_type} → {target} "
+                f"(severity={severity}, mode={mode_now}, reason={explanation})"
             )
-        else:
-            blocked_label = f"BLOCKED:{action_type}({target}):{reason}"
-            actions_taken.append(blocked_label)
-            _update_governance_metrics(action_executed=False)
-            PROM_ACTIONS_BLOCKED_TOTAL.labels(action=action_type, reason="blocked").inc()
-            action_records.append({
-                "action_type": action_type,
-                "target_resource": target,
-                "target_namespace": Config.K8S_NAMESPACE,
-                "status": "blocked",
-                "error_message": reason,
-                "mode": d["get_mode"](),
-                "triggered_by": llm_used,
-                "severity": severity,
-                "reason": f"Governance blocked: {reason}",
-            })
-            d["audit"](
-                "ACTION_EXECUTED",
-                trace_id=request_trace_id,
-                severity=int(severity),
-                status="blocked",
-                payload={"action": action_type, "target": target, "reason": reason},
-            )
-            logger.warning(
-                f"🚫 ACTION BLOCKED: {action_type} → {target} "
-                f"(reason={reason}, severity={severity}, mode={d['get_mode']()})"
-            )
+            return
+
+        blocked_reason = explanation or "governance_rejected"
+        blocked_label = f"BLOCKED:{action_type}({target}):{blocked_reason}"
+        actions_taken.append(blocked_label)
+        PROM_ACTIONS_BLOCKED_TOTAL.labels(action=action_type, reason="governance").inc()
+        action_records.append({
+            "action_type": action_type,
+            "target_resource": target,
+            "target_namespace": Config.K8S_NAMESPACE,
+            "status": "blocked",
+            "error_message": blocked_reason,
+            "mode": mode_now,
+            "triggered_by": llm_used,
+            "severity": severity,
+            "reason": f"Governance blocked: {blocked_reason}",
+        })
+        d["audit"](
+            "ACTION_EXECUTED",
+            trace_id=request_trace_id,
+            severity=int(severity),
+            status="blocked",
+            payload={"action": action_type, "target": target, "reason": blocked_reason},
+        )
+        logger.warning(
+            f"🚫 ACTION BLOCKED: {action_type} → {target} "
+            f"(reason={blocked_reason}, severity={severity}, mode={mode_now})"
+        )
 
     if d["k8s"]:
         # Execute LLM-recommended actions (validated against severity thresholds)
@@ -601,7 +688,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         # --- Critical severity (>= 8): isolate_pod + any LLM-recommended actions ---
         if severity >= 8 and container_name:
             if "isolate_pod" not in executed_actions:
-                _try_action("isolate_pod", container_name, f"isolate_pod({container_name})")
+                await _try_action("isolate_pod", container_name, f"isolate_pod({container_name})")
                 executed_actions.add("isolate_pod")
 
             # Execute additional LLM-recommended actions
@@ -609,13 +696,13 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
                 if action in executed_actions:
                     continue
                 if action == "block_ip" and src_ip:
-                    _try_action("block_ip", src_ip, f"block_ip({src_ip})")
+                    await _try_action("block_ip", src_ip, f"block_ip({src_ip})")
                     executed_actions.add("block_ip")
                 elif action == "cordon_node" and container_name:
-                    _try_action("cordon_node", container_name, f"cordon_node({container_name})")
+                    await _try_action("cordon_node", container_name, f"cordon_node({container_name})")
                     executed_actions.add("cordon_node")
                 elif action == "restart_pod" and container_name:
-                    _try_action("restart_pod", container_name, f"restart_pod({container_name})")
+                    await _try_action("restart_pod", container_name, f"restart_pod({container_name})")
                     executed_actions.add("restart_pod")
                 elif action == "alert_team":
                     actions_taken.append("alert_team")
@@ -633,7 +720,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         # --- High severity (>= 6): scale_up + LLM-recommended actions ---
         elif severity >= 6 and service_name:
             if "scale_up" not in executed_actions:
-                _try_action("scale_up", service_name, f"scale_up({service_name})")
+                await _try_action("scale_up", service_name, f"scale_up({service_name})")
                 executed_actions.add("scale_up")
 
             # Execute additional LLM-recommended actions for high severity
@@ -641,10 +728,10 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
                 if action in executed_actions:
                     continue
                 if action == "isolate_pod" and container_name:
-                    _try_action("isolate_pod", container_name, f"isolate_pod({container_name})")
+                    await _try_action("isolate_pod", container_name, f"isolate_pod({container_name})")
                     executed_actions.add("isolate_pod")
                 elif action == "block_ip" and src_ip:
-                    _try_action("block_ip", src_ip, f"block_ip({src_ip})")
+                    await _try_action("block_ip", src_ip, f"block_ip({src_ip})")
                     executed_actions.add("block_ip")
                 elif action == "alert_team":
                     actions_taken.append("alert_team")
@@ -784,6 +871,25 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
             except Exception as tr_exc:
                 logger.warning(f"ThreatResponse creation failed for alert {alert_id}: {tr_exc}")
 
+    # Add governance action steps to the alert trace so /api/audit/trace/alert-<id>
+    # shows decision evidence (pending, executed, blocked) for examiner review.
+    for action in action_records:
+        d["audit"](
+            "GOVERNANCE_ACTION",
+            trace_id=trace_id,
+            severity=int(action.get("severity") or severity or 0),
+            status=str(action.get("status") or "unknown"),
+            payload={
+                "rule": alert.rule,
+                "mode": action.get("mode") or d["get_mode"](),
+                "action_type": action.get("action_type"),
+                "target": action.get("target_resource"),
+                "decision_status": action.get("status"),
+                "reason": action.get("reason") or action.get("error_message"),
+                "triggered_by": action.get("triggered_by") or llm_used,
+            },
+        )
+
     # ===================================================================
     # Stage 7: Operator incident view
     # ===================================================================
@@ -798,14 +904,14 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
             analysis=analysis,
             llm_model_used=llm_used,
             analysis_duration_ms=int(llm_latency * 1000),
-            automation_mode=Config.AUTOMATION_MODE,
+            automation_mode=d["get_mode"](),
             protected_services=Config.PROTECTED_SERVICES,
         )
     except Exception as e:
         logger.warning(f"Could not build operator incident: {e}")
 
     # Append to the in-memory alert list for fast GET /api/alerts access
-    d["alerts_db"].append(alert_record)
+    d["append_alert"](alert_record)
 
     # Recompute the running automation rate (percentage of alerts that
     # triggered at least one automated action)
@@ -966,7 +1072,7 @@ async def process_alert(alert: Alert, request: Request, token=Depends(verify_tok
             "raw_alert": alert.dict(), "analysis": {"error": str(e)},
         }
         alert_id = d["db"].add_alert(alert_record)
-        d["alerts_db"].append({**alert_record, "id": alert_id})
+        d["append_alert"]({**alert_record, "id": alert_id})
         return AlertResponse(status="error", alert_id=alert_id, trace_id=d["trace_id"](alert_id), error=str(e))
     finally:
         # Always release the request queue slot, even on error, to prevent
@@ -1068,7 +1174,7 @@ async def process_alert_internal(
             "raw_alert": alert.dict(), "analysis": {"error": str(e)},
         }
         alert_id = d["db"].add_alert(alert_record)
-        d["alerts_db"].append({**alert_record, "id": alert_id})
+        d["append_alert"]({**alert_record, "id": alert_id})
         return AlertResponse(status="error", alert_id=alert_id, trace_id=d["trace_id"](alert_id), error=str(e))
     finally:
         # Release the queue slot to prevent starvation

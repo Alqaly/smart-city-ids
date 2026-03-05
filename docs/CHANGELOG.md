@@ -4,6 +4,79 @@ All notable changes to the Smart City IDS project.
 
 ---
 
+## [Unreleased] Governance Validation + Automation Control Hardening — 2026-03-05
+
+### Summary
+
+Completed a live-stack hardening pass for governance mode validation, automation UI reliability, and operator help guidance. Focus was end-to-end behavior with real APIs and safe cleanup semantics.
+
+### Automation / Governance
+
+- **`services/ids-api/src/governance.py`**
+  - Added runtime support for autonomous force-execution profile:
+    - `autonomous_force_execution` status field
+    - `set_autonomous_force_execution(...)` toggle
+  - Added `context` to pending actions so approval-time execution can use scoped target metadata.
+
+- **`services/ids-api/src/api/governance.py`**
+  - Added authenticated endpoint:
+    - `POST /api/governance/autonomy/force?enabled=true|false`
+  - Approval path for `block_ip` now passes `target_workload` from action context to K8s automation.
+
+- **`services/ids-api/src/api/alerts.py`**
+  - Fixed workload derivation for action targeting:
+    - preserves full workload names (e.g., `traffic-camera`)
+    - strips hash suffix only for pod-like names.
+  - `block_ip` actions now consistently send scoped workload context to governance and executor.
+
+- **`services/ids-api/src/k8s_automation.py`**
+  - Hardened `block_ip(...)` to prevent namespace-wide lockouts:
+    - requires `target_workload`
+    - uses scoped `podSelector`
+    - applies egress exception rule for blocked IP.
+
+### Dashboard / Help UX
+
+- **`services/ids-api/static/index.html`**
+  - Finalized Automation Control panel elements:
+    - governance mode state/help consistency
+    - full-autonomy profile control state text
+    - action history panel
+    - pending queue empty/error messaging.
+  - Updated help modal guidance and run sequence, including full-autonomy E2E option.
+
+- **`services/ids-api/static/help.html`**
+  - Rewritten as operator-facing guide with:
+    - panel map
+    - governance mode semantics
+    - full trace interpretation
+    - live validation commands
+    - troubleshooting workflow.
+
+### Test / Validation Scripts
+
+- **`scripts/test-governance-modes.sh`**
+  - Consolidated live governance mode test flow for `manual → assisted → autonomous`.
+  - Added strict auth + JSON/HTTP failure handling.
+  - Added optional `--enable-full-autonomy`.
+  - `--enable-full-autonomy` now includes an explicit `autonomous_malicious` case to prove force-execution behavior (malicious path + audit trace) in the same run.
+  - Added explicit audit-trace evidence output per mode.
+  - Added safe cleanup behavior:
+    - rejects newly queued pending actions
+    - restores original mode and autonomy-force state
+    - removes temporary test `block-198-51-100-42` policy when script created it.
+
+- **`scripts/e2e-verbose-test.sh`**
+  - Integrated governance mode validation as a required stage.
+  - Added optional pass-through: `E2E_ENABLE_FULL_AUTONOMY=1`.
+
+### Validation Notes
+
+- Live checks executed after deployment:
+  - `GET /health` and `GET /ui` reachable on `http://localhost:30800`
+  - governance mode E2E script passes with mode restore
+  - quick E2E script passes and fails-fast on governance regression.
+
 ## [Unreleased] Research-Grade IoT Realism + Resilience Improvements — 2026-02-24
 
 ### Summary

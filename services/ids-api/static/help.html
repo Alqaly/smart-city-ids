@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart City IDS - Operator Guide</title>
+  <style>
+    :root{
+      --bg:#0b0f17; --panel:#121826; --txt:#e5e7eb; --muted:#94a3b8;
+      --cyan:#38bdf8; --green:#22c55e; --amber:#f59e0b; --red:#ef4444;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--txt)}
+    .wrap{max-width:1120px;margin:0 auto;padding:22px 18px 36px}
+    .panel{background:var(--panel);border:1px solid rgba(148,163,184,.2);border-radius:12px;padding:16px}
+    h1{font-size:24px;margin:0 0 8px}
+    h2{font-size:18px;margin:18px 0 10px;color:#cbd5e1}
+    h3{font-size:15px;margin:12px 0 6px;color:#dbeafe}
+    p,li{font-size:14px;line-height:1.6;color:#cbd5e1}
+    code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    pre{background:#0a0f1a;border:1px solid rgba(148,163,184,.2);padding:10px;border-radius:10px;overflow:auto}
+    .muted{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+    .card{border:1px solid rgba(148,163,184,.2);border-radius:10px;padding:12px;background:rgba(255,255,255,.01)}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid rgba(148,163,184,.25)}
+    .ok{color:#86efac;border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.12)}
+    .warn{color:#fde68a;border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.12)}
+    .bad{color:#fecaca;border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.12)}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid rgba(148,163,184,.2);padding:8px;text-align:left;font-size:13px}
+    th{color:#cbd5e1;background:rgba(255,255,255,.02)}
+    a{color:var(--cyan)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Smart City IDS - Operator Guide</h1>
+    <p class="muted">Truth-first guide for analysts and examiners. All steps below use live IDS APIs and cluster behavior, not mock data.</p>
+
+    <div class="panel">
+      <h2>1) Dashboard Map</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Overview</h3>
+          <p>Current system posture: alert volume, throughput, component health, IoT counting source metadata, and provider availability.</p>
+        </div>
+        <div class="card">
+          <h3>Alerts</h3>
+          <p>Alert history with severity, detector source, Kubernetes context, LLM outcome, and trace access.</p>
+        </div>
+        <div class="card">
+          <h3>IoT Mesh</h3>
+          <p>Device/workload visibility and fleet status. Count quality is source-qualified (cluster telemetry vs fallback source).</p>
+        </div>
+        <div class="card">
+          <h3>K8s Cluster</h3>
+          <p>Operational status for IDS, database, detectors, and supporting workloads.</p>
+        </div>
+        <div class="card">
+          <h3>LLM Control</h3>
+          <p>Provider health, failover chain, token/cost estimate metrics, routing strategy, and live provider diagnostics.</p>
+        </div>
+        <div class="card">
+          <h3>Automation</h3>
+          <p>Governance mode, action counters, pending queue, and historical decisions with actor/status trail.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px;">
+      <h2>2) Automation Control (Governance)</h2>
+      <table>
+        <thead>
+          <tr><th>Mode</th><th>Execution Behavior</th><th>Expected Queue Behavior</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>manual</code></td>
+            <td>LLM can recommend actions, but execution is blocked pending analyst approval.</td>
+            <td><code>pending_approval</code> increases for actionable events.</td>
+          </tr>
+          <tr>
+            <td><code>assisted</code></td>
+            <td>High-confidence actions may execute automatically; medium-confidence actions are queued.</td>
+            <td>Pending queue varies by confidence/policy thresholds.</td>
+          </tr>
+          <tr>
+            <td><code>autonomous</code></td>
+            <td>Policy-approved actions execute automatically when thresholds are met.</td>
+            <td>Benign alerts should normally produce no pending actions.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        <strong>LLM Full Autonomy Profile:</strong> optional runtime profile that removes confidence gating in autonomous mode.
+        Protected targets are still constrained by governance safety checks.
+      </p>
+      <p>
+        Interactive UI exposes only <code>manual</code>, <code>assisted</code>, and <code>autonomous</code>.
+        Emergency/bypass capabilities are out-of-band and intentionally not UI-controllable.
+      </p>
+    </div>
+
+    <div class="panel" style="margin-top:14px;">
+      <h2>3) How to Read "View Full LLM Trace"</h2>
+      <ul>
+        <li><strong>Parsed output:</strong> normalized severity, threat type, confidence, and recommended actions.</li>
+        <li><strong>System prompt:</strong> IDS policy/instruction context sent to provider.</li>
+        <li><strong>User prompt:</strong> detector payload and normalization context.</li>
+        <li><strong>Raw response:</strong> unmodified provider completion for auditability.</li>
+        <li><strong>Metadata:</strong> provider, model, latency, trace source.</li>
+      </ul>
+      <p>
+        <span class="pill ok">Analyzed · provider</span> means a live provider call was made.
+        <span class="pill warn">Cached analysis</span> means output was served from dedup/cache logic.
+      </p>
+      <p>If a row reports missing inline trace, use the trace identifier and query <code>/api/audit/trace/&lt;trace_id&gt;</code>.</p>
+    </div>
+
+    <div class="panel" style="margin-top:14px;">
+      <h2>4) Live Validation Commands</h2>
+      <pre>curl -s -o /dev/null -w "HEALTH:%{http_code}\n" http://localhost:30800/health
+curl -s -o /dev/null -w "UI:%{http_code}\n" http://localhost:30800/ui
+
+bash scripts/test-governance-modes.sh --api-url http://localhost:30800
+bash scripts/e2e-verbose-test.sh --quick</pre>
+      <p>Use <code>E2E_ENABLE_FULL_AUTONOMY=1</code> with the E2E script if you want to include force-autonomy profile in the run.</p>
+    </div>
+
+    <div class="panel" style="margin-top:14px;">
+      <h2>5) Troubleshooting</h2>
+      <h3>Automation panel shows unavailable/session expired</h3>
+      <ul>
+        <li>Sign in again to refresh token.</li>
+        <li>Check governance APIs directly with bearer token.</li>
+      </ul>
+      <pre>TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' \
+  http://localhost:30800/api/auth/login | jq -r '.access_token')
+
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/governance/status | jq
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/governance/pending | jq</pre>
+
+      <h3>Database shows memory fallback</h3>
+      <ul>
+        <li>Check for restrictive network policies and DB connectivity.</li>
+        <li>Verify health endpoint and restart IDS API deployment if needed.</li>
+      </ul>
+      <pre>curl -s http://localhost:30800/health | jq '.components.database'
+kubectl get networkpolicy -n smart-city
+kubectl rollout restart deploy/ids-api -n smart-city</pre>
+    </div>
+  </div>
+</body>
+</html>

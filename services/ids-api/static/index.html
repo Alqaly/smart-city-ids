@@ -107,6 +107,9 @@
                 <span id="govPill"    class="pill" title="Automation mode for Kubernetes response actions (click to manage)">Automation —</span>
                 <div style="width:1px;height:24px;background:rgba(255,255,255,0.1);margin:0 4px;"></div>
                 <span id="uptimeLabel" style="font-size:11px;color:#606080;font-family:'JetBrains Mono',monospace;">Uptime: —</span>
+                <button onclick="app.openHelp()" style="padding:7px 14px;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:#7dd3fc;border-radius:8px;font-size:13px;cursor:pointer;">
+                    <i class="fas fa-circle-question mr-1"></i>Help
+                </button>
                 <button onclick="app.logout()" style="padding:7px 14px;background:rgba(255,51,102,0.12);border:1px solid rgba(255,51,102,0.3);color:#ff6688;border-radius:8px;font-size:13px;cursor:pointer;">
                     <i class="fas fa-sign-out-alt mr-1"></i>Exit
                 </button>
@@ -240,7 +243,7 @@
         <div class="stat-card" id="costCard">
             <div class="stat-label"><i class="fas fa-dollar-sign mr-1"></i> Total Cost Today (USD)</div>
             <div class="stat-value" id="llmCtrlCost" style="font-size:30px;color:#4ade80;">$0.00</div>
-            <div class="stat-sub" id="llmCtrlCostSub">0 calls today · threshold $5.00</div>
+            <div class="stat-sub" id="llmCtrlCostSub">0 calls today · estimated cost · threshold $5.00</div>
         </div>
 
         <!-- Total Tokens Used Today -->
@@ -263,7 +266,7 @@
         <div class="stat-card">
             <div class="stat-label"><i class="fas fa-calendar-week mr-1"></i> Total Cost (Last 7 Days)</div>
             <div class="stat-value" id="llmCtrlCostWeek" style="font-size:26px;color:#a0a0b0;">$0.00</div>
-            <div class="stat-sub" id="llmCtrlCostWeekSub">0 calls · window: last 7 days</div>
+            <div class="stat-sub" id="llmCtrlCostWeekSub">0 calls · estimated cost · window: last 7 days</div>
         </div>
         <div class="stat-card">
             <div class="stat-label"><i class="fas fa-coins mr-1"></i> Total Tokens (Last 7 Days)</div>
@@ -305,7 +308,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
             <div>
                 <h3 style="font-size:15px;font-weight:700;margin:0;"><i class="fas fa-table mr-2" style="color:#38bdf8;"></i>Provider Breakdown (today)</h3>
-                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Provider Name · Status · API Calls · Tokens · Estimated Cost</p>
+                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Provider Name · Status · API Calls · Tokens · Estimated Cost (token-based)</p>
             </div>
             <div style="font-size:11px;color:#606080;">Source: DB-backed usage log</div>
         </div>
@@ -511,46 +514,99 @@
             <button onclick="app.refreshGovernance(true)" style="padding:8px 16px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:8px;font-size:13px;cursor:pointer;"><i class="fas fa-sync-alt mr-2"></i>Refresh</button>
         </div>
 
-        <div style="margin-top:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span style="font-size:11px;color:#606080;text-transform:uppercase;font-weight:800;letter-spacing:.06em;">Current mode</span>
-            <span id="govModePill" class="pill">—</span>
-            <span id="govModeHelp" style="font-size:12px;color:#a0a0b0;"></span>
+        <div style="margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;background:rgba(0,0,0,0.18);">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <span style="font-size:11px;color:#606080;text-transform:uppercase;font-weight:800;letter-spacing:.06em;">Current Mode</span>
+                    <span id="govModePill" class="pill">—</span>
+                </div>
+                <div id="govModeHelp" style="font-size:12px;color:#a0a0b0;line-height:1.55;margin-top:8px;"></div>
+            </div>
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:12px;background:rgba(0,0,0,0.18);">
+                <div style="font-size:11px;color:#606080;text-transform:uppercase;font-weight:800;letter-spacing:.06em;">Safety Rails</div>
+                <div style="font-size:12px;color:#a0a0b0;line-height:1.55;margin-top:8px;">
+                    Interactive UI is limited to standard governance modes (<strong>manual</strong>, <strong>assisted</strong>, <strong>autonomous</strong>).
+                    Emergency/bypass capabilities require out-of-band procedures and are intentionally not controllable here.
+                </div>
+                <div id="govDataFreshness" style="font-size:11px;color:#94a3b8;margin-top:8px;">Last refresh: —</div>
+            </div>
         </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div class="glass-panel rounded-xl p-6">
-            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Mode selection</h3>
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Mode Selection</h3>
             <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
                 <button id="govBtnManual" onclick="app.setAutomationMode('manual')" style="padding:12px;border-radius:10px;border:1px solid rgba(255,51,102,0.25);background:rgba(255,51,102,0.06);color:#ff6688;font-weight:800;cursor:pointer;">
-                    🔒 Manual
+                    <i class="fas fa-lock mr-1"></i>Manual
                     <div style="font-size:11px;font-weight:600;color:#a0a0b0;margin-top:4px;">Approval required</div>
                 </button>
                 <button id="govBtnAssisted" onclick="app.setAutomationMode('assisted')" style="padding:12px;border-radius:10px;border:1px solid rgba(250,204,21,0.22);background:rgba(250,204,21,0.06);color:#facc15;font-weight:800;cursor:pointer;">
-                    ⚡ Assisted
+                    <i class="fas fa-user-check mr-1"></i>Assisted
                     <div style="font-size:11px;font-weight:600;color:#a0a0b0;margin-top:4px;">Risk-based approval</div>
                 </button>
                 <button id="govBtnAutonomous" onclick="app.setAutomationMode('autonomous')" style="padding:12px;border-radius:10px;border:1px solid rgba(0,255,136,0.22);background:rgba(0,255,136,0.06);color:#00ff88;font-weight:800;cursor:pointer;">
-                    ✅ Auto
+                    <i class="fas fa-robot mr-1"></i>Autonomous
                     <div style="font-size:11px;font-weight:600;color:#a0a0b0;margin-top:4px;">Execute automatically</div>
                 </button>
             </div>
             <div style="margin-top:12px;font-size:12px;color:#606080;">This UI intentionally does not expose a bypass/override mode.</div>
+            <div style="margin-top:14px;border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:12px;font-weight:800;color:#cbd5e1;">LLM Full Autonomy Profile</div>
+                        <div id="govForceState" style="font-size:11px;color:#94a3b8;margin-top:3px;">Disabled: confidence thresholds remain active.</div>
+                    </div>
+                    <button id="govForceToggleBtn" onclick="app.toggleAutonomyForce()" style="padding:8px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);color:#fde68a;border-radius:8px;font-size:12px;cursor:pointer;">
+                        Enable Full Autonomy
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="glass-panel rounded-xl p-6">
-            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Mode statistics</h3>
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 8px;">Mode Statistics</h3>
+            <div id="govStatsScope" style="font-size:11px;color:#94a3b8;margin-bottom:12px;">Lifetime counters since service restore</div>
             <div class="grid grid-cols-3 gap-4">
-                <div class="stat-card"><div class="stat-label">Approved</div><div id="govApproved" class="stat-value" style="color:#00ff88;">0</div><div class="stat-sub">Executed actions</div></div>
+                <div class="stat-card"><div class="stat-label">Executed</div><div id="govApproved" class="stat-value" style="color:#00ff88;">0</div><div class="stat-sub">Auto + manual approvals</div></div>
+                <div class="stat-card"><div class="stat-label">Auto</div><div id="govAutoExecuted" class="stat-value" style="color:#22d3ee;">0</div><div class="stat-sub">Executed without approval</div></div>
+                <div class="stat-card"><div class="stat-label">Manual</div><div id="govManualApproved" class="stat-value" style="color:#a7f3d0;">0</div><div class="stat-sub">Approved by analyst</div></div>
                 <div class="stat-card"><div class="stat-label">Rejected</div><div id="govRejected" class="stat-value" style="color:#ff6688;">0</div><div class="stat-sub">Operator overrides</div></div>
                 <div class="stat-card"><div class="stat-label">Pending</div><div id="govPending" class="stat-value" style="color:#facc15;">0</div><div class="stat-sub">Awaiting review</div></div>
+                <div class="stat-card"><div class="stat-label">Expired</div><div id="govExpired" class="stat-value" style="color:#fda4af;">0</div><div class="stat-sub">Timed out in queue</div></div>
             </div>
+            <div style="margin-top:10px;font-size:11px;color:#94a3b8;">Total requested actions: <span id="govTotalRequested">0</span></div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        <div class="glass-panel rounded-xl p-6">
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Execution Policy Matrix</h3>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                <div id="govMatrixManual" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);">
+                    <div style="font-size:12px;font-weight:700;color:#fecaca;">Manual</div>
+                    <div style="font-size:11px;color:#a0a0b0;margin-top:3px;">All response actions require explicit analyst approval.</div>
+                </div>
+                <div id="govMatrixAssisted" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);">
+                    <div style="font-size:12px;font-weight:700;color:#fde68a;">Assisted</div>
+                    <div style="font-size:11px;color:#a0a0b0;margin-top:3px;">Mixed model: selected actions queue for one-click approval based on policy/confidence.</div>
+                </div>
+                <div id="govMatrixAutonomous" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);">
+                    <div style="font-size:12px;font-weight:700;color:#86efac;">Autonomous</div>
+                    <div style="font-size:11px;color:#a0a0b0;margin-top:3px;">Policy-approved actions execute automatically when thresholds are met.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-panel rounded-xl p-6">
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Pending Actions <span id="govPendingBadge" style="margin-left:8px;font-size:11px;color:#94a3b8;font-weight:600;">—</span></h3>
+            <div id="govPendingList" style="color:#606080;font-size:13px;">Loading…</div>
         </div>
     </div>
 
     <div class="glass-panel rounded-xl p-6 mt-6">
-        <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Pending actions</h3>
-        <div id="govPendingList" style="color:#606080;font-size:13px;">Loading…</div>
+        <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Action History <span id="govHistoryBadge" style="margin-left:8px;font-size:11px;color:#94a3b8;font-weight:600;">recent</span></h3>
+        <div id="govHistoryList" style="color:#606080;font-size:13px;">Loading…</div>
     </div>
 </div>
 
@@ -662,6 +718,116 @@
     </div>
 </div>
 
+<!-- HELP MODAL -->
+<div id="helpModal" style="display:none;position:fixed;inset:0;z-index:10010;background:rgba(0,0,0,0.72);backdrop-filter:blur(4px);padding:18px;">
+    <div class="glass-panel rounded-xl" style="max-width:1080px;max-height:90vh;margin:0 auto;overflow:auto;border:1px solid rgba(56,189,248,0.35);">
+        <div style="position:sticky;top:0;background:rgba(19,19,31,0.98);padding:14px 18px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div>
+                <div style="font-size:17px;font-weight:800;">Dashboard Help</div>
+                <div style="font-size:12px;color:#94a3b8;">How to read each panel and run validation end-to-end</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <a href="/ui/static/help.html" target="_blank" rel="noopener" style="padding:7px 12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);color:#86efac;border-radius:8px;font-size:12px;text-decoration:none;">
+                    <i class="fas fa-book mr-1"></i>Open Full Guide
+                </a>
+                <button onclick="app.closeHelp()" style="padding:7px 12px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#fecaca;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-times mr-1"></i>Close
+                </button>
+            </div>
+        </div>
+        <div style="padding:16px 18px 18px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:12px;">
+                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                    <div style="font-weight:700;font-size:13px;color:#a5f3fc;margin-bottom:6px;">Overview</div>
+                    <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Live system posture: alert totals, IoT activity source metadata, pipeline throughput, detector/component health, and provider status.</div>
+                </div>
+                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                    <div style="font-weight:700;font-size:13px;color:#facc15;margin-bottom:6px;">Alerts</div>
+                    <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Grouped alert history with severity, detector, namespace/pod context, LLM outcome, and full prompt/response trace viewer.</div>
+                </div>
+                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                    <div style="font-weight:700;font-size:13px;color:#4ade80;margin-bottom:6px;">IoT Mesh</div>
+                    <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Current IoT workloads and fleet telemetry. Device counts are source-qualified; degraded telemetry is explicitly labeled.</div>
+                </div>
+                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                    <div style="font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;">LLM Control</div>
+                    <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Provider health, failover chain, estimated token-cost usage, routing strategy, probe/test controls, and runtime event log.</div>
+                </div>
+                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                    <div style="font-weight:700;font-size:13px;color:#fda4af;margin-bottom:6px;">Automation</div>
+                    <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Governance mode control (`manual`, `assisted`, `autonomous`) with pending queue, live counters, and action history. Full-autonomy profile is optional and explicit.</div>
+                </div>
+                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                    <div style="font-weight:700;font-size:13px;color:#fca5a5;margin-bottom:6px;">K8s Cluster</div>
+                    <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Cluster component availability and infrastructure context for services and detectors.</div>
+                </div>
+            </div>
+
+            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(0,0,0,0.2);margin-bottom:12px;">
+                <div style="font-weight:700;font-size:13px;color:#93c5fd;margin-bottom:8px;">Recommended run sequence (terminal)</div>
+                <pre style="margin:0;font-size:11px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap;font-family:'JetBrains Mono',monospace;">curl -s -o /dev/null -w "HEALTH:%{http_code}\n" http://localhost:30800/health
+bash scripts/test-governance-modes.sh --api-url http://localhost:30800
+bash scripts/e2e-verbose-test.sh --quick
+E2E_ENABLE_FULL_AUTONOMY=1 bash scripts/e2e-verbose-test.sh --quick
+bash scripts/run-live-attacks.sh --duration 10 --show-alerts 3 --verbose</pre>
+            </div>
+
+            <div style="font-size:12px;color:#94a3b8;line-height:1.55;">
+                Tip: In Alerts, click <strong>View Full LLM Trace</strong> to inspect exact prompts, parsed output, raw completion, and trace metadata.
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FULL LLM TRACE MODAL -->
+<div id="traceModal" style="display:none;position:fixed;inset:0;z-index:10020;background:rgba(0,0,0,0.78);backdrop-filter:blur(4px);padding:16px;">
+    <div class="glass-panel rounded-xl" style="max-width:1200px;max-height:92vh;margin:0 auto;overflow:auto;border:1px solid rgba(0,240,255,0.35);">
+        <div style="position:sticky;top:0;background:rgba(19,19,31,0.98);padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div>
+                <div style="font-size:16px;font-weight:800;">Full LLM Trace</div>
+                <div id="traceModalMeta" style="font-size:11px;color:#94a3b8;">—</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button onclick="app.copyCurrentTraceJSON()" style="padding:7px 12px;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:#7dd3fc;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-copy mr-1"></i>Copy JSON
+                </button>
+                <button onclick="app.downloadCurrentTraceJSON()" style="padding:7px 12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);color:#86efac;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-download mr-1"></i>Download JSON
+                </button>
+                <button onclick="app.closeTraceModal()" style="padding:7px 12px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#fecaca;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-times mr-1"></i>Close
+                </button>
+            </div>
+        </div>
+        <div style="padding:14px 16px;">
+            <div id="traceModalSummary" style="margin-bottom:12px;"></div>
+            <div style="display:grid;grid-template-columns:1fr;gap:12px;">
+                <div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">System Prompt</div>
+                        <button onclick="app.copyCurrentTraceSection('system_prompt')" style="padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);color:#cbd5e1;border-radius:6px;font-size:11px;">Copy</button>
+                    </div>
+                    <pre id="traceModalSystem" style="margin:0;white-space:pre-wrap;max-height:220px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
+                </div>
+                <div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">User Prompt</div>
+                        <button onclick="app.copyCurrentTraceSection('user_prompt')" style="padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);color:#cbd5e1;border-radius:6px;font-size:11px;">Copy</button>
+                    </div>
+                    <pre id="traceModalUser" style="margin:0;white-space:pre-wrap;max-height:240px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
+                </div>
+                <div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">Raw LLM Response</div>
+                        <button onclick="app.copyCurrentTraceSection('raw_response_text')" style="padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);color:#cbd5e1;border-radius:6px;font-size:11px;">Copy</button>
+                    </div>
+                    <pre id="traceModalRaw" style="margin:0;white-space:pre-wrap;max-height:260px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════════════
      DASHBOARD APPLICATION — single file, no ES6 modules, no import()
      All symbols available immediately at script parse time.
@@ -701,7 +867,7 @@ function dbStatusMeta(raw) {
         return { label: 'PostgreSQL (persistent)', detail: 'Data is saved persistently', tone: 'ok', short: 'PostgreSQL' };
     }
     if (v === 'memory-fallback') {
-        return { label: 'In-memory fallback (demo mode)', detail: 'App works, but data resets on restart', tone: 'warn', short: 'In-memory' };
+        return { label: 'In-memory fallback (degraded persistence)', detail: 'Application remains available, but data in this mode resets on restart until PostgreSQL reconnects', tone: 'warn', short: 'In-memory' };
     }
     return { label: v === 'error' ? 'Database error' : (raw || 'Unknown'), detail: 'Database connectivity issue', tone: 'err', short: 'Error' };
 }
@@ -826,7 +992,7 @@ function ruleHelpMeta(a) {
             return {
                 tone: 'warn',
                 short: `High-rate HTTP traffic from one source exceeded the Suricata threshold${sidText}.`,
-                detail: 'Rule uses a detection_filter (300 requests / 10s by source). During demo flood traffic, duplicate alerts are expected and may be throttled.'
+                detail: 'Rule uses a detection_filter (300 requests / 10s by source). During high-rate evaluation traffic, duplicate alerts are expected and may be throttled.'
             };
         }
         if (/SMARTCITY IoT sensor API flood/i.test(rule)) {
@@ -935,6 +1101,9 @@ const api = {
         const qs = new URLSearchParams({ window: String(window||'today') }).toString();
         return this._pub(`/api/metrics/llm-usage?${qs}`);
     },
+    getAuditTrace(traceId) {
+        return this._pub(`/api/audit/trace/${encodeURIComponent(String(traceId || ''))}`);
+    },
     getLLMControl(probe=false) {
         const qs = new URLSearchParams({ probe: String(probe) }).toString();
         return this._pub(`/api/llm/control/status?${qs}`);
@@ -983,11 +1152,19 @@ const api = {
     getPipeline() { return this._pub('/api/pipeline-overview'); },
     getDedupStats(){ return this._pub('/api/deduplicator-stats'); },
     getAlertRateLimiterStatus(){ return this._pub('/api/rate-limiter/status'); },
-    getGov()      { return this._pub('/api/governance/status'); },
-    getGovPending(){ return this._pub('/api/governance/pending'); },
+    getGov()      { return this._fetch('/api/governance/status'); },
+    getGovPending(){ return this._fetch('/api/governance/pending'); },
+    getGovHistory(limit=25){
+        const qs = new URLSearchParams({ limit: String(limit||25) }).toString();
+        return this._fetch(`/api/governance/history?${qs}`);
+    },
     setGovMode(mode){
         const qs = new URLSearchParams({ mode: String(mode||'assisted') }).toString();
         return this._fetch(`/api/governance/mode?${qs}`, { method:'POST' });
+    },
+    setGovForceAutonomy(enabled){
+        const qs = new URLSearchParams({ enabled: String(Boolean(enabled)) }).toString();
+        return this._fetch(`/api/governance/autonomy/force?${qs}`, { method:'POST' });
     },
     approveGovAction(id, comment=''){
         const qs = new URLSearchParams({ comment: String(comment||'') }).toString();
@@ -1078,6 +1255,7 @@ const render = {
             const total    = metrics.total_alerts||0;
             const crit     = metrics.critical_alerts||0;
             const iot      = metrics.iot_devices_active||0;
+            const iotMeta  = metrics.iot_devices_active_meta||{};
             const dedupHitPct = (dedup?.hit_rate_percent ?? pipeline?.stages?.find?.(s => s.id === 'ingest')?.dedup_hit_rate_percent);
             const fatigue = pipeline?.alert_fatigue || {};
             const reductionPct = (fatigue?.reduction_percent ?? metrics?.alert_reduction_percentage);
@@ -1096,10 +1274,24 @@ const render = {
             const rlWindow = Number(rateLimiter?.config?.window_seconds || 60);
             const floodColor = throttled > 0 ? (rlPct >= 80 ? '#facc15' : '#4ade80') : '#94a3b8';
             const critPct  = total>0 ? Math.round(crit/total*100) : 0;
+            const iotSub = (()=>{
+                const src = String(iotMeta.authoritative_source || 'none');
+                const degraded = !!iotMeta.degraded;
+                const k8s = Number(iotMeta.k8s_count || 0);
+                const db = Number(iotMeta.db_count || 0);
+                const mem = Number(iotMeta.mem_count || 0);
+                if (degraded) return 'Device-count telemetry degraded (K8s/DB/registry unavailable)';
+                const srcLabel = {
+                    k8s_pods: 'K8s pod inventory',
+                    device_registry_db: 'device registry (DB)',
+                    device_registry_memory: 'device registry (memory)'
+                }[src] || 'mixed sources';
+                return `${srcLabel} · k8s:${k8s} db:${db} mem:${mem}`;
+            })();
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-label">Total Alerts</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">Ingested via Falco / Suricata</div></div>
                 <div class="stat-card"><div class="stat-label">Critical Alerts</div><div class="stat-value" style="color:#f87171;">${crit}</div><div class="stat-sub">Severity 8–10 &nbsp;(${critPct}% of total)</div></div>
-                <div class="stat-card"><div class="stat-label">IoT Devices</div><div class="stat-value" style="color:#4ade80;">${iot}</div><div class="stat-sub">${iot} pod(s) running in K8s</div></div>
+                <div class="stat-card"><div class="stat-label">IoT Devices</div><div class="stat-value" style="color:${iotMeta.degraded ? '#facc15' : '#4ade80'};">${iot}</div><div class="stat-sub">${esc(iotSub)}</div></div>
                 <div class="stat-card"><div class="stat-label">Dedup + LLM Savings</div><div class="stat-value" style="color:#ffaa00;">${dedupValue}</div><div class="stat-sub">${esc(dedupSub)}</div></div>
                 <div class="stat-card"><div class="stat-label">Flood Suppression</div><div class="stat-value" style="color:${floodColor};">${throttled.toLocaleString()}</div><div class="stat-sub">${rlReceived>0 ? `${rlProcessed}/${rlReceived} alerts processed in ${rlWindow}s window · ${rlPct.toFixed(1)}% throttled` : 'No throttling in current window'}</div></div>
                 <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value" style="color:#a78bfa;">${uptime}</div><div class="stat-sub">IDS API process uptime</div></div>`;
@@ -1304,11 +1496,19 @@ const render = {
         if (gp) {
             gp.style.cursor = 'pointer';
             gp.onclick = () => app.switchTab('governance');
-            if (gov && typeof gov === 'object') {
+            const govErr = !!(gov && typeof gov === 'object' && (gov.status === 'error' || Number(gov.status_code || 0) >= 400));
+            if (govErr) {
+                const code = Number(gov.status_code || 0);
+                gp.className = 'pill ' + (code === 401 ? 'pill-err' : 'pill-warn');
+                gp.textContent = code === 401 ? '● Auth' : '● Gov ?';
+                gp.title = code === 401
+                    ? 'Governance API requires login (session expired)'
+                    : 'Governance status unavailable';
+            } else if (gov && typeof gov === 'object') {
                 const raw = String(gov.mode || 'assisted').toLowerCase();
                 const allowed = { manual:1, assisted:1, autonomous:1 };
                 const m = allowed[raw] ? raw : 'manual';
-                const label = m === 'manual' ? '● Manual' : m === 'autonomous' ? '● Auto' : '● Assisted';
+                const label = m === 'manual' ? '● Manual' : m === 'autonomous' ? '● Autonomous' : '● Assisted';
                 const cls = m === 'manual' ? 'pill-err' : m === 'assisted' ? 'pill-warn' : 'pill-ok';
                 gp.className = 'pill ' + cls;
                 gp.textContent = label;
@@ -1317,7 +1517,7 @@ const render = {
                            'Assisted mode: Medium-confidence actions require approval';
             } else {
                 gp.className = 'pill pill-warn';
-                gp.textContent = '● Auto —';
+                gp.textContent = '● Gov ?';
                 gp.title = 'Automation status unknown';
             }
         }
@@ -1329,8 +1529,14 @@ const render = {
         }
     },
 
-    governance(gov, pending) {
+    governance(gov, pending, history) {
         const status = (gov && typeof gov === 'object') ? gov : {};
+        const govErrorCode = Number(status.status_code || 0);
+        const govHasError = !!(status.status === 'error' || govErrorCode >= 400);
+        const pendingObj = (pending && typeof pending === 'object') ? pending : {};
+        const pendingHasError = !!(pendingObj.status === 'error' || Number(pendingObj.status_code || 0) >= 400);
+        const historyObj = (history && typeof history === 'object') ? history : {};
+        const historyHasError = !!(historyObj.status === 'error' || Number(historyObj.status_code || 0) >= 400);
         const rawMode = String(status.mode || 'assisted').toLowerCase();
         const allowed = { manual:1, assisted:1, autonomous:1 };
         const mode = allowed[rawMode] ? rawMode : 'manual';
@@ -1338,40 +1544,123 @@ const render = {
         const pill = $('govModePill');
         const help = $('govModeHelp');
         const desc = $('govModeDesc');
+        const stamp = $('govDataFreshness');
+        const statsScope = $('govStatsScope');
+        const pendingBadge = $('govPendingBadge');
+        const forceState = $('govForceState');
+        const forceBtn = $('govForceToggleBtn');
+        const historyBadge = $('govHistoryBadge');
+        const historyList = $('govHistoryList');
+
+        if (stamp) stamp.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
 
         const label = mode === 'manual' ? 'Manual Approval' : mode === 'autonomous' ? 'Auto-Execute' : 'Assisted';
         const cls = mode === 'manual' ? 'pill-err' : mode === 'assisted' ? 'pill-warn' : 'pill-ok';
 
+        const setModeRow = (id, active, tone='cyan') => {
+            const el = $(id);
+            if (!el) return;
+            const map = {
+                red:   ['rgba(255,51,102,0.30)', 'rgba(255,51,102,0.10)'],
+                amber: ['rgba(250,204,21,0.30)', 'rgba(250,204,21,0.10)'],
+                green: ['rgba(0,255,136,0.30)', 'rgba(0,255,136,0.10)'],
+                cyan:  ['rgba(0,240,255,0.25)', 'rgba(0,240,255,0.08)']
+            };
+            const [bd, bg] = map[tone] || map.cyan;
+            el.style.borderColor = active ? bd : 'rgba(255,255,255,0.08)';
+            el.style.background = active ? bg : 'rgba(255,255,255,0.02)';
+            el.style.boxShadow = active ? '0 0 0 2px rgba(0,240,255,0.14)' : 'none';
+        };
+
+        const setStatsUnavailable = () => {
+            ['govApproved','govAutoExecuted','govManualApproved','govRejected','govPending','govExpired','govTotalRequested']
+                .forEach((id) => { const el = $(id); if (el) el.textContent = '—'; });
+            if (statsScope) statsScope.textContent = 'Counters unavailable';
+            if (pendingBadge) pendingBadge.textContent = 'unavailable';
+            if (forceState) forceState.textContent = 'Unavailable: governance status not loaded.';
+            if (forceBtn) {
+                forceBtn.textContent = 'Unavailable';
+                forceBtn.disabled = true;
+                forceBtn.style.opacity = '0.5';
+            }
+            if (historyBadge) historyBadge.textContent = 'unavailable';
+        };
+
+        setModeRow('govMatrixManual', false, 'red');
+        setModeRow('govMatrixAssisted', false, 'amber');
+        setModeRow('govMatrixAutonomous', false, 'green');
+
+        if (govHasError) {
+            const errText = govErrorCode === 401
+                ? 'Session expired. Please sign in again to view automation status.'
+                : 'Governance status temporarily unavailable; backend error.';
+            if (pill) {
+                pill.className = 'pill ' + (govErrorCode === 401 ? 'pill-err' : 'pill-warn');
+                pill.textContent = govErrorCode === 401 ? 'Auth Required' : 'Status Unavailable';
+            }
+            if (help) help.textContent = errText;
+            if (desc) desc.textContent = 'Automation status unavailable. No mode changes should be applied until governance status is restored.';
+            setStatsUnavailable();
+            const list = $('govPendingList');
+            if (list) {
+                list.innerHTML = `<div style="color:#fda4af;font-size:13px;padding:12px;background:rgba(127,29,29,0.2);border-radius:8px;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>${errText}</div>`;
+            }
+            if (historyList) {
+                historyList.innerHTML = `<div style="color:#fda4af;font-size:13px;padding:12px;background:rgba(127,29,29,0.2);border-radius:8px;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>${errText}</div>`;
+            }
+            return;
+        }
+
         if (pill) { pill.className = 'pill ' + cls; pill.textContent = label; }
         if (help) {
             help.textContent = mode === 'manual'
-                ? 'No automatic response actions. Analysts review and approve every action.'
+                ? 'No automatic response actions. Analysts review and approve every recommended action.'
                 : mode === 'assisted'
                     ? 'Recommended actions are prepared for the analyst. Some actions require a 1-click approval gate.'
-                    : 'Approved action types can execute automatically when confidence and policy thresholds are met.';
+                    : 'Approved action types execute automatically when confidence/policy thresholds are met. Full-autonomy profile can be toggled explicitly below.';
         }
         if (desc) {
             desc.textContent = 'Controls whether Kubernetes response actions (isolate pod, scale up, etc.) run automatically or require operator approval.';
         }
+        setModeRow('govMatrixManual', mode === 'manual', 'red');
+        setModeRow('govMatrixAssisted', mode === 'assisted', 'amber');
+        setModeRow('govMatrixAutonomous', mode === 'autonomous', 'green');
 
-        // Get metrics from governance status - handle different possible structures
         const metrics = status.metrics || {};
-        
-        // Calculate totals from the metrics
         const autoExecuted = Number(metrics.auto_executed || 0);
-        const approved = Number(metrics.approved || 0);
+        const manualApproved = Number(metrics.manual_approved ?? metrics.approved ?? 0);
         const rejected = Number(metrics.rejected || 0);
         const pendingApproval = Number(metrics.pending_approval || 0);
+        const expired = Number(metrics.expired || 0);
         const totalRequested = Number(metrics.total_actions_requested || 0);
-        
-        // Display: Approved = auto-executed + manually approved
-        const totalApproved = autoExecuted + approved;
-        
-        const a=$('govApproved'); if(a) a.textContent = String(totalApproved);
-        const r=$('govRejected'); if(r) r.textContent = String(rejected);
-        const p=$('govPending');  if(p) p.textContent = String(pendingApproval);
+        const totalExecuted = autoExecuted + manualApproved;
+        const resolvedRequested = totalRequested || (totalExecuted + rejected + pendingApproval + expired);
 
-        // Highlight active mode button
+        const a=$('govApproved'); if(a) a.textContent = totalExecuted.toLocaleString();
+        const ae=$('govAutoExecuted'); if(ae) ae.textContent = autoExecuted.toLocaleString();
+        const ma=$('govManualApproved'); if(ma) ma.textContent = manualApproved.toLocaleString();
+        const r=$('govRejected'); if(r) r.textContent = rejected.toLocaleString();
+        const p=$('govPending');  if(p) p.textContent = pendingApproval.toLocaleString();
+        const ex=$('govExpired'); if(ex) ex.textContent = expired.toLocaleString();
+        const tr=$('govTotalRequested'); if(tr) tr.textContent = resolvedRequested.toLocaleString();
+        if (statsScope) statsScope.textContent = 'Lifetime counters from governance engine';
+        if (pendingBadge) pendingBadge.textContent = `${pendingApproval.toLocaleString()} waiting`;
+
+        const forceEnabled = !!status.autonomous_force_execution;
+        if (forceState) {
+            forceState.textContent = forceEnabled
+                ? 'Enabled: autonomous mode executes all recommended actions (protected targets still gated).'
+                : 'Disabled: confidence thresholds remain active.';
+        }
+        if (forceBtn) {
+            forceBtn.disabled = false;
+            forceBtn.style.opacity = '1';
+            forceBtn.textContent = forceEnabled ? 'Disable Full Autonomy' : 'Enable Full Autonomy';
+            forceBtn.style.background = forceEnabled ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)';
+            forceBtn.style.borderColor = forceEnabled ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)';
+            forceBtn.style.color = forceEnabled ? '#fecaca' : '#fde68a';
+        }
+
         const setActive = (id, active) => {
             const el = $(id);
             if (!el) return;
@@ -1384,39 +1673,78 @@ const render = {
         setActive('govBtnAutonomous', mode === 'autonomous');
 
         const list = $('govPendingList');
-        const actions = (pending && pending.actions) ? pending.actions : [];
-        if (!list) return;
-
-        if (!actions.length) {
-            list.innerHTML = '<div style="color:#606080;font-size:13px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;"><i class="fas fa-check-circle" style="color:#4ade80;margin-right:8px;"></i>No pending actions. All automated actions have been processed.</div>';
-            return;
+        const actions = Array.isArray(pendingObj.actions) ? pendingObj.actions : [];
+        if (list) {
+            if (pendingHasError) {
+                if (pendingBadge) pendingBadge.textContent = 'queue unavailable';
+                list.innerHTML = '<div style="color:#fda4af;font-size:13px;padding:12px;background:rgba(127,29,29,0.2);border-radius:8px;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>Pending queue unavailable, retry in a few seconds.</div>';
+            } else if (!actions.length) {
+                list.innerHTML = '<div style="color:#606080;font-size:13px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;"><i class="fas fa-check-circle" style="color:#4ade80;margin-right:8px;"></i>No actions are awaiting analyst review right now.</div>';
+            } else {
+                const btnStyle = (bg, bd, fg) => `padding:6px 10px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:8px;font-size:12px;cursor:pointer;`;
+                list.innerHTML = actions
+                    .sort((a,b)=>(b.severity||0)-(a.severity||0))
+                    .slice(0, 50)
+                    .map(act => {
+                        const s = sevInfo(act.severity || 0);
+                        const age = act.age_seconds != null ? Math.round(act.age_seconds) + 's' : '—';
+                        const reason = act.reason || '';
+                        const rule = (act.context && act.context.rule) || act.rule || act.alert_rule || act.trigger_rule || 'Unknown rule';
+                        const suggestedAction = act.action_type || act.recommended_action || 'review';
+                        return `
+                            <div style="border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:10px;background:rgba(0,0,0,0.18);">
+                                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                    <span class="sev-badge ${s.cls}" title="${esc(s.label)}">${s.short}&nbsp;${act.severity}</span>
+                                    <span style="font-size:13px;font-weight:800;color:#fff;">${esc(suggestedAction)}</span>
+                                    <span style="font-size:12px;color:#a0a0b0;">→ ${esc(act.target||'—')}</span>
+                                    <span style="margin-left:auto;font-size:11px;color:#606080;font-family:monospace;">age ${esc(age)}</span>
+                                </div>
+                                <div style="margin-top:8px;font-size:12px;color:#a0a0b0;line-height:1.5;"><strong style="color:#cbd5e1;">Rule:</strong> ${esc(rule)}</div>
+                                <div style="margin-top:4px;font-size:12px;color:#a0a0b0;line-height:1.5;"><strong style="color:#cbd5e1;">Suggested action:</strong> ${esc(suggestedAction)}</div>
+                                <div style="margin-top:4px;font-size:12px;color:#a0a0b0;line-height:1.5;">${esc(reason)}</div>
+                                <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+                                    <button onclick="app.approvePending('${esc(act.id)}')" style="${btnStyle('rgba(0,255,136,0.12)','rgba(0,255,136,0.25)','#00ff88')}"><i class=\"fas fa-check mr-1\"></i>Approve</button>
+                                    <button onclick="app.rejectPending('${esc(act.id)}')" style="${btnStyle('rgba(255,51,102,0.12)','rgba(255,51,102,0.25)','#ff6688')}"><i class=\"fas fa-times mr-1\"></i>Reject</button>
+                                </div>
+                            </div>
+                        `;
+                    })
+                    .join('');
+            }
         }
 
-        const btnStyle = (bg, bd, fg) => `padding:6px 10px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:8px;font-size:12px;cursor:pointer;`;
-        list.innerHTML = actions
-            .sort((a,b)=>(b.severity||0)-(a.severity||0))
-            .slice(0, 50)
-            .map(act => {
-                const s = sevInfo(act.severity || 0);
-                const age = act.age_seconds != null ? Math.round(act.age_seconds) + 's' : '—';
-                const reason = act.reason || '';
-                return `
-                    <div style="border:1px solid rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:10px;background:rgba(0,0,0,0.18);">
-                        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                            <span class="sev-badge ${s.cls}" title="${esc(s.label)}">${s.short}&nbsp;${act.severity}</span>
-                            <span style="font-size:13px;font-weight:800;color:#fff;">${esc(act.action_type||'action')}</span>
-                            <span style="font-size:12px;color:#a0a0b0;">→ ${esc(act.target||'—')}</span>
-                            <span style="margin-left:auto;font-size:11px;color:#606080;font-family:monospace;">age ${esc(age)}</span>
-                        </div>
-                        <div style="margin-top:8px;font-size:12px;color:#a0a0b0;line-height:1.5;">${esc(reason)}</div>
-                        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-                            <button onclick="app.approvePending('${esc(act.id)}')" style="${btnStyle('rgba(0,255,136,0.12)','rgba(0,255,136,0.25)','#00ff88')}"><i class=\"fas fa-check mr-1\"></i>Approve</button>
-                            <button onclick="app.rejectPending('${esc(act.id)}')" style="${btnStyle('rgba(255,51,102,0.12)','rgba(255,51,102,0.25)','#ff6688')}"><i class=\"fas fa-times mr-1\"></i>Reject</button>
-                        </div>
-                    </div>
-                `;
-            })
-            .join('');
+        const historyRows = Array.isArray(historyObj.history) ? historyObj.history : [];
+        if (historyBadge) historyBadge.textContent = historyHasError ? 'unavailable' : `${historyRows.length} rows`;
+        if (historyList) {
+            if (historyHasError) {
+                historyList.innerHTML = '<div style="color:#fda4af;font-size:13px;padding:12px;background:rgba(127,29,29,0.2);border-radius:8px;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>Action history unavailable, retry in a few seconds.</div>';
+            } else if (!historyRows.length) {
+                historyList.innerHTML = '<div style="color:#606080;font-size:13px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;"><i class="fas fa-clock" style="color:#94a3b8;margin-right:8px;"></i>No governance decisions recorded yet in this runtime window.</div>';
+            } else {
+                historyList.innerHTML = historyRows
+                    .slice(0, 30)
+                    .map((row) => {
+                        const sev = sevInfo(row.severity || 0);
+                        const ts = row.created_at_iso || row.approved_at || row.created_at || '—';
+                        const actionType = row.action_type || 'unknown_action';
+                        const target = row.target || '—';
+                        const statusTxt = row.status || 'unknown';
+                        const actor = row.approved_by || 'system';
+                        return `
+                            <div style="border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px;margin-bottom:8px;background:rgba(0,0,0,0.18);">
+                                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                    <span class="sev-badge ${sev.cls}">${sev.short}&nbsp;${row.severity || 0}</span>
+                                    <span style="font-size:12px;color:#fff;font-weight:700;">${esc(actionType)}</span>
+                                    <span style="font-size:12px;color:#a0a0b0;">→ ${esc(target)}</span>
+                                    <span style="margin-left:auto;font-size:11px;color:#94a3b8;font-family:monospace;">${esc(ts)}</span>
+                                </div>
+                                <div style="margin-top:6px;font-size:11px;color:#a0a0b0;">status: <strong style="color:#cbd5e1;">${esc(statusTxt)}</strong> · actor: <strong style="color:#cbd5e1;">${esc(actor)}</strong></div>
+                            </div>
+                        `;
+                    })
+                    .join('');
+            }
+        }
     },
     // LLM Control Center render functions
     llmControl(status, comparison, healthSummary, usage, usageWeek) {
@@ -1464,7 +1792,7 @@ const render = {
             costEl.textContent = '$' + (isFinite(costToday) ? costToday.toFixed(2) : '0.00');
             costEl.style.color = (costToday > threshold) ? '#f87171' : '#4ade80';
         }
-        if (costSubEl) costSubEl.textContent = `${callsToday.toLocaleString()} calls today · threshold $${threshold.toFixed(2)}`;
+        if (costSubEl) costSubEl.textContent = `${callsToday.toLocaleString()} calls today · estimated cost · threshold $${threshold.toFixed(2)}`;
 
         // Weekly totals (last 7 days)
         const wTotals = usageWeek?.totals || {};
@@ -1475,7 +1803,7 @@ const render = {
         const costWeek = Number(wTotals.estimated_cost_usd || 0);
 
         if (costWeekEl) costWeekEl.textContent = '$' + (isFinite(costWeek) ? costWeek.toFixed(2) : '0.00');
-        if (costWeekSubEl) costWeekSubEl.textContent = `${callsWeek.toLocaleString()} calls · window: last 7 days`;
+        if (costWeekSubEl) costWeekSubEl.textContent = `${callsWeek.toLocaleString()} calls · estimated cost · window: last 7 days`;
         if (tokensWeekEl) tokensWeekEl.textContent = isFinite(tokensWeek) ? tokensWeek.toLocaleString() : '0';
         if (tokensWeekSubEl) tokensWeekSubEl.textContent = `prompt ${promptWeek.toLocaleString()} · completion ${completionWeek.toLocaleString()}`;
         if (callsWeekEl) callsWeekEl.textContent = isFinite(callsWeek) ? callsWeek.toLocaleString() : '0';
@@ -1654,7 +1982,7 @@ const render = {
             return;
         }
         
-        el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="font-size:10px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.25);"><th style="padding:10px;text-align:left;">Provider</th><th style="padding:10px;text-align:right;">Calls</th><th style="padding:10px;text-align:right;">Tokens</th><th style="padding:10px;text-align:right;">Cost</th><th style="padding:10px;text-align:center;">Success</th></tr></thead><tbody>' +
+        el.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="font-size:10px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.25);"><th style="padding:10px;text-align:left;">Provider</th><th style="padding:10px;text-align:right;">Calls</th><th style="padding:10px;text-align:right;">Tokens</th><th style="padding:10px;text-align:right;">Est. Cost</th><th style="padding:10px;text-align:center;">Success</th></tr></thead><tbody>' +
             rows.map(r => {
                 const calls = Number(r.calls ?? r.attempts ?? 0);
                 const attempts = Number(r.attempts ?? 0);
@@ -1727,7 +2055,7 @@ const render = {
                         </tr>
                     </thead>
                     <tbody>
-                        ${rows.map(a=>{
+                        ${rows.map((a, idx)=>{
                             const s=sevInfo(a.severity);
                             const ns=alertNamespace(a) || '—';
                             const pod=alertPod(a) || '—';
@@ -1744,6 +2072,7 @@ const render = {
                             const sourceLabel = `${a.source||'falco'}${ns && ns!=='—' ? ' · '+ns : ''}`;
                             const analysisObj = (a && typeof a.analysis === 'object' && a.analysis) ? a.analysis : {};
                             const traceObj = (analysisObj && typeof analysisObj._llm_trace === 'object') ? analysisObj._llm_trace : null;
+                            const traceId = String(a.trace_id || (a.raw_alert && a.raw_alert.trace_id) || '').trim();
                             const llmEngine = a.llm_engine || analysisObj._llm_engine || analysisObj.llm_engine || analysisObj.provider || analysisObj.engine || traceObj?.provider || '';
                             const hasAnalysis = !!(a.analysis_present || (analysisObj && Object.keys(analysisObj).length));
                             let analysisChip = '';
@@ -1771,6 +2100,34 @@ const render = {
                                 const parsedActions = Array.isArray(a.automated_actions) && a.automated_actions.length
                                     ? a.automated_actions
                                     : (Array.isArray(analysisObj.automated_actions) ? analysisObj.automated_actions : []);
+                                const traceKeyBase = String(a.id || a.alert_id || idx || 'row').replace(/[^a-zA-Z0-9_-]/g, '_');
+                                const traceKey = `trace_${traceKeyBase}_${idx}`;
+                                if (window.app && typeof window.app.cacheTrace === 'function') {
+                                    window.app.cacheTrace(traceKey, {
+                                        alert_id: a.id || a.alert_id || '',
+                                        trace_id: traceId || '',
+                                        timestamp: a.timestamp || a.time || '',
+                                        source: a.source || '',
+                                        rule: a.rule || '',
+                                        provider_reported: llmEngine || '',
+                                        analysis_source: analysisObj._analysis_source || '',
+                                        trace: {
+                                            provider: String(traceObj.provider || llmEngine || 'unknown'),
+                                            model: String(traceObj.model || 'unknown'),
+                                            latency_ms: Number(traceObj.latency_ms || 0),
+                                            system_prompt: promptSys,
+                                            user_prompt: promptUsr,
+                                            raw_response_text: rawResp
+                                        },
+                                        parsed_output: {
+                                            severity: parsedSeverity,
+                                            threat_type: parsedThreat,
+                                            confidence: parsedConf,
+                                            actions: parsedActions,
+                                            summary: String(a.summary || analysisObj.summary || '')
+                                        }
+                                    });
+                                }
                                 llmTraceBlock = `
                                     <details style="margin-top:8px;border:1px solid rgba(0,240,255,0.14);border-radius:8px;background:rgba(0,240,255,0.03);">
                                         <summary style="cursor:pointer;padding:8px 10px;color:var(--accent-cyan);font-size:11px;font-weight:700;">View Full LLM Trace</summary>
@@ -1783,12 +2140,74 @@ const render = {
                                                 <div style="padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-size:10px;color:#cbd5e1;"><span style="color:#94a3b8;">Confidence</span><br><strong>${esc(parsedConf)}</strong></div>
                                                 <div style="padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.04);font-size:10px;color:#cbd5e1;"><span style="color:#94a3b8;">Actions</span><br><strong>${esc(parsedActions.length ? parsedActions.join(', ') : 'none')}</strong></div>
                                             </div>
+                                            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                                                <button onclick="event.preventDefault();event.stopPropagation();app.openTraceModal('${traceKey}')" style="padding:5px 10px;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:#7dd3fc;border-radius:7px;font-size:11px;">
+                                                    <i class="fas fa-up-right-and-down-left-from-center mr-1"></i>Open Fullscreen
+                                                </button>
+                                                <button onclick="event.preventDefault();event.stopPropagation();app.copyTraceByKey('${traceKey}')" style="padding:5px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.18);color:#cbd5e1;border-radius:7px;font-size:11px;">
+                                                    <i class="fas fa-copy mr-1"></i>Copy JSON
+                                                </button>
+                                            </div>
                                             <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">System Prompt</div>
                                             <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0 0 8px 0;">${esc(promptSys)}</pre>
                                             <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">User Prompt</div>
                                             <pre style="white-space:pre-wrap;max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0 0 8px 0;">${esc(promptUsr)}</pre>
                                             <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Raw LLM Response</div>
                                             <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0;">${esc(rawResp)}</pre>
+                                        </div>
+                                    </details>`;
+                            } else if (traceId) {
+                                const parsedSeverity = a.severity != null ? String(a.severity) : (analysisObj.severity != null ? String(analysisObj.severity) : '—');
+                                const parsedThreat = String(a.threat_type || analysisObj.threat_type || 'Unknown');
+                                const parsedConfRaw = analysisObj.confidence ?? analysisObj.confidence_score;
+                                const parsedConf = (typeof parsedConfRaw === 'number')
+                                    ? `${Math.round(parsedConfRaw <= 1 ? parsedConfRaw * 100 : parsedConfRaw)}%`
+                                    : '—';
+                                const parsedActions = Array.isArray(a.automated_actions) && a.automated_actions.length
+                                    ? a.automated_actions
+                                    : (Array.isArray(analysisObj.automated_actions) ? analysisObj.automated_actions : []);
+                                const traceKeyBase = String(a.id || a.alert_id || traceId || idx || 'row').replace(/[^a-zA-Z0-9_-]/g, '_');
+                                const traceKey = `trace_audit_${traceKeyBase}_${idx}`;
+                                if (window.app && typeof window.app.cacheTrace === 'function') {
+                                    window.app.cacheTrace(traceKey, {
+                                        alert_id: a.id || a.alert_id || '',
+                                        trace_id: traceId,
+                                        timestamp: a.timestamp || a.time || '',
+                                        source: a.source || '',
+                                        rule: a.rule || '',
+                                        provider_reported: llmEngine || '',
+                                        analysis_source: analysisObj._analysis_source || 'audit_trace_only',
+                                        trace: {
+                                            provider: String(llmEngine || 'unknown'),
+                                            model: 'n/a',
+                                            latency_ms: 0,
+                                            system_prompt: '[Not stored on this alert row]',
+                                            user_prompt: '[Not stored on this alert row]',
+                                            raw_response_text: '[Click "Open Fullscreen" to load audit timeline steps for this trace ID.]'
+                                        },
+                                        parsed_output: {
+                                            severity: parsedSeverity,
+                                            threat_type: parsedThreat,
+                                            confidence: parsedConf,
+                                            actions: parsedActions,
+                                            summary: String(a.summary || analysisObj.summary || '')
+                                        },
+                                        audit_loaded: false
+                                    });
+                                }
+                                llmTraceBlock = `
+                                    <details style="margin-top:8px;border:1px solid rgba(250,204,21,0.25);border-radius:8px;background:rgba(250,204,21,0.06);">
+                                        <summary style="cursor:pointer;padding:8px 10px;color:#fde68a;font-size:11px;font-weight:700;">View Full LLM Trace</summary>
+                                        <div style="padding:8px 10px 10px;">
+                                            <div style="font-size:10px;color:#fcd34d;margin-bottom:8px;">Prompt/response trace not stored inline for this alert. You can still open the correlated audit timeline using trace ID <strong style="font-family:'JetBrains Mono',monospace;">${esc(traceId)}</strong>.</div>
+                                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                                <button onclick="event.preventDefault();event.stopPropagation();app.openTraceTimeline('${traceKey}','${encodeURIComponent(traceId)}')" style="padding:5px 10px;background:rgba(56,189,248,0.12);border:1px solid rgba(56,189,248,0.3);color:#7dd3fc;border-radius:7px;font-size:11px;">
+                                                    <i class="fas fa-up-right-and-down-left-from-center mr-1"></i>Open Fullscreen
+                                                </button>
+                                                <button onclick="event.preventDefault();event.stopPropagation();app.copyTraceByKey('${traceKey}')" style="padding:5px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.18);color:#cbd5e1;border-radius:7px;font-size:11px;">
+                                                    <i class="fas fa-copy mr-1"></i>Copy JSON
+                                                </button>
+                                            </div>
                                         </div>
                                     </details>`;
                             }
@@ -1901,6 +2320,197 @@ const app = {
     currentTab: 'overview',
     lastData:   {},
     pollTimer:  null,
+    traceCache: {},
+    traceOrder: [],
+    currentTrace: null,
+
+    isAuthError(obj) {
+        return !!(obj && typeof obj === 'object' && Number(obj.status_code || 0) === 401);
+    },
+
+    openHelp() {
+        const el = $('helpModal');
+        if (el) el.style.display = 'block';
+    },
+
+    closeHelp() {
+        const el = $('helpModal');
+        if (el) el.style.display = 'none';
+    },
+
+    cacheTrace(key, payload) {
+        if (!key || !payload) return;
+        this.traceCache[key] = payload;
+        this.traceOrder.push(key);
+        // Keep bounded cache in browser memory.
+        const limit = 800;
+        while (this.traceOrder.length > limit) {
+            const oldest = this.traceOrder.shift();
+            if (oldest && oldest !== key) delete this.traceCache[oldest];
+        }
+    },
+
+    async copyText(text, successMsg='Copied', errorMsg='Copy failed') {
+        try {
+            if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(String(text || ''));
+                this.setNotice(successMsg, 'info', 1800);
+                return;
+            }
+        } catch (_) {}
+        try {
+            const ta = document.createElement('textarea');
+            ta.value = String(text || '');
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+            this.setNotice(successMsg, 'info', 1800);
+        } catch (_) {
+            this.setNotice(errorMsg, 'warn', 2500);
+        }
+    },
+
+    copyTraceByKey(key) {
+        const trace = this.traceCache[key];
+        if (!trace) {
+            this.setNotice('Trace not found in current session', 'warn', 2500);
+            return;
+        }
+        this.copyText(JSON.stringify(trace, null, 2), 'Trace JSON copied', 'Could not copy trace JSON');
+    },
+
+    async openTraceTimeline(key, encodedTraceId) {
+        const trace = this.traceCache[key];
+        if (!trace) {
+            this.setNotice('Trace data unavailable for this row', 'warn', 2500);
+            return;
+        }
+        const traceId = decodeURIComponent(String(encodedTraceId || trace.trace_id || ''));
+        if (!traceId) {
+            this.openTraceModal(key);
+            return;
+        }
+        if (!trace.audit_loaded) {
+            this.setNotice(`Loading audit timeline for ${traceId}...`, 'info', 2200);
+            const audit = await api.getAuditTrace(traceId);
+            const steps = Array.isArray(audit?.steps) ? audit.steps : [];
+            if (steps.length) {
+                const merged = {
+                    ...trace,
+                    trace_id: traceId,
+                    analysis_source: 'audit_trace_only',
+                    audit_loaded: true,
+                    audit_step_count: Number(audit?.step_count || steps.length),
+                    trace: {
+                        ...(trace.trace || {}),
+                        system_prompt: '[Not stored on this alert row]',
+                        user_prompt: '[Not stored on this alert row]',
+                        raw_response_text: JSON.stringify(steps, null, 2),
+                    },
+                };
+                this.cacheTrace(key, merged);
+            } else {
+                this.setNotice(`No audit steps found for ${traceId}`, 'warn', 2800);
+            }
+        }
+        this.openTraceModal(key);
+    },
+
+    openTraceModal(key) {
+        const trace = this.traceCache[key];
+        if (!trace) {
+            this.setNotice('Trace data unavailable for this row', 'warn', 2500);
+            return;
+        }
+        this.currentTrace = trace;
+        const meta = $('traceModalMeta');
+        const summary = $('traceModalSummary');
+        const sys = $('traceModalSystem');
+        const usr = $('traceModalUser');
+        const raw = $('traceModalRaw');
+        const m = $('traceModal');
+        const parsed = trace.parsed_output || {};
+        const t = trace.trace || {};
+        const traceBits = [];
+        if (trace.trace_id) traceBits.push(`Trace ${String(trace.trace_id)}`);
+        if (trace.audit_loaded && trace.audit_step_count) traceBits.push(`Audit steps ${Number(trace.audit_step_count)}`);
+
+        if (meta) {
+            meta.textContent = `${String(trace.rule || 'Unknown rule')} · ${String(trace.source || 'unknown').toUpperCase()} · ${String(t.provider || trace.provider_reported || 'unknown').toUpperCase()} · ${String(t.model || 'unknown')} · ${Number(t.latency_ms || 0)}ms${traceBits.length ? ' · ' + traceBits.join(' · ') : ''}`;
+        }
+        if (summary) {
+            const sevValue = parsed.severity ?? '—';
+            const threatValue = parsed.threat_type ?? '—';
+            const confValue = parsed.confidence ?? '—';
+            summary.innerHTML = `
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;">
+                    <div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;color:#cbd5e1;"><span style="color:#94a3b8;">Alert ID</span><br><strong>${esc(String(trace.alert_id || '—'))}</strong></div>
+                    <div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;color:#cbd5e1;"><span style="color:#94a3b8;">Severity</span><br><strong>${esc(String(sevValue))}/10</strong></div>
+                    <div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;color:#cbd5e1;"><span style="color:#94a3b8;">Threat</span><br><strong>${esc(String(threatValue))}</strong></div>
+                    <div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;color:#cbd5e1;"><span style="color:#94a3b8;">Confidence</span><br><strong>${esc(String(confValue))}</strong></div>
+                    <div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;color:#cbd5e1;"><span style="color:#94a3b8;">Action Class</span><br><strong>${esc(Array.isArray(parsed.actions) && parsed.actions.length ? parsed.actions.join(', ') : 'none')}</strong></div>
+                    <div style="padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:11px;color:#cbd5e1;"><span style="color:#94a3b8;">Analysis Source</span><br><strong>${esc(String(trace.analysis_source || 'llm'))}</strong></div>
+                </div>
+            `;
+        }
+        if (sys) sys.textContent = String(t.system_prompt || '');
+        if (usr) usr.textContent = String(t.user_prompt || '');
+        if (raw) raw.textContent = String(t.raw_response_text || '');
+        if (m) m.style.display = 'block';
+    },
+
+    closeTraceModal() {
+        const m = $('traceModal');
+        if (m) m.style.display = 'none';
+    },
+
+    copyCurrentTraceSection(section) {
+        if (!this.currentTrace) {
+            this.setNotice('No trace open', 'warn', 2000);
+            return;
+        }
+        const t = this.currentTrace.trace || {};
+        let value = '';
+        if (section === 'system_prompt') value = String(t.system_prompt || '');
+        else if (section === 'user_prompt') value = String(t.user_prompt || '');
+        else if (section === 'raw_response_text') value = String(t.raw_response_text || '');
+        else value = '';
+        this.copyText(value, `${section.replaceAll('_',' ')} copied`, 'Could not copy section');
+    },
+
+    copyCurrentTraceJSON() {
+        if (!this.currentTrace) {
+            this.setNotice('No trace open', 'warn', 2000);
+            return;
+        }
+        this.copyText(JSON.stringify(this.currentTrace, null, 2), 'Trace JSON copied', 'Could not copy trace JSON');
+    },
+
+    downloadCurrentTraceJSON() {
+        if (!this.currentTrace) {
+            this.setNotice('No trace open', 'warn', 2000);
+            return;
+        }
+        try {
+            const blob = new Blob([JSON.stringify(this.currentTrace, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const id = String(this.currentTrace.alert_id || 'trace').replace(/[^a-zA-Z0-9_-]/g, '_');
+            a.href = url;
+            a.download = `llm-trace-${id}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            this.setNotice('Trace JSON downloaded', 'info', 1800);
+        } catch (e) {
+            this.setNotice('Could not download trace JSON', 'warn', 2500);
+        }
+    },
 
     setNotice(message, tone='info', durationMs=2500) {
         try {
@@ -1990,6 +2600,8 @@ const app = {
     logout() {
         api.token=''; localStorage.removeItem(CFG.TOKEN_KEY); clearInterval(this.pollTimer); clearInterval(this.creditTimer); liveFeed.disconnect();
         $('dashboard').style.display='none'; $('liveFeedCard').style.display='none'; $('loginScreen').style.display='flex'; $('loginError').style.display='none';
+        this.closeHelp();
+        this.closeTraceModal();
         const btn=$('loginBtn'); if(btn){btn.disabled=false;btn.innerHTML='<i class="fas fa-sign-in-alt" style="margin-right:8px;"></i>Authenticate';}
     },
 
@@ -2026,13 +2638,23 @@ const app = {
 
     async refreshGovernance(force=false) {
         // force is unused currently; keep signature stable.
-        const [status, pending] = await Promise.all([
+        let [status, pending, history] = await Promise.all([
             api.getGov(),
             api.getGovPending(),
+            api.getGovHistory(50),
         ]);
+        if (!status) status = { status: 'error', status_code: 503, detail: 'network' };
+        if (!pending) pending = { status: 'error', status_code: 503, detail: 'network' };
+        if (!history) history = { status: 'error', status_code: 503, detail: 'network' };
+        if (this.isAuthError(status) || this.isAuthError(pending) || this.isAuthError(history)) {
+            this.setNotice('Session expired. Please sign in again to view automation status.', 'warn', 3000);
+            this.logout();
+            return;
+        }
         this.lastData.gov = status;
         this.lastData.govPending = pending;
-        render.governance(status, pending);
+        this.lastData.govHistory = history;
+        render.governance(status, pending, history);
     },
 
     async setAutomationMode(mode) {
@@ -2040,11 +2662,31 @@ const app = {
         if (res?.status === 'success') {
             this.setNotice(`Automation mode set: ${String(mode).toUpperCase()}`, 'info', 2000);
         } else {
-            const msg = res?.detail || res?.reason || (res?.status_code===401 ? 'Session expired. Please log in again.' : 'Failed to change mode');
+            const msg = res?.detail || res?.reason || (res?.status_code===401 ? 'Session expired. Please sign in again to view automation status.' : 'Failed to change mode');
             this.setNotice(msg, 'warn', 3500);
         }
         await this.refreshGovernance(false);
         // Refresh pills in header too
+        this.refreshAll();
+    },
+
+    async toggleAutonomyForce() {
+        const current = !!(this.lastData?.gov?.autonomous_force_execution);
+        const next = !current;
+        const res = await api.setGovForceAutonomy(next);
+        if (res?.status === 'success') {
+            this.setNotice(
+                next
+                    ? 'Full autonomy profile enabled for autonomous mode'
+                    : 'Full autonomy profile disabled',
+                next ? 'warn' : 'info',
+                2800
+            );
+        } else {
+            const msg = res?.detail || res?.reason || (res?.status_code===401 ? 'Session expired. Please sign in again to view automation status.' : 'Failed to toggle autonomy profile');
+            this.setNotice(msg, 'warn', 3500);
+        }
+        await this.refreshGovernance(false);
         this.refreshAll();
     },
 
@@ -2244,9 +2886,16 @@ const app = {
     },
 
     async refreshAll() {
-        const [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits,govPending,dedup,rateLimiter]=await Promise.all([
+        let [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits,govPending,dedup,rateLimiter]=await Promise.all([
             api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(50),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits(),api.getGovPending(),api.getDedupStats(),api.getAlertRateLimiterStatus()
         ]);
+        if (!gov) gov = { status: 'error', status_code: 503, detail: 'network' };
+        if (!govPending) govPending = { status: 'error', status_code: 503, detail: 'network' };
+        if (this.isAuthError(gov) || this.isAuthError(govPending)) {
+            this.setNotice('Session expired. Please sign in again to view automation status.', 'warn', 3000);
+            this.logout();
+            return;
+        }
         this.lastData={health,metrics,pipeline,alerts,iot:{devices:iot},gov,llmDiag,credits,govPending,dedup,rateLimiter};
         this._renderTab(this.currentTab);
         if (this.currentTab === 'llm-control') {
@@ -2269,7 +2918,7 @@ const app = {
         else if(tab==='alerts')     this.renderAlerts();
         else if(tab==='iot')        render.iot(d.iot||{});
         else if(tab==='kubernetes') render.kubernetes(d);
-        else if(tab==='governance') render.governance(d.gov, d.govPending);
+        else if(tab==='governance') render.governance(d.gov, d.govPending, d.govHistory);
     },
 
     renderAlerts() {
@@ -2283,6 +2932,24 @@ const app = {
 
     // Synthetic attack launchers removed (live attacks only).
 };
+
+// Global modal shortcuts
+document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+        app.closeTraceModal();
+        app.closeHelp();
+    }
+});
+['helpModal', 'traceModal'].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('click', (ev) => {
+        if (ev.target === el) {
+            if (id === 'helpModal') app.closeHelp();
+            if (id === 'traceModal') app.closeTraceModal();
+        }
+    });
+});
 
 // ── Bootstrap ─────────────────────────────────────────────────────────
 (function(){
@@ -2300,7 +2967,7 @@ const app = {
             localStorage.removeItem(CFG.TOKEN_KEY);
             const errEl = $('loginError');
             if (errEl) {
-                errEl.textContent = 'Session expired. Please log in again.';
+                errEl.textContent = 'Session expired. Please sign in again.';
                 errEl.style.display = 'block';
             }
         }

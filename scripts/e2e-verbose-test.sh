@@ -68,9 +68,9 @@ auth_curl() {
 # Phase 1: Baseline
 log_phase "PHASE 1: Establishing Baseline"
 
-BASELINE_ALERTS=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_alerts',0))" || echo 0)
-BASELINE_IOT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('iot_devices_active',0))" || echo 0)
-BASELINE_LLM=$(curl -s "${API_BASE}/api/llm/diagnostics" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}).get('operational',0))" || echo 0)
+BASELINE_ALERTS=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | jq -r '.total_alerts // 0' 2>/dev/null || echo 0)
+BASELINE_IOT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | jq -r '.iot_devices_active // 0' 2>/dev/null || echo 0)
+BASELINE_LLM=$(curl -s "${API_BASE}/api/llm/diagnostics" 2>/dev/null | jq -r '.summary.operational // 0' 2>/dev/null || echo 0)
 
 log_info "Baseline alerts: $BASELINE_ALERTS"
 log_info "Baseline IoT devices: $BASELINE_IOT"
@@ -80,8 +80,8 @@ log_info "Baseline operational LLM providers: $BASELINE_LLM"
 log_phase "PHASE 2: System Health Verification"
 
 HEALTH=$(curl -s "${API_BASE}/health" 2>/dev/null)
-DB_STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('components',{}).get('database','unknown'))")
-K8S_STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin).get('components',{}).get('kubernetes','unknown'))")
+DB_STATUS=$(echo "$HEALTH" | jq -r '.components.database // "unknown"' 2>/dev/null || echo unknown)
+K8S_STATUS=$(echo "$HEALTH" | jq -r '.components.kubernetes // "unknown"' 2>/dev/null || echo unknown)
 
 if [[ "$DB_STATUS" == "connected" ]]; then
     log_success "Database connected"
@@ -99,7 +99,7 @@ fi
 log_phase "PHASE 3: LLM Provider Verification"
 
 LLM_DIAG=$(curl -s "${API_BASE}/api/llm/diagnostics" 2>/dev/null)
-PROVIDERS=$(echo "$LLM_DIAG" | python3 -c "import sys,json; d=json.load(sys.stdin).get('providers',{}); [print(f'{k}:{v.get(\"status\",\"unknown\")}') for k,v in d.items()]" 2>/dev/null || echo "")
+PROVIDERS=$(echo "$LLM_DIAG" | jq -r '.providers | to_entries[]? | "\(.key):\(.value.status // "unknown")"' 2>/dev/null || echo "")
 
 OPERATIONAL=0
 while IFS=: read -r name status; do
@@ -113,32 +113,53 @@ while IFS=: read -r name status; do
     fi
 done <<< "$PROVIDERS"
 
-TOTAL_PROVIDERS=$(echo "$LLM_DIAG" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('providers',{})))" 2>/dev/null || echo 0)
+TOTAL_PROVIDERS=$(echo "$LLM_DIAG" | jq -r '.providers | length // 0' 2>/dev/null || echo 0)
 log_info "Operational providers: $OPERATIONAL/$TOTAL_PROVIDERS"
 
 # Phase 4: Governance Check
 log_phase "PHASE 4: Governance Status"
 
 GOV=$(auth_curl "${API_BASE}/api/governance/status")
-GOV_MODE=$(echo "$GOV" | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode','unknown'))")
-AUTO_EXEC=$(echo "$GOV" | python3 -c "import sys,json; print(json.load(sys.stdin).get('metrics',{}).get('auto_executed',0))")
+GOV_MODE=$(echo "$GOV" | jq -r '.mode // "unknown"' 2>/dev/null || echo unknown)
+AUTO_EXEC=$(echo "$GOV" | jq -r '.metrics.auto_executed // 0' 2>/dev/null || echo 0)
 
 log_info "Governance mode: $GOV_MODE"
 log_info "Auto-executed actions: $AUTO_EXEC"
+
+# Phase 4B: Governance mode E2E validation (real alert path)
+log_phase "PHASE 4B: Governance Mode E2E Validation"
+if [[ ! -f "$SCRIPT_DIR/test-governance-modes.sh" ]]; then
+    log_error "Missing governance mode test script: $SCRIPT_DIR/test-governance-modes.sh"
+    exit 1
+fi
+
+GOV_MODE_TEST_ARGS=(--api-url "$API_BASE" --username admin --password admin --quiet)
+if [[ "${E2E_ENABLE_FULL_AUTONOMY:-0}" == "1" ]]; then
+    GOV_MODE_TEST_ARGS+=(--enable-full-autonomy)
+fi
+
+if bash "$SCRIPT_DIR/test-governance-modes.sh" "${GOV_MODE_TEST_ARGS[@]}"; then
+    log_success "Governance modes validated (manual / assisted / autonomous)"
+else
+    log_error "Governance mode validation failed"
+    exit 1
+fi
 
 # Phase 5: IoT Device Verification
 log_phase "PHASE 5: IoT Device Count"
 
 K8S_COUNT=$(kubectl get pods -n smart-city --field-selector=status.phase=Running 2>/dev/null | grep -E "traffic-camera|healthcare-api|parking-system|env-sensor|street-lighting|mqtt-broker" | wc -l || echo 0)
-API_COUNT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('iot_devices_active',0))" || echo 0)
+API_COUNT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | jq -r '.iot_devices_active // 0' 2>/dev/null || echo 0)
 
 log_info "Kubectl count: $K8S_COUNT pods"
 log_info "API reports: $API_COUNT devices"
 
-if [[ "$API_COUNT" -eq 13 ]]; then
-    log_success "IoT device count correct (13)"
+if [[ "$K8S_COUNT" -gt 0 && "$API_COUNT" -eq "$K8S_COUNT" ]]; then
+    log_success "IoT device count aligned with running smart-city IoT pods ($API_COUNT)"
+elif [[ "$API_COUNT" -eq 13 ]]; then
+    log_success "IoT device count matches default reference profile (13)"
 else
-    log_error "IoT device count differs from demo baseline: $API_COUNT (expected 13)"
+    log_error "IoT device count mismatch: API=$API_COUNT, K8s=$K8S_COUNT (expected pod-aligned or default 13)"
 fi
 
 # Phase 6: Live Attack Test (Optional - skip if --quick)
@@ -155,7 +176,7 @@ if [[ "${1:-}" != "--quick" ]]; then
     
     # Check results
     sleep 3
-    AFTER_ALERTS=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_alerts',0))" || echo 0)
+    AFTER_ALERTS=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | jq -r '.total_alerts // 0' 2>/dev/null || echo 0)
     NEW_ALERTS=$((AFTER_ALERTS - BASELINE_ALERTS))
     
     log_info "Alerts before: $BASELINE_ALERTS"
@@ -181,23 +202,39 @@ fi
 # Phase 7: Dashboard Verification
 log_phase "PHASE 7: Dashboard Verification"
 
-UI_HTML="$(curl -s "${API_BASE}/ui" 2>/dev/null || true)"
+UI_HTML=""
+for _ in {1..5}; do
+    UI_HTML="$(curl -s "${API_BASE}/ui" 2>/dev/null || true)"
+    if [[ -n "$UI_HTML" ]] && grep -q "Smart City IDS" <<<"$UI_HTML"; then
+        break
+    fi
+    sleep 1
+done
 if [[ -n "$UI_HTML" ]] && grep -q "Smart City IDS" <<<"$UI_HTML"; then
     log_success "Dashboard UI accessible"
 else
     log_error "Dashboard UI not accessible"
 fi
 
+HELP_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${API_BASE}/ui/static/help.html" 2>/dev/null || echo 000)"
+if [[ "$HELP_CODE" == "200" ]]; then
+    log_success "Dashboard help page accessible"
+else
+    log_error "Dashboard help page unavailable (HTTP $HELP_CODE)"
+fi
+
 # Phase 8: Pipeline Status
 log_phase "PHASE 8: Pipeline Overview"
 
 PIPELINE=$(curl -s "${API_BASE}/api/pipeline-overview" 2>/dev/null)
-STAGES=$(echo "$PIPELINE" | python3 -c "import sys,json; d=json.load(sys.stdin); [print(f'{s.get(\"label\",\"?\")}:{s.get(\"status\",\"?\")}:{s.get(\"rate_per_minute\",0)}') for s in d.get('stages',[])]" 2>/dev/null || echo "")
+STAGES=$(echo "$PIPELINE" | jq -r '.stages[]? | "\(.label // "?"):\(.status // "?"):\(.rate_per_minute // 0)"' 2>/dev/null || echo "")
 
 while IFS=: read -r label status rate; do
     if [[ -n "$label" ]]; then
         if [[ "$status" == "green" ]]; then
             log_success "$label: $status ($rate/min)"
+        elif [[ "$status" == "idle" || "$status" == "yellow" || "$status" == "warning" ]]; then
+            log_info "$label: $status ($rate/min)"
         else
             log_error "$label: $status ($rate/min)"
         fi
