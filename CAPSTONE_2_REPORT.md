@@ -1008,33 +1008,19 @@ async def test_governance_assisted_mode():
 
 **Strict Live LLM Evaluation:**
 
-The LLM provider comparison was re-run against the live IDS backend using strict provider execution with fallback disabled and database persistence disabled. The completed measured run is stored in `artifacts/llm-eval/strict-real-01` and is documented in `docs/LLM_EVALUATION.md`. The strict run used the same stored alert set across all included providers and only counted rows where `status = success` and `strict_satisfied = true`.
+LLM provider evaluation was executed against the live IDS backend rather than a separate benchmark harness. Stored IDS alerts were selected from the operational alert history, matched against the frozen ground-truth file `docs/reference/LLM_EVAL_GROUND_TRUTH_CORE.csv`, and then re-analyzed provider by provider through the reanalysis endpoint. Evaluation requests used `strict=true` to disable provider fallback and `persist=false` to prevent the evaluation workflow from overwriting operational alert-analysis records. This design ensured that each provider was evaluated on the same stored alert objects under the same scoring rubric.
 
-The completed artifact-backed comparison in `strict-real-01` used:
+The primary completed comparison is stored in `artifacts/llm-eval/strict-real-01` and is documented in `docs/LLM_EVALUATION.md`. That artifact used 14 distinct matched alerts, produced 42 provider-attempts, retained 41 successful strict evaluations, and covered seven scenario families: `anpr_exfiltration`, `lateral_movement_or_platform_access`, `modbus_write_tamper`, `mqtt_misuse`, `onvif_misuse`, `onvif_recon`, and `runtime_shell`. Direct provider scoring excluded cache-hit rows and included only rows where `status = success` and `strict_satisfied = true`.
 
-- 14 distinct matched alerts
-- 42 provider-attempts
-- 41 successful strict evaluations
-- 7 scenario families:
-  - `anpr_exfiltration`
-  - `lateral_movement_or_platform_access`
-  - `modbus_write_tamper`
-  - `mqtt_misuse`
-  - `onvif_misuse`
-  - `onvif_recon`
-  - `runtime_shell`
+| Provider | Model | Distinct Alerts Scored | Success Rate | Avg Latency | p95 Latency | Cost / 1000 Alerts | Cost / 1M Tokens | Quality Score | Severity Accuracy | Threat Accuracy | Action Relevance | Safety Proxy |
+|----------|-------|-----------------------:|-------------:|------------:|------------:|-------------------:|-----------------:|--------------:|------------------:|----------------:|-----------------:|-------------:|
+| Kimi | moonshot-v1-8k | 14 | 100.00% | 3.7296s | 5.320s | $5.00 | $6.00 | 70.86% | 100.00% | 42.86% | 3.43 / 5 | 100.00% |
+| OpenAI | gpt-3.5-turbo | 14 | 100.00% | 2.2774s | 3.054s | $7.65 | $10.00 | 65.14% | 100.00% | 28.57% | 3.43 / 5 | 100.00% |
+| xAI | grok-4-latest | 13 | 92.86% | 25.4889s | 28.854s | $17.58 | $7.90 | 62.77% | 84.62% | 38.46% | 3.38 / 5 | 94.87% |
 
-Included providers for the completed run were `kimi`, `openai`, and `xai`. `gemini` was excluded because it was in cooldown/quota state at run time. Anthropic was excluded from this specific artifact because it was not operational at the time that run was executed.
+The measured evidence from `strict-real-01` supports three conclusions. First, Kimi produced the strongest quality-cost tradeoff in the completed comparison. Second, OpenAI produced the lowest latency among the scored providers. Third, xAI remained operationally usable, but its latency profile was significantly weaker than that of the other two providers and reduced its suitability for time-sensitive IDS response paths.
 
-| Provider | Model | Scored Alerts | Success Rate | Avg Latency | p95 Latency | Cost / 1000 Alerts | Severity Accuracy | Threat Accuracy | Action Relevance | Quality Score | Safety Proxy |
-|----------|-------|--------------:|-------------:|------------:|------------:|-------------------:|------------------:|----------------:|-----------------:|--------------:|-------------:|
-| Kimi | moonshot-v1-8k | 14 | 100.00% | 3.7296s | 5.32s | $5.00 | 100.00% | 42.86% | 3.4286 / 5 | 70.86% | 100.00% |
-| OpenAI | gpt-3.5-turbo | 14 | 100.00% | 2.2774s | 3.054s | $7.65 | 100.00% | 28.57% | 3.4286 / 5 | 65.14% | 100.00% |
-| xAI | grok-4-latest | 13 | 92.86% | 25.4889s | 28.854s | $17.58 | 84.62% | 38.46% | 3.3846 / 5 | 62.77% | 94.87% |
-
-In this completed strict run, Kimi ranked first overall on the measured quality-cost balance, OpenAI was the fastest successful provider, and xAI remained usable but materially slower and less reliable than the other two providers.
-
-A second strict run was later executed after the Anthropic API key was corrected. That follow-up artifact is stored in `artifacts/llm-eval/strict-real-02` and confirms that Anthropic can now complete strict scored evaluations against live stored IDS alerts. However, that run should be treated as an Anthropic inclusion update rather than a replacement for `strict-real-01`, because Kimi experienced provider-side overload and contributed zero scored rows in that heavier four-provider run.
+A follow-up run was executed after the Anthropic API key was corrected. That artifact is stored in `artifacts/llm-eval/strict-real-02`. It confirms that Anthropic can now participate in strict scored evaluation against live stored IDS alerts. However, `strict-real-02` should be interpreted as an Anthropic inclusion update rather than a replacement for `strict-real-01`, because Kimi experienced provider-side overload during that run and contributed zero scored rows.
 
 ![Figure 15: Before vs after — manual vs AI-driven](figures/fig15-before-vs-after.png)
 *Figure 15: Before vs after comparison of manual security operations versus AI-driven IDS.*

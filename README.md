@@ -228,6 +228,41 @@ Reference and archive material are still kept under:
 - `docs/archive/`
 - `docs/archive-legacy/`
 
+## Public LLM Evaluation Summary
+
+The current artifact-backed LLM study evaluates providers on one fixed task: structured analysis of stored IDS alerts.
+
+Primary completed comparison:
+- artifact: `artifacts/llm-eval/strict-real-01`
+- providers scored: `Kimi`, `OpenAI`, `xAI`
+- distinct matched alerts: `14`
+- provider-attempts: `42`
+- successful strict evaluations: `41`
+- scenario families: `7`
+
+Measured outcomes from `strict-real-01`:
+- `Kimi`
+  - strongest measured quality-cost tradeoff
+  - quality score: `70.86%`
+  - cost: `$5.00` per 1000 alerts
+- `OpenAI`
+  - lowest measured latency
+  - average latency: `2277.4 ms`
+  - p95 latency: `3054.0 ms`
+- `xAI`
+  - operationally usable, but much slower
+  - average latency: `25488.9 ms`
+  - quality score: `62.77%`
+
+Follow-up inclusion run:
+- artifact: `artifacts/llm-eval/strict-real-02`
+- `Anthropic` completed strict scored evaluation successfully
+- `Gemini` remains excluded from the completed study because it was unavailable due quota/cooldown during the evaluation window
+
+Current boundary:
+- the repository contains a real strict-evaluation pipeline and completed artifact-backed results
+- it does **not** yet contain a completed `500 x 5-provider` study
+
 ## LLM Provider Notes (Operational Reality)
 
 The system supports multiple providers (e.g., Kimi, xAI, OpenAI, Anthropic, Gemini), but runtime health depends on:
