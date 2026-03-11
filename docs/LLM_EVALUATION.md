@@ -1,6 +1,6 @@
 # LLM Evaluation
 
-## 1. Scope
+## 1. Study Scope
 
 This document is the canonical record of the LLM evaluation conducted for the Smart City IDS.
 It documents the implemented evaluation path, the frozen parameters, the measured artifacts, the scoring method, and the limits of the current evidence.
@@ -11,7 +11,7 @@ The evaluation covers one task only:
 
 It does not evaluate generic conversational quality.
 
-## 2. Evaluation Objective
+## 2. Research Objective
 
 The objective of the study is to compare LLM providers on the same IDS-analysis task under controlled conditions.
 For each stored alert, the provider is expected to return a structured response containing:
@@ -33,7 +33,7 @@ The response schema is enforced by the live backend and is defined by the curren
   - `services/ids-api/src/llm_engine_xai.py`
   - `services/ids-api/src/llm_engine_gemini.py`
 
-## 3. System Under Evaluation
+## 3. Experimental Environment
 
 The study uses the live Smart City IDS stack:
 
@@ -47,7 +47,24 @@ The study uses the live Smart City IDS stack:
 
 No separate benchmark harness or synthetic prompt-only testbed was used for the measured runs documented here.
 
-## 4. Dataset Construction
+## 4. Materials Used In The Study
+
+The study used the following concrete project components.
+
+| Component | Role In The Evaluation |
+|---|---|
+| `scripts/run-live-attacks.sh` | generates real cluster activity and fresh alerts |
+| `scripts/llm-compare-report.py` | executes strict reanalysis and writes evaluation artifacts |
+| `docs/reference/LLM_EVAL_GROUND_TRUTH_CORE.csv` | frozen ground-truth labels and scenario mappings |
+| `POST /api/alerts/{id}/reanalyze` | strict, non-persistent per-provider evaluation path |
+| `GET /api/alerts` | source of stored alerts used for provider comparison |
+| `GET /api/llm/diagnostics` | provider readiness and runtime-state verification |
+| `artifacts/llm-eval/strict-real-01` | primary completed comparison artifact |
+| `artifacts/llm-eval/strict-real-02` | Anthropic inclusion follow-up artifact |
+
+The study therefore depends on the real runtime stack, the stored alert corpus, the frozen ground-truth file, and the strict reanalysis endpoint.
+
+## 5. Dataset Construction
 
 The evaluation dataset is derived from the live IDS pipeline rather than from manually written prompts.
 The process is:
@@ -61,7 +78,7 @@ The process is:
 
 This design ensures that the evaluation is performed on the same alert objects used by the operational system.
 
-## 5. Frozen Parameters
+## 6. Frozen Parameters
 
 The following conditions were fixed within each strict evaluation run:
 
@@ -81,7 +98,7 @@ Important correction:
 - the system was not evaluated at `temperature = 0`
 - the configured runtime value is `LLM_TEMPERATURE=0.3`
 
-## 6. Strict Evaluation Method
+## 7. Provider Invocation Protocol
 
 The strict evaluation path uses:
 
@@ -99,11 +116,26 @@ Meaning:
 - `persist=false`
   - prevents the evaluation run from overwriting the original operational alert analysis in the database
 
-This is the basis for a defensible provider comparison.
+This invocation contract is the basis for a defensible provider comparison.
 
-## 7. Evaluation Commands
+## 8. Study Procedure
 
-### 7.1 Provider and platform readiness
+The completed study workflow was:
+
+1. Verify that the live IDS API, authentication path, and provider diagnostics are reachable.
+2. Refresh the recent alert window with controlled attack activity.
+3. Pull recent stored alerts from the live IDS backend.
+4. Match stored alerts against the frozen ground-truth CSV.
+5. Balance the selected alerts with `--max-per-family`.
+6. Re-analyze each alert against one provider at a time with fallback disabled.
+7. Record one raw row per provider-attempt.
+8. Compute per-row scoring fields.
+9. Aggregate provider-level and scenario-level summaries.
+10. Export CSV, JSON, and chart artifacts.
+
+## 9. Evaluation Commands
+
+### 9.1 Provider and platform readiness
 
 ```bash
 bash scripts/llm-manager.sh check
@@ -111,13 +143,13 @@ curl -s http://localhost:30800/health | jq .
 curl -s http://localhost:30800/api/llm/diagnostics | jq .
 ```
 
-### 7.2 Alert-window refresh before strict comparison
+### 9.2 Alert-window refresh before strict comparison
 
 ```bash
 bash scripts/run-live-attacks.sh --mode protocol --duration 12 --show-alerts 8 --verbose
 ```
 
-### 7.3 Completed three-provider comparison
+### 9.3 Completed three-provider comparison
 
 ```bash
 python3 scripts/llm-compare-report.py \
@@ -133,7 +165,7 @@ python3 scripts/llm-compare-report.py \
   --out-dir artifacts/llm-eval/strict-real-01
 ```
 
-### 7.4 Anthropic inclusion follow-up
+### 9.4 Anthropic inclusion follow-up
 
 ```bash
 python3 scripts/llm-compare-report.py \
@@ -149,7 +181,7 @@ python3 scripts/llm-compare-report.py \
   --out-dir artifacts/llm-eval/strict-real-02
 ```
 
-### 7.5 Future five-provider target
+### 9.5 Future five-provider target
 
 ```bash
 python3 scripts/llm-compare-report.py \
@@ -167,7 +199,7 @@ python3 scripts/llm-compare-report.py \
 
 This command should not be cited as completed unless all five providers are simultaneously operational and the artifact is present.
 
-## 8. What `scripts/llm-compare-report.py` Does
+## 10. What `scripts/llm-compare-report.py` Does
 
 The evaluation script performs the following steps:
 
@@ -184,7 +216,7 @@ The evaluation script performs the following steps:
 
 This is why the artifact directory is sufficient to defend the study: it contains both raw evidence and derived summaries.
 
-## 9. Artifact Inventory
+## 11. Artifact Inventory
 
 Each evaluation artifact directory contains:
 
@@ -202,21 +234,21 @@ Completed runs also contain validation appendices:
 - `validation_evidence.json`
 - `slide_alignment.json`
 
-## 10. Metrics
+## 12. Metrics
 
-### 10.1 Quality metrics
+### 12.1 Quality metrics
 
 - severity accuracy
 - threat-type accuracy
 - action relevance score
 - composite quality score
 
-### 10.2 Performance metrics
+### 12.2 Performance metrics
 
 - average latency
 - p95 latency
 
-### 10.3 Cost metrics
+### 12.3 Cost metrics
 
 - total tokens
 - estimated total cost
@@ -224,7 +256,7 @@ Completed runs also contain validation appendices:
 - estimated cost per 1000 alerts
 - estimated cost per 1M tokens
 
-### 10.4 Safety and reliability metrics
+### 12.4 Safety and reliability metrics
 
 - strict success rate
 - false-high severity rate
@@ -233,9 +265,9 @@ Completed runs also contain validation appendices:
 - unsafe action recommendation rate
 - safety calibration proxy
 
-## 11. Metric Computation
+## 13. Metric Computation
 
-### 11.1 Provider attempts and success rate
+### 13.1 Provider attempts and success rate
 
 Source file:
 
@@ -248,7 +280,7 @@ Rules:
 - failure = any row not meeting the success rule
 - success rate = `strict_success / attempts`
 
-### 11.2 Latency
+### 13.2 Latency
 
 Source field:
 
@@ -256,7 +288,7 @@ Source field:
 
 Reported values are computed from successful strict rows only.
 
-### 11.3 Token usage and cost
+### 13.3 Token usage and cost
 
 Source fields:
 
@@ -271,7 +303,7 @@ Derived values:
 - cost per 1000 alerts = `cost per alert * 1000`
 - cost per 1M tokens = derived from the script's token-rate table
 
-### 11.4 Quality scoring
+### 13.4 Quality scoring
 
 Source file:
 
@@ -287,7 +319,25 @@ Per-row fields:
 - `weighted_false_low_penalty`
 - `unsafe_action_recommendation_0_1`
 
-## 12. Primary Measured Run: `strict-real-01`
+## 14. Current Runtime Readiness
+
+At the time of the latest runtime verification, the provider states were:
+
+- `anthropic`
+  - strict test passed
+  - provider operational
+- `kimi`
+  - operational
+- `openai`
+  - configured and unverified in the current process
+- `xai`
+  - configured and unverified in the current process
+- `gemini`
+  - strict test failed with `429 quota exceeded`
+
+This means the current runtime state is sufficient for Anthropic-backed follow-up evaluation, but Gemini still cannot be treated as part of a completed scored comparison.
+
+## 15. Primary Measured Run: `strict-real-01`
 
 This is the primary completed artifact-backed comparison.
 
@@ -333,7 +383,7 @@ The primary completed run supports the following findings:
 - xAI remained usable, but was materially slower and less reliable than the other two scored providers.
 - Severity accuracy was consistently stronger than threat-type accuracy across the scored providers.
 
-## 13. Anthropic Inclusion Run: `strict-real-02`
+## 16. Anthropic Inclusion Run: `strict-real-02`
 
 This run was executed after the Anthropic API key was corrected.
 It should be treated as an inclusion update rather than a replacement for `strict-real-01`.
@@ -374,7 +424,7 @@ This means:
 - Anthropic can now be included in future strict comparisons
 - `strict-real-02` does not replace `strict-real-01` as the main completed comparison artifact
 
-## 14. Current Provider Framing
+## 17. Current Provider Framing
 
 The current evidence supports the following provider status framing.
 
@@ -386,7 +436,7 @@ The current evidence supports the following provider status framing.
 | Anthropic | `claude-sonnet-4-20250514` | scored successfully in `strict-real-02` |
 | Gemini | `gemini-2.0-flash` | not currently evaluable due quota/cooldown |
 
-## 15. Limitations
+## 18. Limitations
 
 The current study has the following limits.
 
@@ -398,7 +448,7 @@ The current study has the following limits.
 - some attack stages validate protocol-recognizable malicious behavior rather than full exploit chains
 - the ground-truth rubric is explicit and frozen, but it remains a human-authored evaluation reference
 
-## 16. Safe Conclusions
+## 19. Safe Conclusions
 
 The current artifact-backed evidence supports these conclusions.
 
@@ -408,7 +458,7 @@ The current artifact-backed evidence supports these conclusions.
 - Anthropic is now operational and can be included in future strict comparison runs.
 - Gemini remains outside the completed evaluation because of quota/cooldown.
 
-## 17. What Remains To Be Done
+## 20. What Remains To Be Done
 
 To complete the larger study, the following work remains:
 
@@ -417,6 +467,6 @@ To complete the larger study, the following work remains:
 - execute the full `500 x 5-provider` strict comparison
 - expand the scenario set beyond the current completed coverage
 
-## 18. Public Summary
+## 21. Public Summary
 
 The current artifact-backed LLM study compares providers on one fixed task: analysis of stored IDS alerts. The completed main comparison (`strict-real-01`) evaluated Kimi, OpenAI, and xAI against the same stored alert set with fallback disabled and database persistence disabled. In that run, Kimi produced the best measured quality-cost balance, OpenAI produced the lowest latency, and xAI remained usable but significantly slower. A later follow-up run (`strict-real-02`) confirmed that Anthropic can now participate in strict scored evaluation. Gemini is still excluded from the completed study because it was unavailable due quota/cooldown during the evaluation window.
