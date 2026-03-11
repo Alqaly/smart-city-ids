@@ -513,7 +513,7 @@ These parts of the plan are structurally correct:
 
 ## 16. Recommended Report Framing
 
-For the written report and viva, use this structure.
+For the written report and technical review, use this structure.
 
 ### 16.1 Completed scored comparison
 

@@ -1,6 +1,6 @@
 # Smart City IDS - Log Format Guide
 
-**Audience:** Students, academic examiners, and SOC analysts  
+**Audience:** Students, academic reviewers, and SOC analysts  
 **Purpose:** Understand how security alerts flow through the system and what each log entry means
 
 ---
