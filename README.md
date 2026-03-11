@@ -257,11 +257,16 @@ Measured outcomes from `strict-real-01`:
 Follow-up inclusion run:
 - artifact: `artifacts/llm-eval/strict-real-02`
 - `Anthropic` completed strict scored evaluation successfully
-- `Gemini` remains excluded from the completed scored artifact because it was unavailable during that evaluation window, although the current runtime has since recovered on `gemini-2.5-flash`
+
+Expanded five-provider attempt:
+- artifact: `artifacts/llm-eval/strict-real-03`
+- `Anthropic`, `Gemini`, `OpenAI`, and `xAI` completed strict scored evaluation successfully
+- `Kimi` failed all requested attempts because of provider overload
+- dataset size: `16` matched alerts, `80` provider-attempts, `64` successful strict evaluations, `8` scenario families
 
 Current boundary:
 - the repository contains a real strict-evaluation pipeline and completed artifact-backed results
-- it does **not** yet contain a completed `500 x 5-provider` study
+- it does **not** yet contain a stable completed `500 x 5-provider` study
 
 ## LLM Provider Notes (Operational Reality)
 

@@ -1022,6 +1022,8 @@ The measured evidence from `strict-real-01` supports three conclusions. First, K
 
 A follow-up run was executed after the Anthropic API key was corrected. That artifact is stored in `artifacts/llm-eval/strict-real-02`. It confirms that Anthropic can now participate in strict scored evaluation against live stored IDS alerts. However, `strict-real-02` should be interpreted as an Anthropic inclusion update rather than a replacement for `strict-real-01`, because Kimi experienced provider-side overload during that run and contributed zero scored rows.
 
+After the Gemini model synchronization was corrected to `gemini-2.5-flash`, an expanded five-provider strict attempt was executed and stored in `artifacts/llm-eval/strict-real-03`. That artifact used 16 matched alerts, produced 80 provider-attempts, retained 64 successful strict evaluations, and covered eight scenario families. Anthropic, Gemini, OpenAI, and xAI all contributed scored rows in this expanded run. Kimi did not contribute scored rows because all 16 strict attempts failed with provider-side overload. Therefore, `strict-real-03` should be interpreted as the current artifact-backed five-provider attempt rather than as a stable replacement for the primary balanced comparison in `strict-real-01`.
+
 ![Figure 15: Before vs after — manual vs AI-driven](figures/fig15-before-vs-after.png)
 *Figure 15: Before vs after comparison of manual security operations versus AI-driven IDS.*
 

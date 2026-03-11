@@ -335,7 +335,7 @@ At the time of the latest runtime verification, the provider states were:
 - `gemini`
   - strict test failed with `429 quota exceeded`
 
-This means the current runtime state is sufficient for Anthropic-backed follow-up evaluation, but Gemini still cannot be treated as part of a completed scored comparison.
+This means the current runtime state is sufficient for expanded strict comparison runs that include Anthropic and Gemini, but runtime stability must still be checked at run time because provider availability can change between executions.
 
 ## 15. Primary Measured Run: `strict-real-01`
 
@@ -424,49 +424,91 @@ This means:
 - Anthropic can now be included in future strict comparisons
 - `strict-real-02` does not replace `strict-real-01` as the main completed comparison artifact
 
-## 17. Current Provider Framing
+## 17. Expanded Five-Provider Attempt: `strict-real-03`
+
+This run was executed after the Gemini model was corrected to `gemini-2.5-flash` and Anthropic was already operational. It is the current largest artifact-backed strict comparison attempt in the repository.
+
+### 17.1 Dataset summary
+
+Source:
+
+- `artifacts/llm-eval/strict-real-03/README.json`
+
+Measured values:
+
+- distinct matched alerts used: `16`
+- provider attempts: `80`
+- successful strict evaluations: `64`
+- failed strict evaluations: `16`
+- scenario families scored: `8`
+- providers requested: `anthropic`, `gemini`, `kimi`, `openai`, `xai`
+- providers with scored rows: `anthropic`, `gemini`, `openai`, `xai`
+
+### 17.2 Provider results
+
+| Provider | Model | Distinct Alerts Scored | Success Rate | Avg Latency (ms) | P95 Latency (ms) | Cost / 1000 Alerts (USD) | Cost / 1M Tokens (USD) | Quality Score | Severity Accuracy | Threat Accuracy | Action Relevance | Safety Proxy |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Anthropic | `claude-sonnet-4-20250514` | 16 | 100.00% | 5122.4 | 5770.0 | 15.01 | 16.00 | 65.00% | 93.75% | 31.25% | 3.75 / 5 | 96.35% |
+| Gemini | `gemini-2.5-flash` | 16 | 100.00% | 6108.6 | 6711.0 | 1.43 | 0.87 | 21.00% | 12.50% | 0.00% | 4.00 / 5 | 50.00% |
+| OpenAI | `gpt-4o` | 16 | 100.00% | 3347.1 | 4459.0 | 7.69 | 10.00 | 70.00% | 100.00% | 37.50% | 3.75 / 5 | 100.00% |
+| xAI | `grok-4-latest` | 16 | 100.00% | 21304.9 | 27096.0 | 17.48 | 7.72 | 72.50% | 100.00% | 43.75% | 3.75 / 5 | 100.00% |
+| Kimi | `moonshot-v1-128k` | 0 | 0.00% | N/A | N/A | N/A | 0.00 | N/A | N/A | N/A | N/A | N/A |
+
+### 17.3 Interpretation
+
+The expanded five-provider attempt supports the following findings:
+
+- Anthropic and Gemini now complete strict scored evaluation successfully against the live backend.
+- OpenAI remains the fastest of the scored providers in this expanded run.
+- xAI again shows the strongest measured quality score, but at much higher latency.
+- Gemini is inexpensive and reliable in this run, but its scored output quality is materially weaker than the other successful providers.
+- Kimi contributed zero scored rows because all 16 strict attempts failed with provider overload.
+
+This means `strict-real-03` is useful as a current five-provider attempt, but it does not replace `strict-real-01` as the primary balanced comparison artifact because one requested provider failed all attempts.
+
+## 18. Current Provider Framing
 
 The current evidence supports the following provider status framing.
 
 | Provider | Model Used | Evidence Status |
 |---|---|---|
-| Kimi | `moonshot-v1-8k` | scored successfully in `strict-real-01`; provider overload in `strict-real-02` |
-| OpenAI | `gpt-3.5-turbo` | scored successfully in both strict artifacts |
-| xAI | `grok-4-latest` | scored successfully in both strict artifacts |
-| Anthropic | `claude-sonnet-4-20250514` | scored successfully in `strict-real-02` |
-| Gemini | `gemini-2.5-flash` | excluded from the completed scored artifacts because it was unavailable during that evaluation window; currently operational again in the live runtime after the model update |
+| Kimi | `moonshot-v1-128k` | scored successfully in `strict-real-01`; provider overload in `strict-real-02` and `strict-real-03` |
+| OpenAI | `gpt-4o` | scored successfully in `strict-real-03`; earlier artifacts used `gpt-3.5-turbo` |
+| xAI | `grok-4-latest` | scored successfully in all strict artifacts where it was requested |
+| Anthropic | `claude-sonnet-4-20250514` | scored successfully in `strict-real-02` and `strict-real-03` |
+| Gemini | `gemini-2.5-flash` | scored successfully in `strict-real-03` after the live model/config fix |
 
-## 18. Limitations
+## 19. Limitations
 
 The current study has the following limits.
 
-- the main completed comparison covers `3` scored providers, not `5`
-- `Gemini` was not usable during the main evaluation window, so it does not appear in the completed scored artifacts
-- Anthropic required a later inclusion run
+- the primary balanced comparison (`strict-real-01`) still covers `3` scored providers, not `5`
+- the expanded five-provider attempt (`strict-real-03`) scored `4` providers; Kimi failed all requested attempts under provider overload
+- Anthropic and Gemini required later follow-up runs to appear in scored artifacts
 - the completed runs used `runs=1`, not a repeatability design
-- the main comparison used `14` distinct matched alerts across `7` scenario families, not a `500 x 5-provider` study
+- the largest current strict attempt used `16` distinct matched alerts across `8` scenario families, not a `500 x 5-provider` study
 - some attack stages validate protocol-recognizable malicious behavior rather than full exploit chains
 - the ground-truth rubric is explicit and frozen, but it remains a human-authored evaluation reference
 
-## 19. Safe Conclusions
+## 20. Safe Conclusions
 
 The current artifact-backed evidence supports these conclusions.
 
 - Kimi is the strongest measured quality-cost tradeoff in `strict-real-01`.
-- OpenAI is the fastest measured provider in the completed strict runs where it scored.
-- xAI remains the slowest provider in the completed strict runs and should be treated cautiously in latency-sensitive workflows.
-- Anthropic is now operational and can be included in future strict comparison runs.
-- Gemini remains outside the completed scored artifacts because it was unavailable during that evaluation window, even though the current runtime has recovered.
+- OpenAI is the fastest measured provider in the current expanded strict run where Anthropic and Gemini also scored.
+- xAI remains the slowest provider in every strict run where it scored and should be treated cautiously in latency-sensitive workflows.
+- Anthropic and Gemini are now both operational and can be included in future strict comparison runs.
+- Kimi is currently the main blocker to a stable five-provider comparison because of provider-side overload during longer strict runs.
 
-## 20. What Remains To Be Done
+## 21. What Remains To Be Done
 
 To complete the larger study, the following work remains:
 
 - run a repeatability pass with `runs >= 3`
-- stabilize Gemini and Kimi at the same time
+- stabilize Kimi so that all five requested providers score in the same artifact
 - execute the full `500 x 5-provider` strict comparison
 - expand the scenario set beyond the current completed coverage
 
-## 21. Public Summary
+## 22. Public Summary
 
-The current artifact-backed LLM study compares providers on one fixed task: analysis of stored IDS alerts. The completed main comparison (`strict-real-01`) evaluated Kimi, OpenAI, and xAI against the same stored alert set with fallback disabled and database persistence disabled. In that run, Kimi produced the best measured quality-cost balance, OpenAI produced the lowest latency, and xAI remained usable but significantly slower. A later follow-up run (`strict-real-02`) confirmed that Anthropic can participate in strict scored evaluation. Gemini is still absent from the completed scored artifacts because it was unavailable during that evaluation window, although the live runtime has since recovered on `gemini-2.5-flash`.
+The current artifact-backed LLM study compares providers on one fixed task: analysis of stored IDS alerts. The primary balanced comparison (`strict-real-01`) evaluated Kimi, OpenAI, and xAI against the same stored alert set with fallback disabled and database persistence disabled. A later inclusion run (`strict-real-02`) confirmed that Anthropic can score successfully. The latest expanded attempt (`strict-real-03`) requested all five providers and produced scored rows for Anthropic, Gemini, OpenAI, and xAI across 16 matched alerts and 8 scenario families, while Kimi failed all attempts because of provider overload. This means the repository now contains a real five-provider attempt, but not yet a stable five-provider completed comparison.

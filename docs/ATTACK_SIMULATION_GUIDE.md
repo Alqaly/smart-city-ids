@@ -315,11 +315,20 @@ Main interpretation:
 - OpenAI delivered the lowest measured latency.
 - xAI was usable, but much slower and less reliable in the same dataset.
 
+Expanded five-provider attempt from `artifacts/llm-eval/strict-real-03`:
+
+| Provider | Model | Alerts | Success | Avg Latency (ms) | Cost / 1000 Alerts (USD) | Quality Score | Safety Proxy |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Anthropic | `claude-sonnet-4-20250514` | 16 | 100.00% | 5122.4 | 15.01 | 65.00% | 96.35% |
+| Gemini | `gemini-2.5-flash` | 16 | 100.00% | 6108.6 | 1.43 | 21.00% | 50.00% |
+| OpenAI | `gpt-4o` | 16 | 100.00% | 3347.1 | 7.69 | 70.00% | 100.00% |
+| xAI | `grok-4-latest` | 16 | 100.00% | 21304.9 | 17.48 | 72.50% | 100.00% |
+| Kimi | `moonshot-v1-128k` | 0 | 0.00% | N/A | N/A | N/A | N/A |
+
 ## Current Limits Of The LLM Study
 
-- the main completed comparison contains `3` fully scored providers
-- `Gemini` was excluded during the main run because it was unavailable during that evaluation window
-- `Anthropic` required a later inclusion run
+- the primary balanced comparison contains `3` fully scored providers
+- the latest five-provider attempt scored `4` providers and lost `Kimi` to provider overload
 - the main comparison used `runs=1`, not a repeatability study
 - this is not yet a `500 x 5-provider` study
 - some attack stages validate detector-recognizable malicious behavior rather than full exploit chains
