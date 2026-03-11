@@ -1,6 +1,25 @@
 # Smart City IDS Documentation Index
 
-This index is the authoritative entry point for technical documentation in `docs/`.
+This is the main documentation entry point for the repository.
+
+If you are new to the project, do not start by reading every file in `docs/`.
+Use the small current set below first, then go into reference or archive material only if needed.
+
+## Start Here: 5 Documents
+
+Use these in order:
+
+1. [../README.md](../README.md) — project overview, scope, quick start
+2. [QUICKSTART.md](QUICKSTART.md) — first deployment and first checks
+3. [ARCHITECTURE.md](ARCHITECTURE.md) — system layout and component boundaries
+4. [HOW_IT_WORKS.md](HOW_IT_WORKS.md) — end-to-end processing flow
+5. [OPERATIONS.md](OPERATIONS.md) — day-to-day use, checks, and recovery
+
+If you only need a fast operational check, use:
+
+```bash
+bash scripts/pre-demo-check.sh
+```
 
 ## Read This First (External Reviewers / Experts)
 
@@ -9,6 +28,15 @@ This index is the authoritative entry point for technical documentation in `docs
 3. [HOW_IT_WORKS.md](HOW_IT_WORKS.md) — end-to-end alert pipeline behavior
 4. [API_REFERENCE.md](API_REFERENCE.md) — API contracts and endpoint behavior
 5. [OPERATIONS.md](OPERATIONS.md) + [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — runtime operations and recovery
+
+## What Belongs Where
+
+- top-level `docs/` files:
+  current operational, setup, architecture, API, and troubleshooting docs
+- `docs/reference/`:
+  supporting material for examiners, supervisors, reports, metrics, and snapshots
+- `docs/archive/` and `docs/archive-legacy/`:
+  historical material, not current system truth
 
 ## Documentation Trust Model (Important)
 
@@ -88,6 +116,8 @@ Use the active script set under `scripts/` for deployment, validation, scaling, 
 
 ## Reference / Supporting Docs
 
+Use [reference/README.md](reference/README.md) if you need the purpose of the `reference/` folder before opening individual files.
+
 | Document | Purpose |
 |---|---|
 | [COMMANDS_REFERENCE.md](COMMANDS_REFERENCE.md) | Admin and kubectl command reference |
@@ -114,3 +144,9 @@ curl -s http://localhost:30800/health | jq
 curl -s http://localhost:30800/api/metrics | jq '{total_alerts,iot_devices_active}'
 curl -s http://localhost:30800/api/iot/devices | jq '{total,logical_total,pod_backed_total,counting_mode}'
 ```
+
+## Practical Rule
+
+- If a document explains how the current system runs, it should live at the top level of `docs/`.
+- If a document supports a defense, supervisor meeting, or paper appendix, it belongs in `docs/reference/`.
+- If a document describes an older state of the project, it belongs in `docs/archive/` or `docs/archive-legacy/`.

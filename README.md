@@ -199,29 +199,34 @@ Use these scripts as the active operational surface of the repository.
 
 ## Documentation (Authoritative Map)
 
-Start here:
-- [`docs/INDEX.md`](docs/INDEX.md) — authoritative docs map + trust model
+Do not start by reading the whole `docs/` tree.
 
-Key docs by audience:
+Use this smaller path first:
 
-### External expert / reviewer
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md)
-- [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
-- [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
+1. [`docs/INDEX.md`](docs/INDEX.md)
+2. [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
+3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+4. [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md)
+5. [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 
-### Operator workflows
-- [`docs/reference/DEMO_DAY_RUNBOOK.md`](docs/reference/DEMO_DAY_RUNBOOK.md)
-- [`docs/reference/DEMO_QA_CHECKLIST.md`](docs/reference/DEMO_QA_CHECKLIST.md)
-- [`docs/reference/DEMO_CHEAT_SHEET.md`](docs/reference/DEMO_CHEAT_SHEET.md)
-- [`docs/LLM_CONTROL_AND_TROUBLESHOOTING.md`](docs/LLM_CONTROL_AND_TROUBLESHOOTING.md)
+Then go deeper only if needed:
 
-### Academic / defense
-- [`docs/reference/EXAMINER_QA_30.md`](docs/reference/EXAMINER_QA_30.md)
-- [`docs/reference/EXAMINER_IOT_QA_20.md`](docs/reference/EXAMINER_IOT_QA_20.md)
-- [`docs/reference/ACADEMIC_CONTEXT.md`](docs/reference/ACADEMIC_CONTEXT.md)
-- [`docs/reference/CAPSTONE_EVIDENCE_MATRIX.md`](docs/reference/CAPSTONE_EVIDENCE_MATRIX.md)
+- API and setup:
+  - [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md)
+  - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+  - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
+- LLM:
+  - [`docs/LLM_CONFIGURATION.md`](docs/LLM_CONFIGURATION.md)
+  - [`docs/LLM_CONTROL_AND_TROUBLESHOOTING.md`](docs/LLM_CONTROL_AND_TROUBLESHOOTING.md)
+  - [`docs/LLM_EVALUATION.md`](docs/LLM_EVALUATION.md)
+- IoT:
+  - [`docs/IOT_INTEGRATION_SDK.md`](docs/IOT_INTEGRATION_SDK.md)
+  - [`docs/IOT_EMULATION_REPORT.md`](docs/IOT_EMULATION_REPORT.md)
+
+Reference and archive material are still kept under:
+- `docs/reference/`
+- `docs/archive/`
+- `docs/archive-legacy/`
 
 ## LLM Provider Notes (Operational Reality)
 

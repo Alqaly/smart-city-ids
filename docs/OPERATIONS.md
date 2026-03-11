@@ -1,186 +1,131 @@
-# Smart City IDS Operations Guide
+# Operations Guide
 
-Day-to-day operating procedures for the active Smart City IDS research deployment.
+Day-to-day operating guide for the current Smart City IDS deployment.
 
----
+## Daily checks
 
-## 1) Daily Health Checks
+Use:
+
+```bash
+bash scripts/pre-demo-check.sh
+bash scripts/demo-readiness.sh --quick
+```
+
+These are the fastest current checks for:
+- cluster reachability
+- core pods
+- API health
+- dashboard availability
+- detector visibility
+- login and protected endpoint access
+
+## Access
+
+Direct local path:
+- `http://localhost:30800/ui`
+
+Stable forwarded path:
 
 ```bash
 bash scripts/access-stack.sh start
 bash scripts/access-stack.sh status
-
-kubectl get pods -n smart-city
-kubectl get pods -n monitoring
-kubectl get pods -n falco-system
 ```
 
-```bash
-curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
-curl -s http://localhost:30800/api/metrics | jq '{total_alerts,iot_devices_active,llm_engines}'
-```
+Use the forwarded path if local NodePort access is inconvenient.
 
-If `localhost:30800` is not reachable in your environment:
+## Authentication
 
-```bash
-bash scripts/access-stack.sh start
-curl -s http://127.0.0.1:8000/health | jq .
-```
+Default local credentials are environment-dependent. The common local default is:
+- `admin / admin`
 
----
-
-## 2) Authentication and Governance Checks
+Example login:
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"operator","password":"operator"}' | jq -r '.access_token')
+  -d '{"username":"admin","password":"admin"}' | jq -r '.access_token')
 ```
+
+## Health and metrics
+
+```bash
+curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
+curl -s http://localhost:30800/api/metrics | jq '{total_alerts,iot_devices_active,llm_engines}'
+curl -s http://localhost:30800/api/iot/devices | jq '{total,logical_total,pod_backed_total,counting_mode}'
+```
+
+## Governance and automation
+
+Read status:
 
 ```bash
 curl -s -H "Authorization: Bearer $TOKEN" \
   http://localhost:30800/api/governance/status | jq '{mode,pending_count,metrics}'
-curl -s -H "Authorization: Bearer $TOKEN" \
-  http://localhost:30800/api/governance/pending | jq .
 ```
 
----
-
-## 3) Alert Pipeline Monitoring
-
-```bash
-curl -s http://localhost:30800/api/alerts?limit=10 | jq '.alerts'
-curl -s http://localhost:30800/api/rate-limiter/status | jq .
-curl -s http://localhost:30800/api/circuit-breaker/status | jq .
-```
-
-Alert History semantics in the dashboard:
-
-- The UI loads a wider recent alert window and groups repeated alerts into 5-minute incident buckets.
-- Grouping key: detector, rule, severity, namespace/pod/container context, and threat signature.
-- The detector summary above the table explains why a detector may be missing from view. If Suricata is not shown there, the loaded window is dominated by other detectors.
-
-Audit a specific alert end-to-end:
-
-```bash
-ALERT_ID=123
-curl -s http://localhost:30800/api/audit/trace/alert-${ALERT_ID} | jq .
-```
-
----
-
-## 4) LLM Operations
-
-```bash
-curl -s http://localhost:30800/api/llm/diagnostics | jq .
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/llm/status | jq .
-```
-
-Dashboard usage semantics:
-
-- `Provider Breakdown (today)` is DB-backed usage for real IDS alert-analysis calls.
-- Manual `Test Key` / `Probe` actions affect provider diagnostics and runtime status only.
-- A provider can recover from stale startup-failure state after a successful strict/manual test.
-- `Hist` in the success column means historical DB usage exists, but runtime success counters were reset after restart.
-
-Overview metric semantics:
-
-- `Dedup + LLM Savings` is shown only after the deduplicator has processed real duplicate-capable security alerts in the current process.
-- `Flood Suppression` reflects cumulative alert-rate throttling since the last rate-limiter reset/startup, not a rolling live-only UI window.
-
-Strict provider diagnostic:
-
-```bash
-curl -s -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:30800/api/llm/test/openai?strict=true" \
-  -H "Content-Type: application/json" \
-  -d '{"test_prompt":"strict provider diagnostic"}' | jq .
-```
-
----
-
-## 5) Attack-Chain Exercise Workflow
-
-Current deployment path is CLI-driven via `scripts/run-live-attacks.sh`.
-
-```bash
-# Baseline preflight (script name retained for compatibility)
-bash scripts/pre-demo-check.sh
-
-# Dry-run exercise plan
-bash scripts/run-live-attacks.sh --mode all --duration 20 --dry-run --verbose
-
-# MQTT abuse chain
-bash scripts/run-live-attacks.sh --mode mqtt --duration 30 --show-alerts 5 --verbose
-
-# Full exercise
-bash scripts/run-live-attacks.sh --mode all --duration 30 --show-alerts 3 --verbose
-```
-
-Governance mode validation:
+Run real governance validation:
 
 ```bash
 bash scripts/test-governance-modes.sh
 bash scripts/e2e-verbose-test.sh --quick
 ```
 
-These checks require at least one operational LLM provider. With zero operational providers, they fail early with the live diagnostics summary instead of producing a misleading governance result.
+These require at least one operational LLM provider.
 
----
+## LLM operations
 
-## 6) Deployment and Update Workflow
+Fast check:
 
 ```bash
-# Build/import ids-api image, refresh static ConfigMaps, restart pods
+bash scripts/llm-manager.sh check
+```
+
+Direct diagnostics:
+
+```bash
+curl -s http://localhost:30800/api/llm/diagnostics | jq .
+```
+
+Important meanings:
+- provider usage tables count real alert-analysis calls only
+- manual tests update diagnostics, not DB-backed usage totals
+- `unverified` means configured but not yet proven by a successful live call in the current process
+
+## Live demo and attack flow
+
+Run a live protocol/runtime exercise:
+
+```bash
+bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose
+```
+
+Use two terminals during demos:
+
+```bash
+# Processed IDS events
+bash scripts/live-pipeline-log.sh --attacks
+
+# Raw component logs
+SINCE=5m bash scripts/tail-pipeline-pods.sh
+```
+
+## Code updates
+
+After code changes:
+
+```bash
 bash scripts/deploy-code.sh
 ```
 
-`deploy-code.sh` now refreshes:
-- `ids-app-static`
-- `ids-app-static-js`
-- `ids-app-static-js-modules`
-
-This is required because the deployment mounts `/app/static*` from ConfigMaps.
-
----
-
-## 7) Incident Response Checks
-
-When high-severity alerts occur:
+For full cluster bring-up or recovery:
 
 ```bash
-curl -s http://localhost:30800/api/alerts?limit=20 | jq '.alerts[] | {id,rule,severity,threat_type,actions_taken}'
-kubectl get networkpolicy -n smart-city
-kubectl get deploy -n smart-city
+sudo bash scripts/start-everything.sh
 ```
 
----
+## Scaling
 
-## 8) Common Recovery Actions
-
-```bash
-kubectl logs -n smart-city -l app=ids-api --tail=200
-kubectl rollout restart deployment/ids-api -n smart-city
-kubectl rollout status deployment/ids-api -n smart-city
-```
-
-```bash
-kubectl logs -n falco-system -l app=falco-forwarder --tail=100
-kubectl logs -n monitoring -l app=suricata-forwarder --tail=100
-```
-
-If DB fallback is suspected:
-
-```bash
-curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
-```
-
----
-
-## 9) Capacity Scaling
-
-Use repeatable profiles instead of ad-hoc manual scaling:
+Preferred path:
 
 ```bash
 bash scripts/scale-profile.sh status
@@ -189,10 +134,23 @@ bash scripts/scale-profile.sh medium
 bash scripts/scale-profile.sh large
 ```
 
-For advanced `ids-api` scaling:
+Quick manual replica changes:
 
 ```bash
-IDS_API_REPLICAS=2 bash scripts/scale-profile.sh medium
+bash scripts/scale-iot.sh
 ```
 
-Keep `ids-api` at one replica unless shared state for dedup/rate-limit is enabled.
+## Log access
+
+API logs:
+
+```bash
+kubectl logs -n smart-city -l app=ids-api --tail=200
+```
+
+Forwarder logs:
+
+```bash
+kubectl logs -n falco-system -l app=falco-forwarder --tail=100
+kubectl logs -n monitoring -l app=suricata-forwarder --tail=100
+```
