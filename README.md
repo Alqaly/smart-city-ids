@@ -9,11 +9,11 @@ Kubernetes-native intrusion detection and response platform for smart-city-style
 
 This repository contains both:
 - a working research testbed, and
-- capstone/defense documentation and supporting materials.
+- technical report and supporting materials.
 
-## Scope (Important for External Reviewers)
+## Scope (Important for External Readers)
 
-This is a **research/capstone prototype**, not a production SOC platform. Some components are evaluation-focused (IoT emulators, controlled attack scripts, examiner prep docs), while core runtime components are real and testable.
+This is a **research prototype**, not a production SOC platform. Some components are evaluation-focused (IoT emulators, controlled attack scripts, review-support docs), while core runtime components are real and testable.
 
 To avoid stale-claim confusion:
 - Use this `README.md` + [`docs/INDEX.md`](docs/INDEX.md) as the **current entry points**

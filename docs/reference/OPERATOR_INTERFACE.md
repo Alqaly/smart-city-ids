@@ -340,7 +340,7 @@ Response time: 10-50x faster
 
 ---
 
-## For Supervisors: Why This Is PhD Work
+## For Reviewers: Why This Is PhD Work
 
 ### 1. Decision Quality, Not Metrics
 - **Bad approach**: "System blocked 1000 attacks today!"

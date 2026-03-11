@@ -19,7 +19,7 @@ Purpose: establish one authoritative source per claim category before drafting t
 | KPI definitions and formulas | [../METRICS_SPEC.md](../METRICS_SPEC.md) | [METRICS_AUDIT.md](METRICS_AUDIT.md) | Definitions from spec; realism commentary from audit. |
 | KPI result values used in report tables | [PROJECT_METRICS.md](PROJECT_METRICS.md) | [DEMO_READINESS_REPORT.md](DEMO_READINESS_REPORT.md) | Keep one run window per table; label timeframe explicitly. |
 | Security model and ATT&CK mapping | [../SECURITY_MODEL.md](../SECURITY_MODEL.md) | [DETECTION_TELEMETRY_ATTACK_QA.md](DETECTION_TELEMETRY_ATTACK_QA.md) | Use model for formal mapping; QA doc for deep explanations. |
-| Governance/HITL behavior | [OPERATOR_INTERFACE.md](OPERATOR_INTERFACE.md) | [../SUPERVISOR_GUIDE.md](../SUPERVISOR_GUIDE.md) | Keep terminology consistent: autonomous/assisted/manual (legacy aliases may appear in historical docs). |
+| Governance/HITL behavior | [OPERATOR_INTERFACE.md](OPERATOR_INTERFACE.md) | [../REVIEW_GUIDE.md](../REVIEW_GUIDE.md) | Keep terminology consistent: autonomous/assisted/manual (legacy aliases may appear in historical docs). |
 | LLM limitations and safe-mode behavior | [LLM_REALITY_CHECK.md](LLM_REALITY_CHECK.md) | [FORCED_ARCHITECTURE_50Q.md](FORCED_ARCHITECTURE_50Q.md) | Limit claims to demonstrated behavior and stated constraints. |
 | Deployment and runtime ops | [../DEPLOYMENT.md](../DEPLOYMENT.md) | [../OPERATIONS.md](../OPERATIONS.md) | Deployment steps from primary; operational runbooks from secondary. |
 | Validation protocol | [../VALIDATION_CHECKLIST.md](../VALIDATION_CHECKLIST.md) | [DEMO_READINESS_REPORT.md](DEMO_READINESS_REPORT.md) | Checklist is method; readiness report is evidence output. |

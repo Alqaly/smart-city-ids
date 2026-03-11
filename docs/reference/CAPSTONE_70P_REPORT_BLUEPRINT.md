@@ -16,7 +16,7 @@ This is the implementation-ready writing blueprint for producing a full capstone
 | Chapter | Target Pages | Primary Sources |
 |---|---:|---|
 | Abstract + Keywords | 1 | [../../README.md](../../README.md), [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md) |
-| 1. Introduction | 6 | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md), [../SUPERVISOR_GUIDE.md](../SUPERVISOR_GUIDE.md), [../../README.md](../../README.md) |
+| 1. Introduction | 6 | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md), [../REVIEW_GUIDE.md](../REVIEW_GUIDE.md), [../../README.md](../../README.md) |
 | 2. Problem Statement & Objectives | 7 | [OPERATOR_INTERFACE.md](OPERATOR_INTERFACE.md), [LLM_REALITY_CHECK.md](LLM_REALITY_CHECK.md), [../HOW_IT_WORKS.md](../HOW_IT_WORKS.md) |
 | 3. Related Context / Positioning | 6 | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md), [../SECURITY_MODEL.md](../SECURITY_MODEL.md), [EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md) |
 | 4. System Architecture | 10 | [../ARCHITECTURE.md](../ARCHITECTURE.md), [../HOW_IT_WORKS.md](../HOW_IT_WORKS.md), [CAPSTONE_FIGURES.md](CAPSTONE_FIGURES.md) |

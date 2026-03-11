@@ -148,7 +148,7 @@ Common non-code failures:
 
 ## 9. Minimum evidence bundle
 
-For supervisor/examiner review, capture:
+For technical review, capture:
 - output of `bash scripts/pre-demo-check.sh`
 - output of `bash scripts/test-governance-modes.sh`
 - output of `bash scripts/e2e-verbose-test.sh --quick`

@@ -3,7 +3,7 @@
 This folder contains supporting material, not the primary runtime path.
 
 Use it when you need:
-- examiner and supervisor preparation
+- examiner and reviewer preparation
 - capstone/report support
 - evidence matrices
 - time-bound validation snapshots

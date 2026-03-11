@@ -21,7 +21,7 @@ If you only need a fast operational check, use:
 bash scripts/pre-demo-check.sh
 ```
 
-## Read This First (External Reviewers / Experts)
+## Read This First (External Readers / Technical Review)
 
 1. [../README.md](../README.md) — project overview, current scope, quick start
 2. [ARCHITECTURE.md](ARCHITECTURE.md) — system design and component boundaries
@@ -34,7 +34,7 @@ bash scripts/pre-demo-check.sh
 - top-level `docs/` files:
   current operational, setup, architecture, API, and troubleshooting docs
 - `docs/reference/`:
-  supporting material for examiners, supervisors, reports, metrics, and snapshots
+  supporting material for technical review, reports, metrics, and snapshots
 - `docs/archive/` and `docs/archive-legacy/`:
   historical material, not current system truth
 
@@ -43,7 +43,7 @@ bash scripts/pre-demo-check.sh
 Use this to avoid stale/misleading claims when sharing the repo externally.
 
 - `Current / operational`: architecture, API, setup, deployment, operations, troubleshooting, security model, LLM configuration
-- `Validation / examiner prep`: runbooks, Q&A, readiness reports (useful, but context-specific)
+- `Validation / review prep`: runbooks, Q&A, readiness reports (useful, but context-specific)
 - `Academic / report support`: capstone blueprints, evidence matrices, defense notes
 - `Historical / archived`: `docs/archive-legacy/` and `docs/archive/` (not current system truth)
 - `Generated artifacts`: coverage matrices and reports may reflect a specific date/run
@@ -89,7 +89,7 @@ Use the active script set under `scripts/` for deployment, validation, scaling, 
 - LLM Provider Breakdown is DB-backed and counts only alert-analysis calls executed by the IDS pipeline.
 - Manual provider probes and sanity tests update provider diagnostics/runtime status, but they do not increment the DB-backed usage totals.
 
-## Validation / Examiner Docs (Context-Specific)
+## Validation / Review Docs (Context-Specific)
 
 | Document | Purpose |
 |---|---|
@@ -98,7 +98,7 @@ Use the active script set under `scripts/` for deployment, validation, scaling, 
 | [reference/DEMO_CHEAT_SHEET.md](reference/DEMO_CHEAT_SHEET.md) | Fast command reference during demo |
 | [reference/DEMO_READINESS_REPORT.md](reference/DEMO_READINESS_REPORT.md) | Snapshot readiness report (time-bound) |
 | [reference/DOC_CLAIMS_VALIDATION_2026-02-24.md](reference/DOC_CLAIMS_VALIDATION_2026-02-24.md) | Claim validation snapshot (time-bound) |
-| [reference/EXAMINER_QA_30.md](reference/EXAMINER_QA_30.md) | Main examiner Q&A prep |
+| [reference/EXAMINER_QA_30.md](reference/EXAMINER_QA_30.md) | Main review Q&A prep |
 | [reference/EXAMINER_IOT_QA_20.md](reference/EXAMINER_IOT_QA_20.md) | IoT specialist Q&A (deep dive) |
 | [reference/FORCED_ARCHITECTURE_50Q.md](reference/FORCED_ARCHITECTURE_50Q.md) | Deep backup / gap-analysis style Q&A (contains historical references) |
 
@@ -148,5 +148,5 @@ curl -s http://localhost:30800/api/iot/devices | jq '{total,logical_total,pod_ba
 ## Practical Rule
 
 - If a document explains how the current system runs, it should live at the top level of `docs/`.
-- If a document supports a defense, supervisor meeting, or paper appendix, it belongs in `docs/reference/`.
+- If a document supports a defense, technical review, or paper appendix, it belongs in `docs/reference/`.
 - If a document describes an older state of the project, it belongs in `docs/archive/` or `docs/archive-legacy/`.

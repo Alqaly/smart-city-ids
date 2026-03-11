@@ -34,7 +34,7 @@ Start here:
 - top-level `docs/`:
   current runtime and operational docs
 - `docs/reference/`:
-  supporting material for examiners, reports, metrics, and snapshots
+  supporting material for reviewers, reports, metrics, and snapshots
 - `docs/archive/` and `docs/archive-legacy/`:
   historical material only
 

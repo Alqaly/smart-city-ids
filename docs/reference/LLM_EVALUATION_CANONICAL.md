@@ -1,7 +1,7 @@
 # LLM Evaluation Canonical Method (Paper-Ready)
 
 This is the canonical evaluation method for comparing LLM providers in Smart City IDS.
-Use this document as the single source of truth for report tables/charts and supervisor evidence.
+Use this document as the single source of truth for report tables/charts and reviewer evidence.
 
 ## 1) Scope and Truth Boundaries
 

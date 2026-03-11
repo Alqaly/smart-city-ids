@@ -84,7 +84,7 @@ This project intentionally mixes **real cluster activity** with **detector-signa
 - The IDS response path (dedup -> LLM -> governance -> K8s actions) is exercised under live conditions
 - Limitations are explicit and reproducible
 
-## How to run each scenario step-by-step for an examiner
+## How to run each scenario step-by-step for a reviewer
 
 ### Baseline verification (run first)
 
@@ -208,7 +208,7 @@ bash scripts/run-live-attacks.sh --mode mqtt --duration 30 --show-alerts 5 --ver
 **Expected detector**
 - Suricata (network-pattern detections) and IDS API correlation output
 
-### Safe rehearsal / examiner preview (no traffic execution)
+### Safe rehearsal / reviewer preview (no traffic execution)
 
 Use `--dry-run` to print the planned steps and expected detections without executing cluster activity:
 

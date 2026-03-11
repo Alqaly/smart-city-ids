@@ -8,7 +8,7 @@ Use this matrix while drafting to guarantee traceability and reduce examiner cha
 
 | Chapter | Must-Prove Outcome | Required Evidence Files |
 |---|---|---|
-| Ch1 Introduction | Problem relevance and project motivation | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md), [../../README.md](../../README.md), [../SUPERVISOR_GUIDE.md](../SUPERVISOR_GUIDE.md) |
+| Ch1 Introduction | Problem relevance and project motivation | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md), [../../README.md](../../README.md), [../REVIEW_GUIDE.md](../REVIEW_GUIDE.md) |
 | Ch2 Problem & Objectives | Clear threat model + operational pain points | [../SECURITY_MODEL.md](../SECURITY_MODEL.md), [OPERATOR_INTERFACE.md](OPERATOR_INTERFACE.md), [LLM_REALITY_CHECK.md](LLM_REALITY_CHECK.md) |
 | Ch3 Positioning | Why this approach vs alternatives | [ACADEMIC_CONTEXT.md](ACADEMIC_CONTEXT.md), [EXAMINER_DEFENSE.md](EXAMINER_DEFENSE.md) |
 | Ch4 Architecture | End-to-end pipeline and component decomposition | [../ARCHITECTURE.md](../ARCHITECTURE.md), [../HOW_IT_WORKS.md](../HOW_IT_WORKS.md), [CAPSTONE_FIGURES.md](CAPSTONE_FIGURES.md) |

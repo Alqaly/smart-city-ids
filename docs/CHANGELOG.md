@@ -241,7 +241,7 @@ Completed a live-stack hardening pass for governance mode validation, automation
 
 ### Summary
 
-Focused upgrades in response to examiner feedback on IoT realism, staged attack methodology, fleet scaling, and LLM provider resilience visibility. This batch improves the actual implementation (not just docs) while keeping the existing demo workflow intact.
+Focused upgrades in response to reviewer feedback on IoT realism, staged attack methodology, fleet scaling, and LLM provider resilience visibility. This batch improves the actual implementation (not just docs) while keeping the existing demo workflow intact.
 
 ### Backend / API
 
@@ -253,7 +253,7 @@ Focused upgrades in response to examiner feedback on IoT realism, staged attack 
     - `logical_total`
     - `pod_backed_total`
     - `counting_mode`
-  - Enables logical fleet tracking independent of Kubernetes pod count (examiner-facing improvement for 100+ device discussions).
+  - Enables logical fleet tracking independent of Kubernetes pod count (reviewer-facing improvement for 100+ device discussions).
 
 - **`services/ids-api/src/infrastructure/middleware.py`**
   - Added `CircuitBreaker.reset()` to support operator-driven breaker recovery (`Retry All Providers`) and eliminate stale `open` states.
@@ -287,13 +287,13 @@ Focused upgrades in response to examiner feedback on IoT realism, staged attack 
 - **`smart-city-services/parking-system/app.py`**
   - Added `PARKING_SLOT_MULTIPLIER` / `DEVICE_COUNT_MULTIPLIER` env support for scaling slot counts per lot.
 
-### Documentation / Examiner Prep
+### Documentation / Reviewer Prep
 
 - **`docs/ARCHITECTURE.md`**
   - Added “Current vs Target Architecture” table (current implementation vs research-grade roadmap).
 
 - **`docs/reference/EXAMINER_QA_30.md`**
-  - Added “Research Limitations + Roadmap” viva section.
+  - Added “Research Limitations + Roadmap” technical review section.
   - Added scenario-spec link in the QA Master Guide.
 
 - **`docs/IOT_INTEGRATION_SDK.md`**
@@ -1162,13 +1162,13 @@ Implemented transparent, explainable, controllable human-in-the-loop security go
   - Confidence scoring breakdown
   - Workload reduction comparison (before/after)
   
-- `docs/SUPERVISOR_GUIDE.md`: Comprehensive guide for academic evaluators
+- `docs/REVIEW_GUIDE.md`: Comprehensive guide for academic evaluators
   - PhD-level contribution explanation
   - Novel approaches (transparent reasoning, graduated automation)
   - Measurable outcomes (10-50x speedup, 10-20x alert reduction)
   - Relevant research areas (Human-AI, Cybersecurity, Interpretability, Automation Safety)
   - Comparison to industry state-of-the-art
-  - Evaluation checklist for examiners
+  - Evaluation checklist for reviewers
   - Demo talking points
   - Grading rubric
   - Future research directions

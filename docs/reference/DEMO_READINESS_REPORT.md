@@ -8,7 +8,7 @@
 
 **Date:** February 3, 2026  
 **Prepared By:** Senior IIoT Security Engineer  
-**Target Audience:** Academic Supervisors & Students  
+**Target Audience:** Academic Reviewers & Students  
 **Purpose:** Academic demonstration preparation and system validation
 
 ---
@@ -601,7 +601,7 @@ kubectl exec -n smart-city deploy/healthcare-api -- nmap -sT localhost
 1. **Execute node cleanup now** (commands provided in Section 1.2)
 2. **Run demo-walkthrough.sh in auto mode** to identify issues
 3. **Create 2-slide backup deck:** "LLM Response Example" and "Architecture Trade-offs"
-4. **Schedule final dry-run** 1 day before demo with supervisor feedback
+4. **Schedule final dry-run** 1 day before demo with review feedback
 
 Would you like me to:
 - A) Design the exact demo timeline with spoken script
