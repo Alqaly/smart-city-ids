@@ -191,7 +191,7 @@ bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 -
   - `SMARTCITY ANPR data scraping`
 - IDS API correlation / LLM analysis after detector ingestion
 
-### Scenario 4: MQTT topic abuse / spoofed client behavior
+### Scenario 5: MQTT topic abuse / spoofed client behavior
 
 **What it represents**
 - MQTT wildcard traversal and unauthorized control-topic publish attempts
@@ -215,6 +215,114 @@ Use `--dry-run` to print the planned steps and expected detections without execu
 ```bash
 bash scripts/run-live-attacks.sh --mode all --duration 20 --dry-run --verbose
 ```
+
+## How These Attack Runs Feed The LLM Study
+
+The attack runner is not only for detector validation. It is also one of the ways the LLM evaluation dataset is produced.
+
+When `scripts/run-live-attacks.sh` executes:
+
+1. real activity is generated in the cluster
+2. Falco and Suricata produce alerts
+3. the IDS API stores those alerts and their analysis records
+4. those stored alerts later become input to the LLM evaluation workflow
+
+For the LLM study, the project does **not** compare providers by writing synthetic prompts manually. Instead, it takes stored IDS alerts from the live system and compares provider outputs against the frozen ground-truth file:
+
+- `docs/reference/LLM_EVAL_GROUND_TRUTH_CORE.csv`
+
+## LLM Task And Output Format
+
+In the evaluation workflow, the LLM has one fixed task: analyze IDS alerts.
+
+For each stored alert, the backend expects a structured answer containing:
+
+- severity (`1` to `10`)
+- threat type
+- short incident summary
+- analyst recommendations
+- automated action proposals
+- confidence and reasoning fields
+
+This is the same operational analysis path used by the live system. The evaluation measures that real path rather than a separate benchmark prompt.
+
+## Strict Evaluation Method
+
+The canonical evaluation command is:
+
+```bash
+python3 scripts/llm-compare-report.py \
+  --api-url http://localhost:30800 \
+  --username admin \
+  --password admin \
+  --alerts-limit 400 \
+  --ground-truth docs/reference/LLM_EVAL_GROUND_TRUTH_CORE.csv \
+  --strict-eval \
+  --providers kimi,openai,xai \
+  --runs 1 \
+  --max-per-family 2 \
+  --out-dir artifacts/llm-eval/strict-real-01
+```
+
+This workflow:
+
+- reads recent stored alerts
+- matches them to frozen ground truth
+- re-runs each alert against one provider at a time
+- uses `strict=true` so fallback is disabled
+- uses `persist=false` so operational alert records are not overwritten
+- records latency, tokens, estimated cost, and output fields
+- computes quality, safety, and cost summaries
+
+## LLM Metrics Used
+
+The measured LLM study reports:
+
+### Quality
+- severity accuracy
+- threat-type accuracy
+- action relevance
+- composite quality score
+
+### Latency
+- average latency
+- p95 latency
+
+### Cost
+- total tokens
+- estimated cost per alert
+- estimated cost per 1000 alerts
+
+### Safety
+- false-high severity rate
+- false-low severity rate
+- unsafe action rate
+- safety calibration proxy
+
+## Current Measured Results
+
+From `artifacts/llm-eval/strict-real-01`:
+
+| Provider | Model | Alerts | Success | Avg Latency (ms) | Cost / 1000 Alerts (USD) | Quality Score | Severity Accuracy | Threat Accuracy | Safety Proxy |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Kimi | `moonshot-v1-8k` | 14 | 100.00% | 3729.6 | 5.00 | 70.86% | 100.00% | 42.86% | 100.00% |
+| OpenAI | `gpt-3.5-turbo` | 14 | 100.00% | 2277.4 | 7.65 | 65.14% | 100.00% | 28.57% | 100.00% |
+| xAI | `grok-4-latest` | 13 | 92.86% | 25488.9 | 17.58 | 62.77% | 84.62% | 38.46% | 94.87% |
+
+Main interpretation:
+
+- Kimi delivered the strongest measured quality-cost tradeoff in the main strict comparison.
+- OpenAI delivered the lowest measured latency.
+- xAI was usable, but much slower and less reliable in the same dataset.
+
+## Current Limits Of The LLM Study
+
+- the main completed comparison contains `3` fully scored providers
+- `Gemini` was excluded during the main run because of quota/cooldown
+- `Anthropic` required a later inclusion run
+- the main comparison used `runs=1`, not a repeatability study
+- this is not yet a `500 x 5-provider` study
+- some attack stages validate detector-recognizable malicious behavior rather than full exploit chains
 
 ## Operational notes
 

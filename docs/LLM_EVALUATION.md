@@ -81,7 +81,78 @@ The evaluation uses the live Smart City IDS stack:
 
 No mock harness was used for the measured runs documented here.
 
-## 5. Frozen Evaluation Parameters
+## 5. LLM Analysis Task
+
+The LLM has one fixed job in this system: analyze normalized IDS alerts.
+
+For each alert, the backend sends a structured alert context and expects a structured JSON answer. The current prompt and schema path require the model to produce:
+
+- `summary`
+  - one to two sentence description of what happened
+- `severity`
+  - integer from `1` to `10`
+- `threat_type`
+  - normalized threat family label
+- `confidence`
+  - float from `0.0` to `1.0`
+- `key_indicators`
+  - evidence items supporting the conclusion
+- `mitigating_factors`
+  - ambiguity or factors reducing confidence
+- `business_impact`
+  - concise impact statement
+- `reasoning`
+  - short explanation of the conclusion
+- `recommendations`
+  - analyst-facing actions
+- `automated_actions`
+  - machine-readable actions proposed for the IDS automation layer
+
+This structure is defined by the live backend prompt/schema path in:
+
+- `services/ids-api/src/llm_manager.py`
+- `services/ids-api/src/llm_response_schema.py`
+- provider-specific prompt builders such as:
+  - `services/ids-api/src/llm_engine_openai.py`
+  - `services/ids-api/src/llm_engine_xai.py`
+  - `services/ids-api/src/llm_engine_gemini.py`
+
+The evaluation is therefore not measuring generic chatbot output. It is measuring one fixed IDS-analysis task with one normalized schema.
+
+## 6. How Attack Runs Feed The Dataset
+
+The dataset was not created by writing synthetic prompts by hand.
+
+It was produced through the normal IDS pipeline:
+
+1. `scripts/run-live-attacks.sh` generated real cluster activity.
+2. Falco and Suricata produced detections from that activity.
+3. The IDS API stored the alerts and analysis records in PostgreSQL.
+4. The evaluation script later read those stored alerts from the live backend.
+5. Alerts were matched against the frozen ground-truth file:
+   - `docs/reference/LLM_EVAL_GROUND_TRUTH_CORE.csv`
+
+This matters because the LLM study uses the same alert objects that appeared in the operational alert history, not a disconnected benchmark harness.
+
+The current completed artifact-backed run `strict-real-01` used:
+
+- `14` distinct stored alerts selected for strict comparison
+- `42` provider-attempts (`14 alerts x 3 providers`)
+- `41` successful strict evaluations
+- `1` failed strict evaluation
+- `7` scenario families
+
+Scenario families covered in `strict-real-01`:
+
+- `anpr_exfiltration`
+- `lateral_movement_or_platform_access`
+- `modbus_write_tamper`
+- `mqtt_misuse`
+- `onvif_misuse`
+- `onvif_recon`
+- `runtime_shell`
+
+## 7. Frozen Evaluation Parameters
 
 These parameters were held fixed during the strict comparative runs.
 
@@ -103,7 +174,7 @@ Important correction:
 - the current configured value is `LLM_TEMPERATURE=0.3`
 - therefore the correct documentation is `temperature = 0.3`, not `temperature = 0`
 
-## 6. Why `strict=true` and `persist=false` Matter
+## 8. Why `strict=true` and `persist=false` Matter
 
 The evaluation depends on one API path:
 
@@ -123,7 +194,7 @@ Meaning:
 
 This is what makes the evaluation safe and defensible.
 
-## 7. Implementation Steps
+## 9. Implementation Steps
 
 The evaluation implementation followed these steps.
 
@@ -169,9 +240,9 @@ bash scripts/run-live-attacks.sh --mode protocol --duration 12 --show-alerts 8 -
 
 6. Validated the generated artifact directories by recomputing counts and checking the raw rows.
 
-## 8. Canonical Commands
+## 10. Canonical Commands
 
-### 8.1 Completed 3-provider comparison
+### 10.1 Completed 3-provider comparison
 
 ```bash
 python3 scripts/llm-compare-report.py \
@@ -187,7 +258,7 @@ python3 scripts/llm-compare-report.py \
   --out-dir artifacts/llm-eval/strict-real-01
 ```
 
-### 8.2 Anthropic inclusion run
+### 10.2 Anthropic inclusion run
 
 ```bash
 python3 scripts/llm-compare-report.py \
@@ -203,7 +274,7 @@ python3 scripts/llm-compare-report.py \
   --out-dir artifacts/llm-eval/strict-real-02
 ```
 
-### 8.3 Large-scale target command
+### 10.3 Large-scale target command
 
 This is the real command structure for a future `500 x 5-provider` study:
 
@@ -223,7 +294,7 @@ python3 scripts/llm-compare-report.py \
 
 This command is only valid for final reporting if all five providers are simultaneously operational.
 
-## 9. Meaning Of Each Command Option
+## 11. Meaning Of Each Command Option
 
 | Option | Meaning |
 |---|---|
@@ -237,7 +308,35 @@ This command is only valid for final reporting if all five providers are simulta
 | `--max-per-family` | maximum number of alerts retained per scenario family |
 | `--out-dir` | output directory for CSV, JSON, and charts |
 
-## 10. Artifact Contents
+## 12. What `scripts/llm-compare-report.py` Actually Does
+
+The evaluation script performs the following workflow:
+
+1. Authenticates to the live IDS API using the provided username and password.
+2. Pulls recent alerts from the running system.
+3. Loads the frozen ground-truth CSV and compiles the rule-pattern matching logic.
+4. Selects alerts that match the ground-truth entries.
+5. Balances the dataset using `--max-per-family`.
+6. For each selected alert and provider, calls:
+
+```text
+POST /api/alerts/{id}/reanalyze?engine=<provider>&strict=true&persist=false
+```
+
+7. Records one raw row per provider-attempt in `strict_eval_raw_results.csv`.
+8. Computes scoring fields per successful row.
+9. Aggregates provider-level and scenario-level summaries.
+10. Writes CSV tables, JSON summaries, and charts into the output directory.
+
+This is why the artifact directory is sufficient to defend the study. It contains:
+
+- raw per-call evidence
+- provider summaries
+- scenario summaries
+- validation JSON
+- chart outputs
+
+## 13. Artifact Contents
 
 Each artifact directory contains:
 
@@ -262,7 +361,7 @@ Validation appendices are also present for the completed runs:
 - `validation_evidence.json`
 - `slide_alignment.json`
 
-## 11. How The Metrics Are Measured
+## 14. How The Metrics Are Measured
 
 ### 11.1 Provider attempts and success rate
 
@@ -318,6 +417,105 @@ Per-row fields used:
 - `false_low_severity_0_1`
 - `weighted_false_low_penalty`
 - `unsafe_action_recommendation_0_1`
+
+## 15. Metrics Reported In The Study
+
+The study reports four metric groups.
+
+### 15.1 Quality
+
+- severity accuracy
+- threat-type accuracy
+- action relevance score
+- composite quality score
+
+### 15.2 Latency
+
+- average latency
+- p95 latency
+
+### 15.3 Cost
+
+- total tokens
+- estimated total cost
+- estimated cost per alert
+- estimated cost per 1000 alerts
+- estimated cost per 1M tokens
+
+### 15.4 Safety and reliability
+
+- strict success rate
+- false-high severity rate
+- false-low severity rate
+- OT under-escalation rate
+- unsafe action recommendation rate
+- safety calibration proxy
+
+## 16. Measured Results
+
+### 16.1 Main completed strict comparison: `strict-real-01`
+
+This is the primary completed artifact-backed comparison.
+
+| Provider | Model | Distinct Alerts Scored | Success Rate | Avg Latency (ms) | P95 Latency (ms) | Cost / 1000 Alerts (USD) | Quality Score | Severity Accuracy | Threat Accuracy | Action Relevance | Safety Proxy |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Kimi | `moonshot-v1-8k` | 14 | 100.00% | 3729.6 | 5320.0 | 5.00 | 70.86% | 100.00% | 42.86% | 3.43 / 5 | 100.00% |
+| OpenAI | `gpt-3.5-turbo` | 14 | 100.00% | 2277.4 | 3054.0 | 7.65 | 65.14% | 100.00% | 28.57% | 3.43 / 5 | 100.00% |
+| xAI | `grok-4-latest` | 13 | 92.86% | 25488.9 | 28854.0 | 17.58 | 62.77% | 84.62% | 38.46% | 3.38 / 5 | 94.87% |
+
+Main findings from this run:
+
+- `Kimi` delivered the best measured quality-cost tradeoff.
+- `OpenAI` delivered the best latency.
+- `xAI` was usable, but materially slower and less reliable in this dataset.
+- Threat-type accuracy was weaker than severity accuracy across all three scored providers.
+
+### 16.2 Anthropic inclusion follow-up: `strict-real-02`
+
+This run was used to verify Anthropic after the provider became operational.
+
+| Provider | Model | Distinct Alerts Scored | Success Rate | Avg Latency (ms) | P95 Latency (ms) | Cost / 1000 Alerts (USD) | Quality Score | Severity Accuracy | Threat Accuracy | Action Relevance | Safety Proxy |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Anthropic | `claude-sonnet-4-20250514` | 16 | 100.00% | 5182.8 | 5851.0 | 14.90 | 65.00% | 93.75% | 31.25% | 3.75 / 5 | 98.12% |
+| OpenAI | `gpt-3.5-turbo` | 16 | 100.00% | 2022.3 | 2733.0 | 7.42 | 67.50% | 100.00% | 31.25% | 3.75 / 5 | 100.00% |
+| xAI | `grok-4-latest` | 16 | 100.00% | 21454.0 | 25781.0 | 17.40 | 72.50% | 100.00% | 43.75% | 3.75 / 5 | 100.00% |
+
+Important note:
+
+- `strict-real-02` is not a replacement for `strict-real-01`.
+- It is a follow-up inclusion run showing that Anthropic can now be scored.
+- `Kimi` failed all attempts in that run due live provider overload (`429 engine_overloaded_error`).
+
+## 17. Study Limitations
+
+The current LLM study still has important limits.
+
+- The main completed comparison is `3 providers`, not `5`.
+- `Gemini` was not usable during the evaluation window because of quota/cooldown.
+- `Anthropic` required a follow-up artifact to be included.
+- The main scored artifact used `runs=1`, not a repeatability study.
+- The completed main comparison used `14` distinct matched alerts across `7` scenario families, not a `500 x 5-provider` city-scale run.
+- Some attack stages are protocol/detector-oriented validation stages rather than full exploit chains.
+- Ground truth is frozen and explicit, but it is still a human-authored research rubric.
+
+## 18. Safe Conclusions
+
+Based on the current artifact-backed evidence:
+
+- Kimi is the strongest measured quality-cost tradeoff in `strict-real-01`.
+- OpenAI is the fastest measured provider in both completed strict runs.
+- xAI remains the slowest provider in both completed strict runs and should be treated carefully in latency-sensitive response paths.
+- Anthropic is now operational and can be included in future strict comparison runs.
+- Gemini remains blocked by quota/cooldown and cannot be treated as part of a completed 5-provider evaluation yet.
+
+## 19. What Still Needs To Be Done
+
+To complete the larger study:
+
+- run a true repeatability pass with `runs >= 3`
+- stabilize `Gemini` and `Kimi` at the same time
+- execute the full `500 x 5-provider` strict run
+- expand the scenario set from the current 7–8 families to the broader target coverage
 
 Composite quality score:
 
