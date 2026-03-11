@@ -6,6 +6,8 @@ Treat `scripts/archive/`, `scripts/demos/`, and `*.disabled` files as historical
 
 ## Recommended Startup Sequence
 
+Use this exact order if you want the least confusing path:
+
 ```bash
 bash scripts/apply-llm-env-to-k8s-secret.sh .env
 sudo bash scripts/start-everything.sh
@@ -19,18 +21,20 @@ python scripts/demo-e2e-pipeline.py --api-url http://localhost:8000 --duration 5
 
 ## Canonical Scripts
 
+If you are not sure which script to use, start with this subset:
+
 Use these first:
 
-- `scripts/start-everything.sh`
-- `scripts/deploy-code.sh`
-- `scripts/access-stack.sh`
-- `scripts/pre-demo-check.sh`
-- `scripts/demo-readiness.sh`
-- `scripts/llm-manager.sh`
-- `scripts/run-live-attacks.sh`
-- `scripts/live-pipeline-log.sh`
-- `scripts/tail-pipeline-pods.sh`
-- `scripts/scale-profile.sh`
+- `scripts/start-everything.sh` — full startup or recovery
+- `scripts/deploy-code.sh` — apply code changes to a running cluster
+- `scripts/pre-demo-check.sh` — fast readiness check
+- `scripts/demo-readiness.sh` — broader readiness check
+- `scripts/llm-manager.sh` — check provider health and alert-analysis path
+- `scripts/run-live-attacks.sh` — generate controlled live attack traffic
+- `scripts/live-pipeline-log.sh` — processed IDS event feed
+- `scripts/tail-pipeline-pods.sh` — raw logs from services, detectors, and forwarders
+- `scripts/scale-profile.sh` — repeatable scaling profiles
+- `scripts/access-stack.sh` — stable localhost access when NodePort is inconvenient
 
 ## Core Scripts
 

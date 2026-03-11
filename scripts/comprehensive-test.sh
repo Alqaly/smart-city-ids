@@ -17,9 +17,44 @@ set +e
 : "${NC:=\033[0m}"
 
 VERBOSE=0
-if [[ "${1:-}" == "--verbose" || "${1:-}" == "-v" ]]; then
-    VERBOSE=1
-fi
+
+show_help() {
+    cat <<'EOF'
+Usage:
+  bash scripts/comprehensive-test.sh [--verbose]
+
+Purpose:
+  Run a broad live-system check across the active Smart City IDS stack.
+
+Checks included:
+  - cluster access and namespaces
+  - core pods and services
+  - IDS API, dashboard, alerts, IoT, governance, and LLM endpoints
+  - HPA, ConfigMaps, secrets, and network policies
+
+When to use it:
+  - after deployment
+  - before a demo
+  - before sharing the project
+
+Options:
+  --verbose, -v   Show extra infrastructure details
+  --help, -h      Show this help text
+
+Safety:
+  This script is read-only. It validates the live system but does not modify it.
+EOF
+}
+
+case "${1:-}" in
+    --help|-h)
+        show_help
+        exit 0
+        ;;
+    --verbose|-v)
+        VERBOSE=1
+        ;;
+esac
 
 log_section() {
     echo ""
@@ -234,20 +269,20 @@ echo -e "${BLUE}  TEST SUMMARY${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
-echo -e "Tests Passed: ${GREEN}$TESTS_PASSED${NC}"
-echo -e "Tests Failed: ${RED}$TESTS_FAILED${NC}"
+echo -e "Checks Passed: ${GREEN}$TESTS_PASSED${NC}"
+echo -e "Checks Failed: ${RED}$TESTS_FAILED${NC}"
 echo ""
 
 if [[ $TESTS_FAILED -eq 0 ]]; then
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${NC}              ALL TESTS PASSED - SYSTEM READY!                ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}              ALL CHECKS PASSED - SYSTEM READY!               ${GREEN}║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "Dashboard: ${CYAN}${API_BASE}/ui${NC}"
     exit 0
 else
     echo -e "${RED}╔════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║${NC}           SOME TESTS FAILED - REVIEW OUTPUT ABOVE            ${RED}║${NC}"
+    echo -e "${RED}║${NC}          SOME CHECKS FAILED - REVIEW OUTPUT ABOVE            ${RED}║${NC}"
     echo -e "${RED}╚════════════════════════════════════════════════════════════════╝${NC}"
     exit 1
 fi

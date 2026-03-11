@@ -607,11 +607,14 @@ pending_after_all="$(get_pending | jq -r '.pending_count // 0')"
 [[ "$pending_after_all" -eq "$INITIAL_PENDING_AFTER_DRAIN" ]] || die "Invariant failed: residual pending actions ($pending_after_all != $INITIAL_PENDING_AFTER_DRAIN)"
 
 policy_count_after="$(block_policy_count)"
+residual_block_policy_leak="$policy_count_after"
 if [[ "$policy_count_after" -ge 0 ]]; then
     if [[ "$PREEXIST_BLOCK_POLICY" == "1" ]]; then
         [[ "$policy_count_after" -eq 1 ]] || die "Invariant failed: expected preserved block policy count=1 got $policy_count_after"
+        residual_block_policy_leak=0
     else
         [[ "$policy_count_after" -eq 0 ]] || die "Invariant failed: expected no residual block policy, got $policy_count_after"
+        residual_block_policy_leak="$policy_count_after"
     fi
 fi
 
@@ -622,7 +625,7 @@ jq -nc \
   --arg autonomy_force_before "$( [[ "$FORCE_AUTONOMY_SUPPORTED" == "1" ]] && echo "$ORIGINAL_FORCE_AUTONOMY" || echo "unsupported" )" \
   --arg autonomy_force_after "$force_after" \
   --argjson residual_pending "$pending_after_all" \
-  --argjson residual_block_policies "$policy_count_after" \
+  --argjson residual_block_policies "$residual_block_policy_leak" \
   '{
     run_id: $run_id,
     original_mode: $original_mode,

@@ -151,13 +151,37 @@ case "${1:-}" in
         ;;
     
     --help|-h)
-        echo "Usage: deploy-code.sh [--status|--llm-status]"
-        echo ""
-        echo "Builds and deploys the IDS API Docker image."
-        echo ""
-        echo "Options:"
-        echo "  --status       Show current pod status"
-        echo "  --llm-status   Show LLM provider status"
+        cat <<'EOF'
+Usage:
+  bash scripts/deploy-code.sh
+  bash scripts/deploy-code.sh --status
+  bash scripts/deploy-code.sh --llm-status
+
+Purpose:
+  Update the running local Smart City IDS code on an existing cluster.
+
+What this script does:
+  - builds the shared emulator runtime image
+  - builds the ids-api image
+  - imports both images into k3s
+  - refreshes mounted static files and emulator ConfigMaps
+  - reapplies the active manifests
+  - restarts the affected workloads
+  - waits for the IDS API health check
+
+When to use it:
+  - after backend code changes
+  - after dashboard changes
+  - after emulator service code changes
+
+Options:
+  --status       Show ids-api pod/service status and the detected live health URL
+  --llm-status   Show provider status from the live API
+
+Note:
+  For a full cluster bring-up, use:
+    sudo bash scripts/start-everything.sh
+EOF
         exit 0
         ;;
 esac

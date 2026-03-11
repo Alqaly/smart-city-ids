@@ -19,6 +19,42 @@ FALCO_NS="${FALCO_NAMESPACE:-falco-system}"
 SINCE="${SINCE:-10m}"
 INCLUDE_IOT="${INCLUDE_IOT:-true}"
 
+show_help() {
+  cat <<'EOF'
+Usage:
+  bash scripts/tail-pipeline-pods.sh
+
+Purpose:
+  Stream raw logs from the live Smart City IDS components:
+  - ids-api
+  - MQTT broker and IoT emulator services
+  - Suricata and Suricata forwarder
+  - Falco and Falco forwarder
+
+Environment overrides:
+  SINCE=10m            How far back to read before following
+  INCLUDE_IOT=true     Include IoT emulator and broker logs
+  K8S_NAMESPACE=...    Override smart-city namespace
+
+Examples:
+  bash scripts/tail-pipeline-pods.sh
+  SINCE=30m bash scripts/tail-pipeline-pods.sh
+  INCLUDE_IOT=false bash scripts/tail-pipeline-pods.sh
+
+Note:
+  This is the raw component log view.
+  For processed IDS events, use:
+    bash scripts/live-pipeline-log.sh --attacks
+EOF
+}
+
+case "${1:-}" in
+  --help|-h)
+    show_help
+    exit 0
+    ;;
+esac
+
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }; }
 need kubectl
 need sed

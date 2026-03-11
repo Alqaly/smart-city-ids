@@ -11,6 +11,36 @@ source "$SCRIPT_DIR/lib/script-utils.sh"
 
 MAGENTA='\033[0;35m'
 
+show_help() {
+    cat <<'EOF'
+Usage:
+  bash scripts/e2e-verbose-test.sh [--quick]
+
+Purpose:
+  Validate the live end-to-end IDS path:
+  health -> LLM readiness -> governance -> IoT visibility -> dashboard -> pipeline
+
+Modes:
+  --quick   Skip the optional live-attack phase
+  --help    Show this help text
+
+When to use it:
+  - before a supervisor or examiner demo
+  - after governance or LLM changes
+  - after deploying code updates
+
+Important:
+  Without --quick, this script launches a short live attack run.
+EOF
+}
+
+case "${1:-}" in
+    --help|-h)
+        show_help
+        exit 0
+        ;;
+esac
+
 log_header() {
     echo ""
     echo -e "${MAGENTA}═══════════════════════════════════════════════════════════════════${NC}"
@@ -272,4 +302,4 @@ echo ""
 echo -e "${CYAN}Dashboard:${NC} ${API_BASE}/ui"
 echo ""
 
-log_success "End-to-end test completed!"
+log_success "End-to-end validation completed successfully."

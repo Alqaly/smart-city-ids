@@ -25,6 +25,41 @@ section() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
+show_help() {
+    cat <<'EOF'
+Usage:
+  sudo bash scripts/start-everything.sh
+
+Purpose:
+  Start or refresh the full Smart City IDS stack on the local K3s cluster.
+
+Main phases:
+  1. Check K3s status
+  2. Start or reuse the cluster
+  3. Read LLM configuration from .env
+  4. Build and import the shared emulator image
+  5. Apply the active Kubernetes manifests
+  6. Wait for the main services to become ready
+
+When to use it:
+  - first-time startup
+  - recovery after a broken local cluster
+  - full environment rebuild
+
+Notes:
+  - This script requires sudo/root because it manages K3s
+  - For code-only updates on a running cluster, use:
+      bash scripts/deploy-code.sh
+EOF
+}
+
+case "${1:-}" in
+    --help|-h)
+        show_help
+        exit 0
+        ;;
+esac
+
 # Check if root
 if [[ $EUID -ne 0 ]]; then
     echo "This script requires root. Re-invoking with sudo..."

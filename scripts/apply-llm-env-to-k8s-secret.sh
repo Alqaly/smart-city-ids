@@ -15,6 +15,42 @@ set -euo pipefail
 #   namespace   = smart-city
 #   secret      = ids-secrets
 
+show_help() {
+  cat <<'EOF'
+Usage:
+  bash scripts/apply-llm-env-to-k8s-secret.sh [path_to_env]
+
+Purpose:
+  Apply LLM API keys and model settings from a local .env file into the live
+  Kubernetes secret used by ids-api, then restart ids-api so the changes take effect.
+
+What it updates:
+  - Kubernetes secret: smart-city/ids-secrets
+  - ids-api model and priority environment values
+  - ids-api deployment rollout
+
+Default:
+  path_to_env = .env
+
+Typical workflow:
+  1. Edit .env and update provider keys or model names
+  2. Run this script
+  3. Verify with: bash scripts/llm-manager.sh check
+
+Notes:
+  - This changes the live cluster configuration
+  - Missing keys are skipped rather than cleared
+  - Billing/quota issues are provider-side and are not fixed by this script
+EOF
+}
+
+case "${1:-}" in
+  --help|-h)
+    show_help
+    exit 0
+    ;;
+esac
+
 ENV_FILE="${1:-.env}"
 NAMESPACE="${NAMESPACE:-smart-city}"
 SECRET_NAME="${SECRET_NAME:-ids-secrets}"
