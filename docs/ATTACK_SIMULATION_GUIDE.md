@@ -318,7 +318,7 @@ Main interpretation:
 ## Current Limits Of The LLM Study
 
 - the main completed comparison contains `3` fully scored providers
-- `Gemini` was excluded during the main run because of quota/cooldown
+- `Gemini` was excluded during the main run because it was unavailable during that evaluation window
 - `Anthropic` required a later inclusion run
 - the main comparison used `runs=1`, not a repeatability study
 - this is not yet a `500 x 5-provider` study

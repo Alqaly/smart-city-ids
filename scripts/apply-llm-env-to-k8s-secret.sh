@@ -22,11 +22,12 @@ Usage:
 
 Purpose:
   Apply LLM API keys and model settings from a local .env file into the live
-  Kubernetes secret used by ids-api, then restart ids-api so the changes take effect.
+  Kubernetes secret and ConfigMap used by ids-api, then restart ids-api so the
+  changes take effect.
 
 What it updates:
   - Kubernetes secret: smart-city/ids-secrets
-  - ids-api model and priority environment values
+  - Kubernetes ConfigMap: smart-city/ids-config (LLM model/priority settings)
   - ids-api deployment rollout
 
 Default:
@@ -90,24 +91,30 @@ kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
 
 echo "✅ Updated secret $NAMESPACE/$SECRET_NAME from $ENV_FILE"
 
-# ── Patch deployment: ensure Anthropic uses secretKeyRef (not inline value) ──
-# Also sync LLM_PRIORITY and model names from .env
-echo "Patching deployment env vars from .env…"
-PATCH_ENV_ARGS=()
-[[ -n "${LLM_PRIORITY:-}" ]]       && PATCH_ENV_ARGS+=("LLM_PRIORITY=${LLM_PRIORITY}")
-[[ -n "${ANTHROPIC_MODEL:-}" ]]    && PATCH_ENV_ARGS+=("ANTHROPIC_MODEL=${ANTHROPIC_MODEL}")
-[[ -n "${OPENAI_MODEL:-}" ]]       && PATCH_ENV_ARGS+=("OPENAI_MODEL=${OPENAI_MODEL}")
-[[ -n "${XAI_MODEL:-}" ]]          && PATCH_ENV_ARGS+=("XAI_MODEL=${XAI_MODEL}")
-[[ -n "${GEMINI_MODEL:-}" ]]       && PATCH_ENV_ARGS+=("GEMINI_MODEL=${GEMINI_MODEL}")
-[[ -n "${KIMI_MODEL:-}" ]]         && PATCH_ENV_ARGS+=("KIMI_MODEL=${KIMI_MODEL}")
-[[ -n "${LLM_TEMPERATURE:-}" ]]    && PATCH_ENV_ARGS+=("LLM_TEMPERATURE=${LLM_TEMPERATURE}")
-[[ -n "${CRITICAL_SEVERITY_THRESHOLD:-}" ]] && PATCH_ENV_ARGS+=("CRITICAL_SEVERITY_THRESHOLD=${CRITICAL_SEVERITY_THRESHOLD}")
-[[ -n "${HIGH_SEVERITY_THRESHOLD:-}" ]]     && PATCH_ENV_ARGS+=("HIGH_SEVERITY_THRESHOLD=${HIGH_SEVERITY_THRESHOLD}")
-[[ -n "${DEDUPLICATOR_TTL_SECONDS:-}" ]]    && PATCH_ENV_ARGS+=("DEDUPLICATOR_TTL_SECONDS=${DEDUPLICATOR_TTL_SECONDS}")
-
-if [[ ${#PATCH_ENV_ARGS[@]} -gt 0 ]]; then
-  kubectl -n "$NAMESPACE" set env deployment/"$RESTART_DEPLOYMENT" "${PATCH_ENV_ARGS[@]}"
-fi
+# ── Sync the ids-config ConfigMap so envFrom no longer re-injects stale models ──
+echo "Updating ids-config ConfigMap from .env…"
+CONFIGMAP_DATA_JSON="$(jq -cn \
+  --arg llm_priority "${LLM_PRIORITY:-}" \
+  --arg anthropic_model "${ANTHROPIC_MODEL:-}" \
+  --arg openai_model "${OPENAI_MODEL:-}" \
+  --arg xai_model "${XAI_MODEL:-}" \
+  --arg gemini_model "${GEMINI_MODEL:-}" \
+  --arg kimi_model "${KIMI_MODEL:-}" \
+  '
+  {
+    data: (
+      {}
+      + (if $llm_priority != "" then {LLM_PRIORITY:$llm_priority} else {} end)
+      + (if $anthropic_model != "" then {ANTHROPIC_MODEL:$anthropic_model} else {} end)
+      + (if $openai_model != "" then {OPENAI_MODEL:$openai_model} else {} end)
+      + (if $xai_model != "" then {XAI_MODEL:$xai_model} else {} end)
+      + (if $gemini_model != "" then {GEMINI_MODEL:$gemini_model} else {} end)
+      + (if $kimi_model != "" then {KIMI_MODEL:$kimi_model} else {} end)
+    )
+  }'
+)"
+kubectl patch configmap ids-config -n "$NAMESPACE" --type=merge -p "$CONFIGMAP_DATA_JSON" >/dev/null
+echo "✅ ids-config LLM settings updated from $ENV_FILE"
 
 # Normalize the full ids-api env list from the canonical manifest so repeated
 # key-sync runs do not append duplicate secret-backed variables.

@@ -34,9 +34,9 @@ KIMI_API_KEY=...
 ```bash
 XAI_MODEL=grok-4-latest
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
-OPENAI_MODEL=gpt-3.5-turbo
-GEMINI_MODEL=gemini-2.0-flash
-KIMI_MODEL=moonshot-v1-8k
+OPENAI_MODEL=gpt-4o
+GEMINI_MODEL=gemini-2.5-flash
+KIMI_MODEL=moonshot-v1-128k
 ```
 
 ### Behavior settings

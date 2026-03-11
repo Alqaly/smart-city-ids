@@ -257,7 +257,7 @@ Measured outcomes from `strict-real-01`:
 Follow-up inclusion run:
 - artifact: `artifacts/llm-eval/strict-real-02`
 - `Anthropic` completed strict scored evaluation successfully
-- `Gemini` remains excluded from the completed study because it was unavailable due quota/cooldown during the evaluation window
+- `Gemini` remains excluded from the completed scored artifact because it was unavailable during that evaluation window, although the current runtime has since recovered on `gemini-2.5-flash`
 
 Current boundary:
 - the repository contains a real strict-evaluation pipeline and completed artifact-backed results

@@ -434,14 +434,14 @@ The current evidence supports the following provider status framing.
 | OpenAI | `gpt-3.5-turbo` | scored successfully in both strict artifacts |
 | xAI | `grok-4-latest` | scored successfully in both strict artifacts |
 | Anthropic | `claude-sonnet-4-20250514` | scored successfully in `strict-real-02` |
-| Gemini | `gemini-2.0-flash` | not currently evaluable due quota/cooldown |
+| Gemini | `gemini-2.5-flash` | excluded from the completed scored artifacts because it was unavailable during that evaluation window; currently operational again in the live runtime after the model update |
 
 ## 18. Limitations
 
 The current study has the following limits.
 
 - the main completed comparison covers `3` scored providers, not `5`
-- `Gemini` was not usable during the evaluation window because of quota/cooldown
+- `Gemini` was not usable during the main evaluation window, so it does not appear in the completed scored artifacts
 - Anthropic required a later inclusion run
 - the completed runs used `runs=1`, not a repeatability design
 - the main comparison used `14` distinct matched alerts across `7` scenario families, not a `500 x 5-provider` study
@@ -456,7 +456,7 @@ The current artifact-backed evidence supports these conclusions.
 - OpenAI is the fastest measured provider in the completed strict runs where it scored.
 - xAI remains the slowest provider in the completed strict runs and should be treated cautiously in latency-sensitive workflows.
 - Anthropic is now operational and can be included in future strict comparison runs.
-- Gemini remains outside the completed evaluation because of quota/cooldown.
+- Gemini remains outside the completed scored artifacts because it was unavailable during that evaluation window, even though the current runtime has recovered.
 
 ## 20. What Remains To Be Done
 
@@ -469,4 +469,4 @@ To complete the larger study, the following work remains:
 
 ## 21. Public Summary
 
-The current artifact-backed LLM study compares providers on one fixed task: analysis of stored IDS alerts. The completed main comparison (`strict-real-01`) evaluated Kimi, OpenAI, and xAI against the same stored alert set with fallback disabled and database persistence disabled. In that run, Kimi produced the best measured quality-cost balance, OpenAI produced the lowest latency, and xAI remained usable but significantly slower. A later follow-up run (`strict-real-02`) confirmed that Anthropic can now participate in strict scored evaluation. Gemini is still excluded from the completed study because it was unavailable due quota/cooldown during the evaluation window.
+The current artifact-backed LLM study compares providers on one fixed task: analysis of stored IDS alerts. The completed main comparison (`strict-real-01`) evaluated Kimi, OpenAI, and xAI against the same stored alert set with fallback disabled and database persistence disabled. In that run, Kimi produced the best measured quality-cost balance, OpenAI produced the lowest latency, and xAI remained usable but significantly slower. A later follow-up run (`strict-real-02`) confirmed that Anthropic can participate in strict scored evaluation. Gemini is still absent from the completed scored artifacts because it was unavailable during that evaluation window, although the live runtime has since recovered on `gemini-2.5-flash`.
