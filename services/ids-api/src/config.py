@@ -34,10 +34,10 @@ class Config:
     
     # LLM Model Settings
     XAI_MODEL: str = os.getenv("XAI_MODEL", "grok-4-latest")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4-turbo-preview")
-    ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshot-v1-8k")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+    ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshot-v1-128k")
     
     # LLM provider failover chain (cloud providers only)
     LLM_PRIORITY: str = os.getenv(

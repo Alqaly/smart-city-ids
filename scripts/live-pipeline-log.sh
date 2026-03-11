@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
 # ============================================================================
-# live-pipeline-log.sh — Real-time end-to-end IDS pipeline observer
+# live-pipeline-log.sh — Real-time IDS event observer
 #
-# Shows the FULL journey of every alert from ingestion to final response:
-#   Falco/Suricata → Forwarder → IDS API → LLM Analysis → Automated Action
+# Shows processed alert events from the IDS SSE stream:
+#   detector -> IDS API -> LLM analysis -> governance/actions
 #
-# Usage:
-#   bash scripts/live-pipeline-log.sh              # default: all sources
-#   bash scripts/live-pipeline-log.sh --falco      # only Falco alerts
-#   bash scripts/live-pipeline-log.sh --suricata   # only Suricata alerts
-#   bash scripts/live-pipeline-log.sh --attacks     # also launch attack sim
+# For raw component logs (IoT services, broker, Falco, Suricata, forwarders,
+# ids-api), use: bash scripts/tail-pipeline-pods.sh
 # ============================================================================
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
+IDS_URL="${IDS_URL:-}"
+if [[ -z "$IDS_URL" ]]; then
+  IDS_URL="$(resolve_ids_api_url || true)"
+fi
 IDS_URL="${IDS_URL:-http://localhost:30800}"
-NS="${K8S_NAMESPACE:-smart-city}"
 FILTER_SOURCE=""
 LAUNCH_ATTACKS=false
+ATTACK_DURATION="${ATTACK_DURATION:-20}"
+ATTACK_MODE="${ATTACK_MODE:-protocol}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -27,51 +32,36 @@ for arg in "$@"; do
       echo "Usage: $0 [--falco|--suricata] [--attacks]"
       echo "  --falco      Show only Falco-sourced alerts"
       echo "  --suricata   Show only Suricata-sourced alerts"
-      echo "  --attacks    Launch attack pipeline in background"
+      echo "  --attacks    Launch run-live-attacks.sh in background (default mode: protocol)"
+      echo ""
+      echo "Notes:"
+      echo "  - This script shows processed IDS events from /api/alerts/live"
+      echo "  - For raw pod logs across IoT services, broker, Falco, Suricata, forwarders, and ids-api:"
+      echo "      bash scripts/tail-pipeline-pods.sh"
       exit 0 ;;
   esac
 done
 
-# ── Colors ──
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[0;33m'; B='\033[0;34m'
 M='\033[0;35m'; C='\033[0;36m'; W='\033[1;37m'; D='\033[0;90m'; N='\033[0m'
-
 sep()  { printf "${D}%.0s─${N}" {1..78}; echo; }
 tstp() { date '+%H:%M:%S'; }
 
-# ── Pre-flight ──
 printf "\n${W}╔═══════════════════════════════════════════════════════════════════╗${N}\n"
-printf "${W}║         🔍  Smart City IDS — Live Pipeline Log                    ║${N}\n"
+printf "${W}║         Smart City IDS — Live Pipeline Feed Observer             ║${N}\n"
 printf "${W}╚═══════════════════════════════════════════════════════════════════╝${N}\n\n"
-
 printf "  IDS API:  ${C}${IDS_URL}${N}\n"
 printf "  Filter:   ${Y}${FILTER_SOURCE:-all sources}${N}\n"
 printf "  Time:     ${D}$(date '+%Y-%m-%d %H:%M:%S')${N}\n\n"
 
-# Check API
-if ! curl -sf "${IDS_URL}/health" >/dev/null 2>&1; then
-  printf "${R}  ✗ IDS API unreachable at ${IDS_URL}${N}\n"
-  exit 1
-fi
+curl -sf "${IDS_URL}/health" >/dev/null
 printf "  ${G}✓ IDS API healthy${N}\n"
-
-# Check SSE
-printf "  ${G}✓ SSE stream available (/api/alerts/live)${N}\n"
+printf "  ${G}✓ SSE stream endpoint configured at /api/alerts/live${N}\n"
+printf "  ${D}  Tip: use bash scripts/tail-pipeline-pods.sh for raw component logs${N}\n"
 
 ALERT_COUNT=0
 TOTAL_LATENCY=0
-
-sep
-
-printf "\n${W}  Listening for alerts... ${D}(Ctrl+C to stop)${N}\n\n"
-
-# ── Optionally launch attacks ──
 ATTACK_PID=""
-if $LAUNCH_ATTACKS; then
-  printf "  ${Y}► Launching attack pipeline in background...${N}\n\n"
-  bash "$(dirname "$0")/attack-iot-pipeline.sh" >/dev/null 2>&1 &
-  ATTACK_PID=$!
-fi
 
 cleanup() {
   echo
@@ -82,131 +72,101 @@ cleanup() {
     printf "  Alerts observed:  ${G}${ALERT_COUNT}${N}\n"
     printf "  Avg latency:      ${C}${AVG}ms${N}\n"
   fi
-  [ -n "$ATTACK_PID" ] && kill "$ATTACK_PID" 2>/dev/null
-  printf "\n${D}  Pipeline log ended at $(date '+%H:%M:%S')${N}\n\n"
+  [ -n "$ATTACK_PID" ] && kill "$ATTACK_PID" 2>/dev/null || true
+  printf "\n${D}  Feed observer ended at $(date '+%H:%M:%S')${N}\n\n"
   exit 0
 }
 trap cleanup INT TERM
 
-# ── Stream alerts via SSE ──
-# The SSE endpoint sends JSON events for every alert processed
+sep
+printf "\n${W}  Listening for processed alerts... ${D}(Ctrl+C to stop)${N}\n\n"
+
+if $LAUNCH_ATTACKS; then
+  printf "  ${Y}► Launching run-live-attacks.sh in background (mode=${ATTACK_MODE}, duration=${ATTACK_DURATION}s)${N}\n\n"
+  bash "$SCRIPT_DIR/run-live-attacks.sh" --mode "$ATTACK_MODE" --duration "$ATTACK_DURATION" --show-alerts 6 --verbose >/tmp/live-pipeline-log.attacks 2>&1 &
+  ATTACK_PID=$!
+fi
+
 curl -sN "${IDS_URL}/api/alerts/live" 2>/dev/null | while IFS= read -r line; do
-  # SSE lines: "data: {...}"
   [[ "$line" != data:* ]] && continue
   json="${line#data: }"
+  [[ "$json" == "heartbeat" || -z "$json" ]] && continue
 
-  # Skip heartbeats / non-JSON
-  [[ "$json" == "heartbeat" || "$json" == "" ]] && continue
-
-  # Parse fields
   status=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null) || continue
   [[ "$status" != "processed" && "$status" != "throttled" ]] && continue
 
   source=$(echo "$json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('source','?'))" 2>/dev/null)
   [[ -n "$FILTER_SOURCE" && "$source" != "$FILTER_SOURCE" ]] && continue
 
-  # Extract all fields
+  alert_id='?'; rule='?'; severity='0'; threat_type='Unknown'; summary=''; engine='unknown'; latency_ms='0'; confidence=''; recs_count=0; actions_count=0
+  unset rec0 rec1 rec2 act0 act1 act2 || true
   eval "$(echo "$json" | python3 -c "
 import sys, json, shlex
-d = json.load(sys.stdin)
-a = d.get('analysis', {})
-print(f'alert_id={shlex.quote(str(d.get(\"alert_id\",\"?\")))}')
-print(f'rule={shlex.quote(str(d.get(\"rule\",\"?\")))}')
-print(f'severity={shlex.quote(str(d.get(\"severity\",\"?\")))}')
-print(f'threat_type={shlex.quote(str(d.get(\"threat_type\",\"?\")))}')
-print(f'summary={shlex.quote(str(d.get(\"summary\",\"\")))}')
-print(f'engine={shlex.quote(str(d.get(\"llm_engine\",a.get(\"analysis_engine\",\"?\"))))}')
-print(f'latency_ms={shlex.quote(str(d.get(\"processing_time_ms\",\"?\")))}')
-print(f'reasoning={shlex.quote(str(a.get(\"reasoning\",\"\")))}')
-print(f'impact={shlex.quote(str(a.get(\"business_impact\",\"\")))}')
-print(f'mitre={shlex.quote(str(a.get(\"mitre_technique\",\"\")))}')
-print(f'confidence={shlex.quote(str(a.get(\"confidence\",\"\")))}')
-recs = a.get('recommendations', d.get('recommendations', []))
+
+d=json.load(sys.stdin)
+a=d.get('analysis', {})
+print(f'alert_id={shlex.quote(str(d.get("alert_id","?")))}')
+print(f'rule={shlex.quote(str(d.get("rule","?")))}')
+print(f'severity={shlex.quote(str(d.get("severity","0")))}')
+print(f'threat_type={shlex.quote(str(d.get("threat_type","Unknown")))}')
+print(f'summary={shlex.quote(str(d.get("summary","")))}')
+print(f'engine={shlex.quote(str(d.get("llm_engine",a.get("analysis_engine","unknown"))))}')
+print(f'latency_ms={shlex.quote(str(d.get("processing_time_ms","0")))}')
+print(f'confidence={shlex.quote(str(a.get("confidence","")))}')
+recs=a.get('recommendations', d.get('recommendations', []))
 print(f'recs_count={len(recs)}')
-for i, r in enumerate(recs[:4]):
+for i, r in enumerate(recs[:3]):
     print(f'rec{i}={shlex.quote(str(r))}')
-actions = d.get('automated_actions', [])
+actions=d.get('automated_actions', [])
 print(f'actions_count={len(actions)}')
 for i, act in enumerate(actions[:3]):
     print(f'act{i}={shlex.quote(str(act) if isinstance(act, str) else json.dumps(act))}')
 " 2>/dev/null)" || continue
 
   ALERT_COUNT=$((ALERT_COUNT + 1))
-  lat_num="${latency_ms//[^0-9]/}"
+  lat_num="${latency_ms:-0}"
+  lat_num="${lat_num//[^0-9]/}"
   [ -n "$lat_num" ] && TOTAL_LATENCY=$((TOTAL_LATENCY + lat_num))
 
-  # Severity coloring
   sev_num="${severity//[^0-9]/}"
-  if [ "${sev_num:-0}" -ge 8 ]; then SEV_C="$R"; SEV_ICON="■ CRITICAL"
-  elif [ "${sev_num:-0}" -ge 6 ]; then SEV_C="$Y"; SEV_ICON="▲ HIGH"
-  elif [ "${sev_num:-0}" -ge 4 ]; then SEV_C="$C"; SEV_ICON="● MEDIUM"
-  else SEV_C="$G"; SEV_ICON="○ LOW"; fi
+  if [ "${sev_num:-0}" -ge 8 ]; then SEV_C="$R"; SEV_LABEL="CRITICAL"
+  elif [ "${sev_num:-0}" -ge 6 ]; then SEV_C="$Y"; SEV_LABEL="HIGH"
+  elif [ "${sev_num:-0}" -ge 4 ]; then SEV_C="$C"; SEV_LABEL="MEDIUM"
+  else SEV_C="$G"; SEV_LABEL="LOW"; fi
 
-  # Confidence coloring
-  CONF_NUM="${confidence//[^0-9.]/}"
-  CONF_NUM="${CONF_NUM:-0}"
-  if awk -v c="$CONF_NUM" 'BEGIN{exit !(c>=0.85)}'; then
-    CONF_C="$G"
-  elif awk -v c="$CONF_NUM" 'BEGIN{exit !(c>=0.65)}'; then
-    CONF_C="$Y"
-  else
-    CONF_C="$R"
+  printf "${D}[%s]${N} ${SEV_C}%s %s/10${N} | ${Y}%s${N} | ${W}%s${N} | engine:%s\n" "$(tstp)" "$SEV_LABEL" "$severity" "$threat_type" "$rule" "$engine"
+  printf "  source: %s\n" "$source"
+  printf "  summary: %s\n" "$summary"
+  if [[ ( "$rule" == "?" || "$summary" == "" || "${severity:-0}" == "0" ) && "$alert_id" =~ ^[0-9]+$ ]]; then
+    detail_json="$(curl -s "${IDS_URL}/api/alerts?limit=50&include_legacy=true" 2>/dev/null || true)"
+    if [[ -n "$detail_json" ]]; then
+      eval "$(python3 - "$alert_id" <<'PY2'
+import json, shlex, sys
+alert_id=sys.argv[1]
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    print('')
+    raise SystemExit(0)
+alerts=d.get('alerts', []) if isinstance(d, dict) else []
+m=next((a for a in alerts if str(a.get('id'))==alert_id or str(a.get('alert_id'))==alert_id), None)
+if not m:
+    raise SystemExit(0)
+print(f'rule={shlex.quote(str(m.get("rule") or m.get("output_fields",{}).get("alert.signature") or "?"))}')
+print(f'severity={shlex.quote(str(m.get("severity", "0")))}')
+print(f'threat_type={shlex.quote(str(m.get("threat_type") or "Unknown"))}')
+print(f'summary={shlex.quote(str(m.get("summary") or ""))}')
+print(f'engine={shlex.quote(str(m.get("llm_engine") or "unknown"))}')
+PY2
+<<<"$detail_json")" || true
+    fi
   fi
 
-  # ── Print the alert journey ──
-  printf "${D}$(tstp)${N} ${W}━━━ Alert #${ALERT_COUNT} ━━━${N}  ${SEV_C}${SEV_ICON}${N}\n"
-  printf "  ${D}│${N}\n"
-  printf "  ${D}├─${N} ${B}① INGESTION${N}\n"
-  printf "  ${D}│${N}    Source:    ${C}${source}${N}\n"
-  printf "  ${D}│${N}    Rule:      ${W}${rule}${N}\n"
-  printf "  ${D}│${N}    Alert ID:  ${D}${alert_id}${N}\n"
-  printf "  ${D}│${N}\n"
-  printf "  ${D}├─${N} ${M}② LLM ANALYSIS${N}  ${D}(engine: ${engine}, ${latency_ms}ms)${N}\n"
-  printf "  ${D}│${N}    Severity:  ${SEV_C}${severity}/10${N}\n"
-  printf "  ${D}│${N}    Threat:    ${Y}${threat_type}${N}\n"
-  [ -n "$mitre" ] && printf "  ${D}│${N}    MITRE:     ${M}${mitre}${N}\n"
-  [ -n "$confidence" ] && printf "  ${D}│${N}    Confidence:${CONF_C} ${confidence}${N} ${D}($(date -u +%H:%M:%S))${N}\n"
-  printf "  ${D}│${N}\n"
-  printf "  ${D}├─${N} ${W}③ SUMMARY${N}\n"
-  printf "  ${D}│${N}    ${summary}\n"
-  if [ -n "$reasoning" ]; then
-    printf "  ${D}│${N}\n"
-    printf "  ${D}├─${N} ${C}④ REASONING${N}\n"
-    # Word-wrap reasoning at ~76 chars
-    echo "$reasoning" | fold -s -w 72 | while IFS= read -r rline; do
-      printf "  ${D}│${N}    ${rline}\n"
-    done
-  fi
-  if [ -n "$impact" ]; then
-    printf "  ${D}│${N}\n"
-    printf "  ${D}├─${N} ${Y}⑤ BUSINESS IMPACT${N}\n"
-    echo "$impact" | fold -s -w 72 | while IFS= read -r iline; do
-      printf "  ${D}│${N}    ${iline}\n"
-    done
-  fi
   if [ "${recs_count:-0}" -gt 0 ]; then
-    printf "  ${D}│${N}\n"
-    printf "  ${D}├─${N} ${G}⑥ RECOMMENDATIONS${N}\n"
-    for i in $(seq 0 $((recs_count - 1))); do
-      var="rec${i}"
-      printf "  ${D}│${N}    ${G}→${N} ${!var}\n"
-    done
+    for i in $(seq 0 $((recs_count - 1))); do var="rec${i}"; printf "  rec: %s\n" "${!var}"; done
   fi
   if [ "${actions_count:-0}" -gt 0 ]; then
-    printf "  ${D}│${N}\n"
-    printf "  ${D}├─${N} ${R}⑦ AUTOMATED ACTIONS${N}\n"
-    for i in $(seq 0 $((actions_count - 1))); do
-      var="act${i}"
-      printf "  ${D}│${N}    ${R}⚡${N} ${!var}\n"
-    done
-  elif [ "${sev_num:-0}" -lt 8 ]; then
-    printf "  ${D}│${N}\n"
-    printf "  ${D}├─${N} ${D}⑦ ACTIONS: none (severity < 8)${N}\n"
+    for i in $(seq 0 $((actions_count - 1))); do var="act${i}"; printf "  action: %s\n" "${!var}"; done
   fi
-  printf "  ${D}│${N}\n"
-  printf "  ${D}└─${N} ${G}✓ Processing complete${N}  ${D}(${latency_ms}ms total)${N}\n"
-  echo
-  sep
-  echo
-
+  printf "  latency: %sms\n\n" "$latency_ms"
 done

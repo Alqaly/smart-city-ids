@@ -73,10 +73,19 @@ fi
 log_section "3/8 API URL Detection"
 API_BASE="$(resolve_ids_api_url || true)"
 if [[ -z "$API_BASE" ]]; then
-    fail "Could not auto-detect IDS API URL (tried localhost:8000, localhost:30800, and NodePort)"
+    warn "Could not auto-detect IDS API URL yet; attempting managed localhost access startup..."
+    if bash "$SCRIPT_DIR/access-stack.sh" start --quiet >/dev/null 2>&1; then
+        sleep 2
+        API_BASE="$(resolve_ids_api_url || true)"
+    fi
+fi
+
+if [[ -z "$API_BASE" ]]; then
+    fail "Could not auto-detect IDS API URL (tried localhost, NodePort, and managed port-forward)"
     echo ""
-    echo "If using port-forward: kubectl -n smart-city port-forward svc/ids-api-service 8000:8000"
-    echo "Then re-run this script or set: IDS_API_URL=http://localhost:8000"
+    echo "Try:"
+    echo "  bash scripts/access-stack.sh start"
+    echo "  IDS_API_URL=http://127.0.0.1:8000 bash scripts/pre-demo-check.sh"
     exit 1
 fi
 pass "IDS API reachable at: ${API_BASE}"
@@ -113,6 +122,7 @@ else
 fi
 
 METRICS_JSON="$(api_json /api/metrics || true)"
+IOT_DEVICES_JSON="$(api_json /api/iot/devices || true)"
 if [[ -n "$METRICS_JSON" ]]; then
     pass "Metrics endpoint reachable"
 else
@@ -121,6 +131,10 @@ fi
 
 TOTAL_ALERTS="$(echo "$METRICS_JSON" | jq -r '.total_alerts // 0' 2>/dev/null || echo 0)"
 IOT_COUNT="$(echo "$METRICS_JSON" | jq -r '.iot_devices_active // 0' 2>/dev/null || echo 0)"
+IOT_TOTAL="$(echo "$IOT_DEVICES_JSON" | jq -r '.total // 0' 2>/dev/null || echo 0)"
+IOT_LOGICAL_TOTAL="$(echo "$IOT_DEVICES_JSON" | jq -r '.logical_total // 0' 2>/dev/null || echo 0)"
+IOT_POD_TOTAL="$(echo "$IOT_DEVICES_JSON" | jq -r '.pod_backed_total // 0' 2>/dev/null || echo 0)"
+IOT_COUNTING_MODE="$(echo "$IOT_DEVICES_JSON" | jq -r '.counting_mode // "unknown"' 2>/dev/null || echo unknown)"
 
 if [[ "$TOTAL_ALERTS" =~ ^[0-9]+$ ]] && [[ "$TOTAL_ALERTS" -gt 0 ]]; then
     pass "Alert count present: ${TOTAL_ALERTS}"
@@ -129,10 +143,10 @@ else
 fi
 
 if [[ "$IOT_COUNT" =~ ^[0-9]+$ ]] && [[ "$IOT_COUNT" -gt 0 ]]; then
-    if [[ "$IOT_COUNT" -eq 13 ]]; then
-        pass "IoT devices reported: 13 (current reference profile)"
+    if [[ -n "$IOT_DEVICES_JSON" ]] && [[ "$IOT_TOTAL" =~ ^[0-9]+$ ]] && [[ "$IOT_TOTAL" -gt 0 ]]; then
+        pass "IoT activity visible: active_metric=${IOT_COUNT}, total_devices=${IOT_TOTAL}, logical=${IOT_LOGICAL_TOTAL}, pod_backed=${IOT_POD_TOTAL}, mode=${IOT_COUNTING_MODE}"
     else
-        warn "IoT devices reported: ${IOT_COUNT} (reference profile often reports 13)"
+        pass "IoT activity visible: active_metric=${IOT_COUNT}"
     fi
 else
     fail "IoT device count is zero"

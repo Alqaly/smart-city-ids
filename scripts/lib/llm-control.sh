@@ -158,7 +158,16 @@ llm_show_status() {
 llm_check_credits() {
     local timeout="${1:-2.0}"
     local pretty="${2:-true}"
-    local url="${LLM_CREDITS_URL:-http://localhost:8000/api/llm/credits/}"
+    local base=""
+    if [[ -n "${LLM_CREDITS_URL:-}" ]]; then
+        local url="${LLM_CREDITS_URL}"
+    else
+        if declare -F resolve_ids_api_url >/dev/null 2>&1; then
+            base="$(resolve_ids_api_url || true)"
+        fi
+        base="${base:-http://localhost:8000}"
+        local url="${base%/}/api/llm/credits/"
+    fi
 
     if ! command -v curl >/dev/null 2>&1; then
         llm_error "curl is required for llm_check_credits"

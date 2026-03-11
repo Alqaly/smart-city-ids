@@ -48,7 +48,7 @@ class OperatorInterfaceService:
             analysis: LLM analysis result
             llm_model_used: Which LLM engine analyzed this
             analysis_duration_ms: How long analysis took
-            automation_mode: autopilot | assisted | manual
+            automation_mode: autonomous | assisted | manual | emergency
             protected_services: List of service names that can't be auto-isolated
         
         Returns:
@@ -349,8 +349,8 @@ class OperatorInterfaceService:
                 approval_reason = f"ASSISTED mode: Critical severity ({severity}/10) requires operator approval"
             else:
                 why_automated = f"ASSISTED mode: Moderate severity ({severity}/10) allows automated response"
-        elif automation_mode == "autopilot":
-            why_automated = f"AUTOPILOT mode: All recommended actions execute automatically"
+        elif automation_mode == "autonomous":
+            why_automated = "AUTONOMOUS mode: policy-approved actions execute automatically"
         
         # Check if action is blocked by protected service
         if is_protected:

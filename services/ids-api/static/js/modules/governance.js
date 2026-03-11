@@ -2,12 +2,12 @@
  * governance.js — Governance / HITL Interface Tab
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Human-in-the-loop (HITL) governance for security automation.  Provides:
- *   • Mode controls (Manual / Assisted / Autopilot)
+ * Human-in-the-loop (HITL) governance for security automation. Provides:
+ *   • Mode controls (Manual / Assisted / Autonomous)
  *   • Pending actions queue (approve / reject workflow)
  *   • Action history audit trail
  *
- * Purpose: keep analyst accountability explicit for stakeholder demos.
+ * Purpose: keep analyst accountability explicit in the research deployment.
  */
 
 import { api } from '../api.js';
@@ -40,8 +40,8 @@ export function renderGovernanceTab(gov, dashboard, refreshFn) {
   const gm = gov.metrics || {};
 
   // ── Summary stat cards ─────────────────────────────────────────────
-  const modeLabel = gov.mode === 'assisted' ? '&#x1F6E1;&#xFE0F; Assisted' : gov.mode === 'autopilot' ? '&#x26A1; Autopilot' : '&#x1F6D1; Manual';
-  const modeColor = gov.mode === 'autopilot' ? 'orange' : gov.mode === 'assisted' ? 'purple' : 'blue';
+  const modeLabel = gov.mode === 'assisted' ? '&#x1F6E1;&#xFE0F; Assisted' : gov.mode === 'autonomous' ? '&#x26A1; Autonomous' : '&#x1F6D1; Manual';
+  const modeColor = gov.mode === 'autonomous' ? 'orange' : gov.mode === 'assisted' ? 'purple' : 'blue';
   const govStatsEl2 = $('govStats');
   if (govStatsEl2) govStatsEl2.innerHTML =
     '<div class="stat-card ' + modeColor + '"><div class="stat-label">Automation Mode</div><div class="stat-value" style="font-size:20px">' + modeLabel +
@@ -55,12 +55,12 @@ export function renderGovernanceTab(gov, dashboard, refreshFn) {
   if (pendingEl) pendingEl.textContent = gov.pending_count || 0;
 
   // ── Mode control ───────────────────────────────────────────────────
-  const modes = ['manual', 'assisted', 'autopilot'];
-  const labels = ['&#x1F6D1; Manual', '&#x1F6E1;&#xFE0F; Assisted', '&#x26A1; Autopilot'];
+  const modes = ['manual', 'assisted', 'autonomous'];
+  const labels = ['&#x1F6D1; Manual', '&#x1F6E1;&#xFE0F; Assisted', '&#x26A1; Autonomous'];
   const descriptions = [
     'All automated actions are blocked. Every response requires analyst approval before execution.',
     'Low-severity actions auto-execute. Critical severity (&ge; ' + (gov.assisted_threshold || 8) + ') requires analyst approval.',
-    'All actions auto-execute immediately. Use for demos only — no human review.'
+    'Policy-approved actions execute automatically. Operator monitoring and audit remain active.'
   ];
   let mHtml = '<div style="font-size:13px;color:var(--text2);margin-bottom:12px"><strong style="color:var(--text)">Select Automation Mode</strong> — Controls how the IDS responds to detected threats</div>';
   mHtml += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px">';

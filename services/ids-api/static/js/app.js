@@ -12,7 +12,7 @@
  *       fetched because the overview stays visible via the top bar.
  *     – Tab-specific data (K8s roster, IoT telemetry, LLM stats, etc.)
  *       is only fetched when that tab is active.
- *     – Polling interval increased from 10s → 15s (demo still feels live
+ *     – Polling interval increased from 10s → 15s (UI still feels live
  *       thanks to SSE for real-time alerts).
  *
  * ES6 module — loaded via <script type="module"> so all imports are scoped
@@ -49,7 +49,6 @@ import {
 } from './modules/iot.js';
 import { renderLLMTab, resetCircuitBreakers } from './modules/llm.js';
 import { renderGovernanceTab } from './modules/governance.js';
-import { renderAttackTab, clearAttackLog } from './modules/attacks.js';
 import { renderThreatsTab, renderMetricsTab, initHunt } from './modules/threats.js';
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -174,9 +173,6 @@ function refreshAll() {
       case 'hunt':
         initHunt();
         break;
-      case 'attacks':
-        renderAttackTab();
-        break;
       // overview: already rendered above
     }
   });
@@ -220,7 +216,6 @@ function initTabSwitching() {
         case 'threats':
         case 'metrics':
         case 'hunt':
-        case 'attacks':
           // These tabs use data from refreshAll, so trigger it immediately
           refreshAll();
           break;
@@ -269,7 +264,7 @@ function updateTopBar(h, gov, llm, llmDiag) {
   if (gp && gov) {
     const m = gov.mode || 'assisted';
     gp.textContent = m.charAt(0).toUpperCase() + m.slice(1);
-    gp.className = 'pill ' + (m === 'autopilot' ? 'pill-warn' : 'pill-ok');
+    gp.className = 'pill ' + (m === 'autonomous' ? 'pill-warn' : 'pill-ok');
   }
 
   // Uptime
@@ -433,17 +428,17 @@ function loadIoTScale() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Chaos Mode (trigger attack pipeline from dashboard)
+// Attack scenario launcher (legacy "chaos mode" API compatibility)
 // ══════════════════════════════════════════════════════════════════════════
 
 function startChaos(mode) {
   const log = $('attackLog');
-  if (log) log.textContent += '\n[' + new Date().toLocaleTimeString() + '] \uD83D\uDD25 CHAOS MODE (' + mode + ') — triggering attack-iot-pipeline.sh...\n';
+  if (log) log.textContent += '\n[' + new Date().toLocaleTimeString() + '] Attack scenario request (' + mode + ') — triggering server-side scenario runner...\n';
 
   api.startChaos(mode).then(res => {
     if (!res) { if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u274C Network error\n'; return; }
     if (res.error) { if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u274C ' + res.error + '\n'; return; }
-    if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u2705 Chaos started — run_id: ' + res.run_id + ' (pid ' + res.pid + ')\n';
+    if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] \u2705 Scenario run started — run_id: ' + res.run_id + ' (pid ' + res.pid + ')\n';
     if (log) log.textContent += '[' + new Date().toLocaleTimeString() + '] Watch the Live Pipeline Feed for real-time alert processing\n\n';
     if (log) log.scrollTop = log.scrollHeight;
   }).catch(e => {

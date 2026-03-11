@@ -6,7 +6,7 @@ In the current deployment, the **Attack Simulation UI tab/backend is not active*
 
 - The dashboard source indicates attack simulation UI was removed (`Attack Simulation removed: live attacks only`)
 - `GET /api/attacks/registry` returns `404`
-- `GET /api/demo/chaos/status` returns `404`
+- `GET /api/demo/chaos/status` returns `404` (legacy route removed)
 
 The supported and verified path for attack-chain evaluation is the CLI scenario runner:
 
@@ -64,6 +64,11 @@ This project intentionally mixes **real cluster activity** with **detector-signa
 
 - Real HTTP requests to running IoT services (ClusterIP services such as traffic camera, healthcare API, parking system)
 - Real `kubectl exec` commands inside running pods (shells, file reads, tooling probes) that generate Falco runtime telemetry
+- Real MQTT publishes/subscribes against the live broker, including parking control-topic abuse
+- Real state-changing protocol actions against emulator services:
+  - Modbus-style register writes on environmental stations
+  - DALI broadcast/off commands on street-lighting
+  - ONVIF device/media/PTZ calls and snapshot scraping against traffic-camera
 - Real Falco and Suricata detections (forwarded into the IDS API)
 - Real IDS processing (rate limiting, deduplication, LLM analysis/cached analysis, governance, automation)
 
@@ -84,6 +89,7 @@ This project intentionally mixes **real cluster activity** with **detector-signa
 ### Baseline verification (run first)
 
 ```bash
+# Script name retained for compatibility
 bash scripts/pre-demo-check.sh
 curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
 ```
@@ -151,6 +157,56 @@ bash scripts/run-live-attacks.sh --mode privesc --duration 20 --show-alerts 3 --
 ```bash
 bash scripts/run-live-attacks.sh --mode exfil --duration 20 --show-alerts 3 --verbose
 ```
+
+### Scenario 4: Protocol-state tamper (MQTT / Modbus / DALI / ONVIF)
+
+**What it represents**
+- Unauthorized parking occupancy/fault control over MQTT
+- Environmental AQI/status tamper through Modbus-style register writes
+- Street-light blackout or forced dimming via DALI command abuse
+- ONVIF camera enumeration, PTZ abuse, and snapshot scraping
+
+**Targets**
+- `mqtt-broker`
+- `parking-system`
+- `env-sensor`
+- `street-lighting`
+- `traffic-camera`
+
+**Command**
+```bash
+bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose
+```
+
+**Expected detector**
+- Suricata:
+  - `SMARTCITY MQTT parking control topic abuse`
+  - `SMARTCITY MQTT parking fault-state tamper`
+  - `SMARTCITY MQTT parking occupancy spoof`
+  - `SMARTCITY Modbus write tamper`
+  - `SMARTCITY ONVIF capability enumeration`
+  - `SMARTCITY ONVIF profile enumeration`
+  - `SMARTCITY ONVIF PTZ control abuse`
+  - `SMARTCITY ONVIF snapshot scraping`
+  - `SMARTCITY ANPR data scraping`
+- IDS API correlation / LLM analysis after detector ingestion
+
+### Scenario 4: MQTT topic abuse / spoofed client behavior
+
+**What it represents**
+- MQTT wildcard traversal and unauthorized control-topic publish attempts
+- Client-ID spoof/reconnect churn to emulate low-level broker abuse
+
+**Targets**
+- MQTT broker and MQTT-backed IoT services
+
+**Command**
+```bash
+bash scripts/run-live-attacks.sh --mode mqtt --duration 30 --show-alerts 5 --verbose
+```
+
+**Expected detector**
+- Suricata (network-pattern detections) and IDS API correlation output
 
 ### Safe rehearsal / examiner preview (no traffic execution)
 

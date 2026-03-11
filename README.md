@@ -8,16 +8,16 @@ Kubernetes-native intrusion detection and response platform for smart-city-style
 - **Governance-controlled Kubernetes response actions** (manual / assisted / autonomous)
 
 This repository contains both:
-- a working demonstrator/prototype system, and
+- a working research testbed, and
 - capstone/defense documentation and supporting materials.
 
 ## Scope (Important for External Reviewers)
 
-This is a **research/capstone prototype**, not a production SOC platform. Some parts are intentionally demo-oriented (IoT emulators, attack scripts, examiner prep docs), while core runtime components are real and testable.
+This is a **research/capstone prototype**, not a production SOC platform. Some components are evaluation-focused (IoT emulators, controlled attack scripts, examiner prep docs), while core runtime components are real and testable.
 
 To avoid stale-claim confusion:
 - Use this `README.md` + [`docs/INDEX.md`](docs/INDEX.md) as the **current entry points**
-- Treat `docs/_archive/` and `docs/archive/` as **historical**
+- Treat `docs/archive-legacy/` and `docs/archive/` as **historical**
 - Validate runtime claims against live endpoints (`/health`, `/api/metrics`) and `kubectl`
 
 ## What the System Does
@@ -29,11 +29,49 @@ To avoid stale-claim confusion:
 - Stores alerts in PostgreSQL with memory fallback and auto-recovery to DB
 - Exposes a web dashboard (`/ui`) and operational APIs
 
-## Quick Start (Demo / Local Validation)
+## IoT Inventory Semantics
+
+The IoT fleet view is a **hybrid inventory**, not a flat list of guaranteed live hardware.
+
+- **Pod-backed rows** come from running Kubernetes emulator workloads.
+- **Logical registry rows** come from `register` / `heartbeat` onboarding for external devices.
+- A logical registry row is an **inventory record**, not proof of a currently live physical device.
+- To prove a device is currently active, use:
+  - recent `last_seen`
+  - recent heartbeat or telemetry
+  - `source`
+  - IP presence
+
+Use `GET /api/iot/devices` as the authoritative fleet view:
+
+```bash
+curl -s http://localhost:30800/api/iot/devices | jq '{total,logical_total,pod_backed_total,counting_mode}'
+```
+
+Typical interpretation:
+- `counting_mode = "hybrid_registry_plus_pods"` means the dashboard is combining logical inventory with Kubernetes-backed workloads.
+- Rows marked `registered` are not currently treated as live hardware.
+- Rows marked `healthy`, `online`, or `running` represent current live status.
+
+## Quick Start (Research Validation / Local Validation)
+
+### 0. Configure LLM keys and models
+
+The project source of truth is the local `.env` file. The running cluster uses
+those values only after you sync them into the Kubernetes secret and redeploy.
+
+```bash
+grep -E '^(LLM_PRIORITY|XAI_MODEL|OPENAI_MODEL|ANTHROPIC_MODEL|GEMINI_MODEL|KIMI_MODEL)=' .env
+bash scripts/apply-llm-env-to-k8s-secret.sh .env
+bash scripts/deploy-code.sh
+```
+
+`deploy-code.sh` is the canonical update path. It rebuilds/imports the active images, reapplies the current `ids-api`, service, Suricata, and Falco-forwarder manifests, refreshes mounted ConfigMaps, and restarts the affected workloads.
 
 ### 1. Pre-check the environment
 
 ```bash
+sudo bash scripts/start-everything.sh
 bash scripts/pre-demo-check.sh
 ```
 
@@ -44,20 +82,57 @@ This now verifies:
 - login
 - **database persistence mode** (and detects `memory-fallback`)
 
+The canonical Kubernetes deployment path uses a shared emulator runtime image plus ConfigMap-mounted emulator application code. `scripts/start-everything.sh` now builds/imports that shared emulator image, and normal emulator code updates are then applied through the existing startup/deploy scripts rather than rebuilding a separate image per emulator edit.
+
+Current strongest protocol-faithful emulator paths:
+- ONVIF traffic camera
+- MQTT/SenML parking gateway
+- HL7 FHIR healthcare gateway
+- Modbus + native OPC UA environmental sensor
+- DALI/TALQ street lighting
+
 ### 2. Open the dashboard
 
 ```bash
+# Direct NodePort path on this host
 xdg-open http://localhost:30800/ui 2>/dev/null || open http://localhost:30800/ui
+
+# If localhost:30800 is not bound in your environment, use stable port-forwarded access
+bash scripts/access-stack.sh start
+xdg-open http://localhost:8000/ui 2>/dev/null || open http://localhost:8000/ui
 ```
 
-Default demo credentials:
+Default local credentials (unless overridden by environment):
 - `admin / admin`
 
-### 3. Run a live attack demo (optional)
+### 3. Run a live attack exercise (optional)
 
 ```bash
 bash scripts/run-live-attacks.sh --duration 30 --show-alerts 3
+bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose
 ```
+
+### 4. Validate LLM providers strictly
+
+```bash
+bash scripts/llm-manager.sh check
+
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r '.access_token')
+
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "http://127.0.0.1:8000/api/llm/test/gemini?strict=true" \
+  -d '{"prompt":"strict provider diagnostic"}' | jq .
+```
+
+Interpretation:
+- `401` = invalid or revoked API key.
+- `429` = quota / billing / provider-side rate limit.
+- UI usage totals count alert-analysis calls only; manual tests do not increment those totals.
+- `Hist` in provider success means historical DB usage exists, but live runtime success counters were reset after restart.
 
 ## Access Points (Typical K3s NodePort Setup)
 
@@ -69,7 +144,47 @@ bash scripts/run-live-attacks.sh --duration 30 --show-alerts 3
 | Prometheus | `http://localhost:31106` |
 | Grafana | `http://localhost:30300` |
 
-If you run `ids-api` locally with `uvicorn`, the UI/API may be on `http://localhost:8000`.
+If you run `ids-api` locally with `uvicorn` outside Kubernetes, the UI/API may be on `http://localhost:8000`. In the cluster-backed deployment, prefer `http://localhost:30800` or `bash scripts/access-stack.sh start`.
+
+For portable local access across different Wi-Fi networks, use:
+
+```bash
+bash scripts/access-stack.sh start
+```
+
+This exposes stable localhost endpoints:
+- IDS UI/API (port-forward fallback): `http://localhost:8000`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
+
+## Canonical Script Surface
+
+Use these scripts as the active operational surface of the repository.
+
+### Startup / Deploy
+- `bash scripts/start-everything.sh` — bootstrap or recover the Kubernetes stack
+- `bash scripts/deploy-code.sh` — canonical code/config redeploy path
+- `bash scripts/access-stack.sh start` — stable localhost access (`8000`, `3000`, `9090`) when NodePort is inconvenient
+
+### Validation
+- `bash scripts/pre-demo-check.sh` — fast readiness check
+- `bash scripts/demo-readiness.sh --quick` — broader readiness audit
+- `bash scripts/llm-manager.sh check` — LLM and end-to-end alert-analysis health
+- `bash scripts/comprehensive-test.sh` — broader platform validation
+- `bash scripts/test-governance-modes.sh` — manual/assisted/autonomous governance validation
+- `bash scripts/e2e-verbose-test.sh --quick` — end-to-end pipeline validation
+
+### Operations / Demo
+- `bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose` — live protocol and runtime exercise
+- `bash scripts/live-pipeline-log.sh --attacks` — processed IDS event feed for demos
+- `SINCE=5m bash scripts/tail-pipeline-pods.sh` — raw pod logs for IoT services, broker, detectors, forwarders, and `ids-api`
+- `bash scripts/scale-profile.sh small|medium|large|status` — repeatable scaling profiles
+- `bash scripts/scale-iot.sh` — quick manual replica changes only
+
+### What not to use as the primary workflow
+- `scripts/archive/` — historical helpers
+- `scripts/demos/` — old presentation-specific helpers
+- `*.disabled` attack scripts — removed synthetic/legacy paths
 
 ## Project Layout (High Level)
 
@@ -78,7 +193,7 @@ If you run `ids-api` locally with `uvicorn`, the UI/API may be on `http://localh
 | `services/` | IDS API, forwarders, service components |
 | `smart-city-services/` | IoT emulators (traffic camera, healthcare, parking, etc.) |
 | `k8s-manifests/` | Kubernetes manifests and platform config |
-| `scripts/` | Deployment, validation, demo, and ops automation |
+| `scripts/` | Deployment, validation, attack execution, and ops automation |
 | `docs/` | Technical docs, runbooks, Q&A, academic support, archives |
 | `CAPSTONE_2_REPORT.*` | Final report deliverables |
 
@@ -96,17 +211,17 @@ Key docs by audience:
 - [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 
-### Demo / operator
-- [`docs/DEMO_DAY_RUNBOOK.md`](docs/DEMO_DAY_RUNBOOK.md)
-- [`docs/DEMO_QA_CHECKLIST.md`](docs/DEMO_QA_CHECKLIST.md)
-- [`docs/DEMO_CHEAT_SHEET.md`](docs/DEMO_CHEAT_SHEET.md)
+### Operator workflows
+- [`docs/reference/DEMO_DAY_RUNBOOK.md`](docs/reference/DEMO_DAY_RUNBOOK.md)
+- [`docs/reference/DEMO_QA_CHECKLIST.md`](docs/reference/DEMO_QA_CHECKLIST.md)
+- [`docs/reference/DEMO_CHEAT_SHEET.md`](docs/reference/DEMO_CHEAT_SHEET.md)
 - [`docs/LLM_CONTROL_AND_TROUBLESHOOTING.md`](docs/LLM_CONTROL_AND_TROUBLESHOOTING.md)
 
 ### Academic / defense
-- [`docs/EXAMINER_QA_30.md`](docs/EXAMINER_QA_30.md)
-- [`docs/EXAMINER_IOT_QA_20.md`](docs/EXAMINER_IOT_QA_20.md)
-- [`docs/ACADEMIC_CONTEXT.md`](docs/ACADEMIC_CONTEXT.md)
-- [`docs/CAPSTONE_EVIDENCE_MATRIX.md`](docs/CAPSTONE_EVIDENCE_MATRIX.md)
+- [`docs/reference/EXAMINER_QA_30.md`](docs/reference/EXAMINER_QA_30.md)
+- [`docs/reference/EXAMINER_IOT_QA_20.md`](docs/reference/EXAMINER_IOT_QA_20.md)
+- [`docs/reference/ACADEMIC_CONTEXT.md`](docs/reference/ACADEMIC_CONTEXT.md)
+- [`docs/reference/CAPSTONE_EVIDENCE_MATRIX.md`](docs/reference/CAPSTONE_EVIDENCE_MATRIX.md)
 
 ## LLM Provider Notes (Operational Reality)
 
@@ -135,6 +250,7 @@ Use this check before sharing screenshots/claims:
 
 ```bash
 curl -s http://localhost:30800/health | jq '{status, storage_type, components}'
+curl -s http://localhost:30800/api/iot/devices | jq '{total,logical_total,pod_backed_total,counting_mode}'
 ```
 
 ## Common Commands
@@ -143,11 +259,18 @@ curl -s http://localhost:30800/health | jq '{status, storage_type, components}'
 # Deploy code changes (ConfigMap-based hot reload path)
 bash scripts/deploy-code.sh
 
-# Demo readiness (broader checks)
+# Stable local access (independent of Wi-Fi/node IP)
+bash scripts/access-stack.sh start
+
+# Readiness checks (broader)
 bash scripts/demo-readiness.sh --quick
 
 # E2E validation (quick)
 bash scripts/e2e-verbose-test.sh --quick
+
+# Scale profile (small|medium|large)
+bash scripts/scale-profile.sh status
+bash scripts/scale-profile.sh medium
 
 # Full scripted validation
 bash scripts/comprehensive-test.sh
@@ -157,12 +280,13 @@ bash scripts/comprehensive-test.sh
 
 Before sharing with experts:
 
-1. Run `bash scripts/pre-demo-check.sh`
+1. Run `bash scripts/pre-demo-check.sh` (name retained for compatibility)
 2. Confirm DB is connected (not `memory-fallback`)
-3. Use [`docs/INDEX.md`](docs/INDEX.md) to direct them to current docs
-4. Avoid citing archived docs as current behavior
+3. If discussing fleet size, use `/api/iot/devices`, not only `iot_devices_active`
+4. If discussing a “real active device”, show `last_seen`, `source`, heartbeat/telemetry, and IP context
+5. Use [`docs/INDEX.md`](docs/INDEX.md) to direct them to current docs
+6. Avoid citing archived docs as current behavior
 
 ## License
 
 See [`LICENSE`](LICENSE).
-

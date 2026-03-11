@@ -2,6 +2,25 @@
 
 This document explains the LLM provider dashboard behavior, failover chain, cooldown logic, cost math, and how to recover when providers are down.
 
+## Recovery note
+
+If providers were previously latched `auth_failed` after a bad startup probe or stale credentials, the existing recovery endpoint is:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin"}' | jq -r '.access_token')
+
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  http://localhost:30800/api/llm/retry-all | jq .
+```
+
+Current behavior:
+- explicit auth failures remain `auth_failed`
+- quota/server issues enter cooldown
+- ambiguous startup probe failures no longer permanently disable an otherwise working provider
+
 ## 1) Why header may show `0/N LLM Operational` while a provider has past successes
 
 - `Operational` is **current runtime state**, not historical success count.
@@ -43,6 +62,21 @@ This document explains the LLM provider dashboard behavior, failover chain, cool
 - Credit check endpoint is independent from inference call path.
 - A provider may have succeeded earlier but credit-check API can still fail (network, auth scope, provider API difference).
 - UI now treats missing credit data as `unavailable` rather than implying execution failure.
+
+## 7a) Provider card semantics
+
+The provider cards now separate three different checks:
+
+- `Analysis`: whether the provider can actually process IDS analysis calls
+- `Billing endpoint`: whether the dashboard could reach the provider's billing/credit path
+- `Balance visibility`: whether a usable balance number is exposed by that provider/account path
+
+This matters because a provider can be operational for analysis while still showing:
+
+- `Billing endpoint: Reachable, billing restricted`, or
+- `Balance visibility: Not exposed`
+
+OpenAI is the clearest example: analysis can succeed while the billing metadata path reports insufficient billing permissions.
 
 ## 8) Cost formula (dashboard)
 

@@ -41,13 +41,15 @@ data:
           enabled: yes
         dns:
           enabled: yes
+        mqtt:
+          enabled: yes
 
   local.rules: |
     # =========================================================================
     # Smart City IDS - Suricata Detection Ruleset
     # Covers: SQLi, Command Injection, Path Traversal, XSS, Auth Brute-Force,
-    #         Data Exfiltration, IoT API Abuse, MQTT Auth, Crypto Mining,
-    #         DNS Tunneling, HTTP Flood
+    #         Data Exfiltration, IoT API Abuse, MQTT control abuse, Modbus tamper,
+    #         ONVIF misuse, Crypto Mining, DNS Tunneling, HTTP Flood
     # =========================================================================
 
     # --- Whitelists (must come first) ---
@@ -91,7 +93,18 @@ data:
     alert http any any -> any any (msg:"SMARTCITY Oversized IoT payload (potential exfil)"; flow:to_server,established; content:"/api/iot"; http_uri; nocase; dsize:>8192; classtype:policy-violation; sid:9000071; rev:1;)
 
     # --- MQTT Unauthorized Connection ---
-    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT cleartext connection"; flow:to_server,established; dsize:>2; classtype:policy-violation; sid:9000080; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT cleartext connection"; flow:to_server,established; content:"|10|"; depth:1; threshold:type limit, track by_src, count 1, seconds 300; classtype:policy-violation; sid:9000080; rev:2;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT parking control topic abuse"; flow:to_server,established; content:"smartcity/parking/control/all"; nocase; classtype:attempted-admin; sid:9000081; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT parking fault-state tamper"; flow:to_server,established; content:"smartcity/parking/"; nocase; content:"/command"; nocase; content:"fault"; nocase; distance:0; within:128; classtype:attempted-admin; sid:9000082; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT parking occupancy spoof"; flow:to_server,established; content:"smartcity/parking/"; nocase; content:"/command"; nocase; content:"occupied"; nocase; distance:0; within:128; classtype:attempted-admin; sid:9000083; rev:1;)
+
+    # --- Protocol-specific IoT Abuse ---
+    alert http any any -> any any (msg:"SMARTCITY Modbus write tamper"; flow:to_server,established; http.uri; content:"/modbus/write"; nocase; classtype:attempted-admin; sid:9000120; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY ONVIF capability enumeration"; flow:to_server,established; http.uri; content:"/onvif/device_service"; nocase; detection_filter:track by_src, count 1, seconds 20; classtype:attempted-recon; sid:9000121; rev:2;)
+    alert http any any -> any any (msg:"SMARTCITY ONVIF profile enumeration"; flow:to_server,established; http.uri; content:"/onvif/media_service"; nocase; detection_filter:track by_src, count 1, seconds 20; classtype:attempted-recon; sid:9000122; rev:2;)
+    alert http any any -> any any (msg:"SMARTCITY ONVIF PTZ control abuse"; flow:to_server,established; http.uri; content:"/onvif/ptz_service"; nocase; detection_filter:track by_src, count 1, seconds 20; classtype:attempted-admin; sid:9000123; rev:2;)
+    alert http any any -> any any (msg:"SMARTCITY ONVIF snapshot scraping"; flow:to_server,established; http.uri; content:"/snap.jpg"; nocase; detection_filter:track by_src, count 3, seconds 20; classtype:attempted-recon; sid:9000124; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY ANPR data scraping"; flow:to_server,established; http.uri; content:"/api/anpr/detections"; nocase; detection_filter:track by_src, count 2, seconds 20; classtype:policy-violation; sid:9000125; rev:1;)
 
     # --- Crypto Mining (Stratum Protocol) ---
     alert tcp any any -> any 3333 (msg:"SMARTCITY Possible crypto miner port 3333"; flow:to_server,established; classtype:policy-violation; sid:9000090; rev:1;)

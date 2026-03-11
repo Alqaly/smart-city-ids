@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-This document describes the design, implementation, and deployment of **protocol-accurate IoT device emulators** for the Smart City Intrusion Detection System (IDS) capstone project. The emulation layer replaces the prior simulation approach (random number generators) with realistic, standards-compliant protocol implementations that generate authentic network traffic and data patterns for intrusion detection analysis.
+This document describes the design, implementation, and deployment of **protocol-faithful IoT software emulators** for the Smart City Intrusion Detection System (IDS) capstone project. The emulation layer replaces the prior simulation approach (random number generators) with realistic, standards-compliant protocol implementations that generate authentic network traffic and domain-shaped data patterns for intrusion detection analysis.
 
 Related attack documentation and appendix artifacts:
 - Attack Simulation UX + governance: [ATTACK_SIMULATION_GUIDE.md](ATTACK_SIMULATION_GUIDE.md)
@@ -16,7 +16,7 @@ Related attack documentation and appendix artifacts:
   - [ATTACK_COVERAGE_MATRIX.json](ATTACK_COVERAGE_MATRIX.json)
   - [ATTACK_COVERAGE_MATRIX.csv](ATTACK_COVERAGE_MATRIX.csv)
 
-Realism scope note: this project prioritizes **protocol and application-layer fidelity** (network traffic, state, and semantics) for IDS/LLM evaluation. Hardware-level side channels (thermal/power/PMU) are not currently modeled and should be documented as out-of-scope unless explicitly required by the evaluation.
+Realism scope note: this project prioritizes **protocol and application-layer fidelity** (network traffic, state, and semantics) for IDS/LLM evaluation. Hardware-level side channels (thermal/power/PMU) are not currently modeled and should be documented as out-of-scope unless explicitly required by the evaluation. The strongest paths now include real MQTT broker interaction from the parking gateway emulator, a native OPC UA endpoint on the environmental service, Modbus-style state tamper on environmental stations, persistent DALI override behavior on street lighting, and ONVIF SOAP/PTZ attack activity against the camera emulator.
 
 ### 1.1 Emulation vs. Simulation — Why It Matters
 
@@ -148,7 +148,7 @@ any → fault (random, 0.1% per cycle)
 |---------|--------|
 | Stations | 5 monitoring stations across city zones (downtown, industrial, residential, highway, waterfront) |
 | Modbus registers | 16 holding registers per station (function code 0x03) |
-| OPC UA | Information model with namespace `urn:smartcity:env:monitor`, browse/read operations |
+| OPC UA | Native OPC UA server on `opc.tcp://<service>:4840/env` plus REST browse/read helpers |
 | Air quality | PM2.5, PM10 (EN 12341), CO, NO2, O3, SO2 (EN 14211/14212/14625) |
 | Noise | dBA measurement (IEC 61672-1 Class 1) |
 | Weather | Temperature, humidity, pressure, wind speed/direction, UV index, rainfall |
@@ -338,3 +338,7 @@ These emulators generate realistic attack surfaces for the IDS:
 - `smart-city-services/traffic-camera/app.py` — ONVIF camera emulator
 - `smart-city-services/parking-system/app.py` — MQTT/CoAP/SenML emulator
 - `smart-city-services/healthcare-api/app.py` — HL7 FHIR R4 emulator
+Current dashboard/device-view interpretation:
+- Pod-backed rows represent running Kubernetes emulator workloads.
+- Logical registry rows represent externally registered devices.
+- A logical row is not treated as live hardware unless it has a recent heartbeat/telemetry signal.

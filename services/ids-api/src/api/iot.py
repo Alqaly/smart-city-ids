@@ -36,7 +36,7 @@ Endpoints:
 import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -445,34 +445,52 @@ async def get_iot_devices_endpoint():
     devices: List[Dict[str, Any]] = []
     now = datetime.now()
 
+    def _parse_last_seen(raw: Any) -> Optional[datetime]:
+        if isinstance(raw, datetime):
+            if raw.tzinfo is not None:
+                return raw.astimezone(timezone.utc).replace(tzinfo=None)
+            return raw
+        if isinstance(raw, str):
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                return None
+        return None
+
     # ── Build device list from in-memory registry ────────────────────────
     for device_id, record in iot_devices.items():
         last_seen_raw = record.get("last_seen")
-        last_seen = None
-        if isinstance(last_seen_raw, str):
-            try:
-                last_seen = datetime.fromisoformat(last_seen_raw.replace("Z", "+00:00")).replace(tzinfo=None)
-            except Exception:
-                last_seen = None
+        last_seen = _parse_last_seen(last_seen_raw)
         if not last_seen:
             last_seen = now
-        # A device is "connected" if seen in the last 120 seconds.
         age_s = max(0, (now - last_seen).total_seconds())
         connected = age_s <= 120
         event_count = int(record.get("event_count", 0))
-        # Rough events-per-minute rate estimate.
         rate_per_min = round((event_count / max(1.0, age_s / 60.0)) if connected else 0.0, 2)
+        metadata = record.get("metadata") or {}
+        ip_value = record.get("ip") or metadata.get("ip") or metadata.get("device_ip") or "-"
+        if connected:
+            status = "online"
+        elif age_s <= 900:
+            status = "recent"
+        elif ip_value == "-" and event_count == 0:
+            status = "registered"
+        else:
+            status = "stale"
         devices.append({
             "device": device_id,
             "namespace": "smart-city",
             "device_type": record.get("device_type", "unknown"),
-            "status": "healthy" if connected else "stale",
+            "status": status,
             "current_rate": rate_per_min,
-            "ip": record.get("ip", "-"),
+            "ip": ip_value,
             "connected": connected,
             "device_id": device_id,
-            "last_seen": record.get("last_seen"),
+            "last_seen": last_seen.isoformat(),
             "event_count": event_count,
+            "metadata": metadata,
+            "source": "logical_registry",
+            "age_seconds": round(age_s, 1),
         })
 
     # ── Enrich from Kubernetes pod data ──────────────────────────────────
@@ -488,6 +506,9 @@ async def get_iot_devices_endpoint():
                     exists["ip"] = p.get("ip", exists["ip"])
                     exists["status"] = "healthy" if p.get("status") == "Running" else p.get("status", "unknown").lower()
                     exists["connected"] = p.get("status") == "Running"
+                    exists["source"] = "logical_registry+pod"
+                    exists["age_seconds"] = 0.0
+                    exists["last_seen"] = now.isoformat()
                 else:
                     # Pod exists in K8s but hasn't sent sensor data yet.
                     devices.append({
@@ -501,6 +522,8 @@ async def get_iot_devices_endpoint():
                         "device_id": pod_name,
                         "last_seen": now.isoformat(),
                         "event_count": 0,
+                        "source": "k8s_pod",
+                        "age_seconds": 0.0,
                     })
         except Exception as e:
             logger.warning(f"Could not enrich /api/iot/devices from pods: {e}")

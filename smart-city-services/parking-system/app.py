@@ -33,6 +33,11 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
+try:
+    import paho.mqtt.client as mqtt
+except Exception:  # pragma: no cover - optional dependency in some local runs
+    mqtt = None
+
 # ─── App ────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -42,6 +47,10 @@ logger = logging.getLogger("parking-sensor")
 GATEWAY_ID = os.environ.get("GATEWAY_ID", "GW-PARK-001")
 FIRMWARE_VERSION = "v2.3.1-230815"
 DEPLOYMENT_ZONE = os.environ.get("ZONE", "downtown")
+MQTT_BROKER = os.environ.get("MQTT_BROKER", "mqtt-broker")
+MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_ENABLED = os.environ.get("MQTT_ENABLED", "1").lower() not in {"0", "false", "no"}
+MQTT_PUBLISH_INTERVAL = max(1, int(os.environ.get("MQTT_PUBLISH_INTERVAL", "5")))
 
 # ═════════════════════════════════════════════════════════════════════════════════
 # Sensor Hardware Emulation
@@ -299,6 +308,15 @@ if _slot_scale != 1:
             _lot_info["capacity"] = int(_lot_info["capacity"]) * _slot_scale
 
 sensors = {}  # slot_id → ParkingSensor
+gateway_runtime = {
+    "mqtt_enabled": bool(MQTT_ENABLED and mqtt),
+    "mqtt_connected": False,
+    "mqtt_last_publish": None,
+    "mqtt_publish_count": 0,
+    "mqtt_control_count": 0,
+    "mqtt_last_control": None,
+    "mqtt_last_error": None,
+}
 
 def _init_sensors():
     """Create sensor objects for every slot in every lot."""
@@ -331,6 +349,141 @@ def _sensor_ticker():
         time.sleep(1.0)
 
 threading.Thread(target=_sensor_ticker, daemon=True).start()
+
+
+def _apply_control_message(topic: str, payload: dict):
+    """Apply MQTT control semantics to one sensor, lot, zone, or the whole fleet."""
+    action = str(payload.get("action", payload.get("command", ""))).strip().lower()
+    desired_state = str(payload.get("state", payload.get("value", ""))).strip().lower()
+    topic_parts = topic.split("/")
+    targets = []
+
+    if len(topic_parts) >= 5 and topic_parts[:2] == ["smartcity", "parking"]:
+        if topic == "smartcity/parking/control/all":
+            targets = list(sensors.values())
+        elif len(topic_parts) == 4 and topic_parts[3] == "command":
+            zone = topic_parts[2]
+            targets = [s for s in sensors.values() if s.zone == zone]
+        elif len(topic_parts) == 5 and topic_parts[4] == "command":
+            zone, lot = topic_parts[2], topic_parts[3]
+            targets = [s for s in sensors.values() if s.zone == zone and s.lot == lot]
+        elif len(topic_parts) == 6 and topic_parts[5] == "command":
+            zone, lot, slot = topic_parts[2], topic_parts[3], topic_parts[4]
+            target = sensors.get(slot)
+            if target and target.zone == zone and target.lot == lot:
+                targets = [target]
+
+    if not targets:
+        return 0
+
+    now = time.time()
+    changed = 0
+    for sensor in targets:
+        if action in {"reserve", "occupied", "occupy"} or desired_state == "occupied":
+            sensor.state = "occupied"
+            sensor.last_state_change = now
+            sensor.vehicle_duration_s = int(payload.get("duration_s", sensor.vehicle_duration_s or 0))
+            sensor._log_event("mqtt_control_occupy", f"topic={topic}")
+            changed += 1
+        elif action in {"vacate", "release"} or desired_state == "vacant":
+            sensor.state = "vacant"
+            sensor.last_state_change = now
+            sensor.vehicle_duration_s = 0
+            sensor._log_event("mqtt_control_vacate", f"topic={topic}")
+            changed += 1
+        elif action in {"fault", "disable"} or desired_state == "fault":
+            sensor.state = "fault"
+            sensor.last_state_change = now
+            sensor._log_event("mqtt_control_fault", f"topic={topic}")
+            changed += 1
+        elif action in {"restore", "clear_fault"}:
+            sensor.state = "vacant"
+            sensor.last_state_change = now
+            sensor._log_event("mqtt_control_restore", f"topic={topic}")
+            changed += 1
+        elif action in {"calibrate", "reserved"} or desired_state == "reserved":
+            sensor.state = "reserved"
+            sensor.last_state_change = now
+            sensor._log_event("mqtt_control_reserved", f"topic={topic}")
+            changed += 1
+    if changed:
+        logger.warning("MQTT control applied: topic=%s action=%s changed=%s", topic, action or desired_state, changed)
+    return changed
+
+
+def _mqtt_gateway_loop():
+    """Publish real MQTT telemetry and process control topics like a gateway."""
+    if not gateway_runtime["mqtt_enabled"]:
+        gateway_runtime["mqtt_last_error"] = "paho-mqtt unavailable or MQTT disabled"
+        return
+
+    pod_identity = os.environ.get("HOSTNAME", "pod")
+    client_id = f"{GATEWAY_ID.lower()}-{pod_identity}-{os.getpid()}"
+    client = mqtt.Client(client_id=client_id, clean_session=True, protocol=mqtt.MQTTv311)
+
+    def on_connect(client, userdata, flags, rc):
+        gateway_runtime["mqtt_connected"] = rc == 0
+        if rc == 0:
+            client.subscribe("smartcity/parking/control/all", qos=1)
+            client.subscribe("smartcity/parking/+/command", qos=1)
+            client.subscribe("smartcity/parking/+/+/command", qos=1)
+            client.subscribe("smartcity/parking/+/+/+/command", qos=1)
+            logger.info("MQTT gateway connected to %s:%s", MQTT_BROKER, MQTT_PORT)
+        else:
+            gateway_runtime["mqtt_last_error"] = f"connect_rc={rc}"
+
+    def on_disconnect(client, userdata, rc):
+        gateway_runtime["mqtt_connected"] = False
+        if rc:
+            gateway_runtime["mqtt_last_error"] = f"disconnect_rc={rc}"
+
+    def on_message(client, userdata, msg):
+        try:
+            payload = json.loads(msg.payload.decode("utf-8") or "{}")
+        except Exception:
+            payload = {}
+        changed = _apply_control_message(msg.topic, payload)
+        gateway_runtime["mqtt_control_count"] += changed
+        gateway_runtime["mqtt_last_control"] = {
+            "topic": msg.topic,
+            "changed": changed,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+
+    while True:
+        try:
+            if not gateway_runtime["mqtt_connected"]:
+                client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
+                client.loop_start()
+                time.sleep(1.0)
+
+            published = 0
+            sample = list(sensors.values())
+            random.shuffle(sample)
+            # Publish a bounded but real gateway sample each cycle.
+            for sensor in sample[: min(80, len(sample))]:
+                for msg in sensor.mqtt_messages():
+                    result = client.publish(msg["topic"], payload=msg["payload"], qos=msg["qos"], retain=msg["retain"])
+                    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                        published += 1
+            gateway_runtime["mqtt_publish_count"] += published
+            gateway_runtime["mqtt_last_publish"] = datetime.now(timezone.utc).isoformat()
+            time.sleep(MQTT_PUBLISH_INTERVAL)
+        except Exception as exc:
+            gateway_runtime["mqtt_last_error"] = str(exc)
+            gateway_runtime["mqtt_connected"] = False
+            try:
+                client.loop_stop()
+            except Exception:
+                pass
+            time.sleep(5.0)
+
+
+threading.Thread(target=_mqtt_gateway_loop, daemon=True).start()
 
 
 # ═════════════════════════════════════════════════════════════════════════════════
@@ -379,10 +532,11 @@ def mqtt_topics():
                 "last_update": datetime.now(timezone.utc).isoformat(),
             }
     return jsonify({
-        "broker": f"mqtt://{os.environ.get('MQTT_BROKER', 'mqtt-broker.smart-city')}:1883",
+        "broker": f"mqtt://{MQTT_BROKER}:1883",
         "protocol": "MQTT v3.1.1",
         "tls": False,
         "topic_count": len(topics),
+        "gateway_runtime": gateway_runtime,
         "topics": dict(list(topics.items())[:100]),
     })
 
@@ -613,12 +767,13 @@ def gateway_info():
         "gateway_id": GATEWAY_ID,
         "firmware": FIRMWARE_VERSION,
         "protocol": "MQTT v3.1.1 (no TLS)",
-        "broker": f"mqtt://{os.environ.get('MQTT_BROKER', 'mqtt-broker.smart-city')}:1883",
+        "broker": f"mqtt://{MQTT_BROKER}:1883",
         "sensors_registered": len(sensors),
         "sensors_online": sum(1 for s in sensors.values() if s.state != "fault"),
         "uplink": "LoRaWAN EU868 SF7BW125",
         "lora_eui": "00-11-22-33-44-55-66-77",
-        "lora_app_key": "AAAABBBBCCCCDDDDEEEE00001111FFFF",
+        "lora_app_key": os.environ.get("LORA_APP_KEY", "TEST_LORAWAN_APP_KEY_CHANGE_ME"),
+        "mqtt_runtime": gateway_runtime,
     })
 
 
@@ -651,6 +806,10 @@ def get_stats():
         "avg_battery_pct": round(
             sum(s.battery_pct for s in sensors.values()) / max(1, len(sensors)), 1
         ),
+        "mqtt_connected": gateway_runtime["mqtt_connected"],
+        "mqtt_publish_count": gateway_runtime["mqtt_publish_count"],
+        "mqtt_control_count": gateway_runtime["mqtt_control_count"],
+        "mqtt_last_publish": gateway_runtime["mqtt_last_publish"],
     }), 200
 
 
@@ -662,5 +821,6 @@ if __name__ == "__main__":
     logger.info(f"  SenML Feed:  http://0.0.0.0:{port}/api/senml")
     logger.info(f"  CoAP Disc:   http://0.0.0.0:{port}/.well-known/core")
     logger.info(f"  LWM2M Reg:   http://0.0.0.0:{port}/api/lwm2m")
-    logger.info(f"  WARNING: No TLS, no auth — intentionally vulnerable for IDS demo")
+    logger.info(f"  MQTT uplink:  mqtt://{MQTT_BROKER}:{MQTT_PORT}")
+    logger.info("  WARNING: No TLS, no auth — intentionally vulnerable for IDS research evaluation")
     app.run(host="0.0.0.0", port=port, debug=False)

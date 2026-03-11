@@ -24,7 +24,7 @@ The Smart City IDS is a Kubernetes-native intrusion detection system that uses L
 │  │  └────────────────────────────────────────────────────────────────┬──┐ │ │
 │  │                                                                   │  │ │ │
 │  │  ┌───────────────────────────────────────────┐  ┌──────────────┐  │  │ │ │
-│  │  │           IDS API  (×1 pod demo-pinned)   │  │  PostgreSQL  │  │  │ │ │
+│  │  │           IDS API  (×1 active replica)   │  │  PostgreSQL  │  │  │ │ │
 │  │  │  FastAPI · LLM Analysis · K8s Automation  │──│  (persistence)│  │  │ │ │
 │  │  │  NodePort 30800                           │  └──────────────┘  │  │ │ │
 │  │  └──────────────┬────────────────────────────┘                    │  │ │ │
@@ -62,12 +62,12 @@ This table is intentionally explicit: it separates what is implemented now from 
 
 | Area | Current (implemented) | Target (next iteration) | Why it matters |
 |---|---|---|---|
-| IoT device counting | Pod-derived / demo-profile count in IDS state | Persistent logical device registry (`register` / `heartbeat`) | Defensible fleet-size metrics at 100+ devices |
+| IoT device counting | Hybrid logical registry + pod-backed inventory (`/api/iot/devices`) | Stronger persistence and device-state validation | Defensible fleet-size metrics at 100+ devices |
 | IoT emulation scale | Pods emulate multiple devices; some services expose internal fleets | Explicit `device_count` per emulator + registry-backed inventory | Better realism without 1 pod = 1 device overhead |
-| Dedup + alert throttling | In-memory in `ids-api` (demo pinned to 1 replica) | Shared state (Redis or equivalent) across replicas | Correct behavior when scaling `ids-api` > 1 |
+| Dedup + alert throttling | In-memory in `ids-api` (single active replica) | Shared state (Redis or equivalent) across replicas | Correct behavior when scaling `ids-api` > 1 |
 | LLM provider resilience | Circuit breaker + cooldown + failover chain + operator reset/test UI | Same, plus stronger provider scoring / adaptive routing persistence | Improves reliability and explainability under quota/key failures |
-| Telemetry ingest auth | Demo-friendly telemetry path; internal alert path uses shared token | Per-device API key/signed token; optional mTLS gateway | Real IoT onboarding security model |
-| Scenario modeling | Attack scripts + detector rules + demo docs | ATT&CK-ICS staged scenario specs with expected telemetry + impact criteria | Research-grade methodology and examiner traceability |
+| Telemetry ingest auth | Telemetry path for external devices; internal alert path uses shared token | Per-device API key/signed token; optional mTLS gateway | Real IoT onboarding security model |
+| Scenario modeling | Attack scripts + detector rules + active scenario docs | ATT&CK-ICS staged scenario specs with expected telemetry + impact criteria | Research-grade methodology and examiner traceability |
 | Impact representation | Security alerts + pipeline metrics + action/audit logs | Domain impact KPIs (availability/integrity/safety) per scenario | Stronger operational relevance for smart city use cases |
 
 ---
@@ -76,7 +76,7 @@ This table is intentionally explicit: it separates what is implemented now from 
 
 | Namespace | Component | Replicas | Purpose |
 |---|---|---|---|
-| `smart-city` | ids-api | 1 (demo-pinned) | Core IDS: alert intake, LLM analysis, K8s automation |
+| `smart-city` | ids-api | 1 active replica | Core IDS: alert intake, LLM analysis, K8s automation |
 | `smart-city` | postgres | 1 | Alert/action/audit persistence |
 | `smart-city` | traffic-camera | 2 | Vulnerable Flask camera feed + license plate API |
 | `smart-city` | healthcare-api | 2 | Vulnerable Flask patient record API |
@@ -202,10 +202,10 @@ Cloud providers with priority-ordered failover:
 | Provider | API Endpoint | Model (default) | Env Var |
 |---|---|---|---|
 | xAI Grok | `api.x.ai/v1/chat/completions` | `grok-4-latest` | `XAI_API_KEY` |
-| Anthropic Claude | `api.anthropic.com/v1/messages` | `claude-3-5-sonnet-20241022` | `ANTHROPIC_API_KEY` |
-| OpenAI GPT | `api.openai.com/v1/chat/completions` | `gpt-4-turbo-preview` | `OPENAI_API_KEY` |
-| Google Gemini | `generativelanguage.googleapis.com` | `gemini-2.0-flash` | `GEMINI_API_KEY` |
-| Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | `moonshot-v1-8k` | `KIMI_API_KEY` |
+| Anthropic Claude | `api.anthropic.com/v1/messages` | `claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY` |
+| OpenAI GPT | `api.openai.com/v1/chat/completions` | `gpt-4o` | `OPENAI_API_KEY` |
+| Google Gemini | `generativelanguage.googleapis.com` | `gemini-2.5-flash` | `GEMINI_API_KEY` |
+| Moonshot Kimi | `api.moonshot.cn/v1/chat/completions` | `moonshot-v1-128k` | `KIMI_API_KEY` |
 
 ### Resilience
 
@@ -226,6 +226,10 @@ Add/rotate a provider key:
 3. Restart/redeploy `ids-api` so the new env vars are loaded
 4. Reset provider states (`/api/llm/retry-all`) to clear circuit breaker/cooldown latches
 5. Probe/test the provider (`/api/llm/test/{provider}`) and verify `/api/llm/diagnostics`
+
+Provider usage semantics:
+- DB-backed usage tables count only IDS alert-analysis calls.
+- Manual provider tests/probes update diagnostics and runtime health but do not increment historical usage totals.
 
 Important:
 - `retry-all` resets in-memory failure state, not provider billing/quota.

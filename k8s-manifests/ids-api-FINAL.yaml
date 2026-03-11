@@ -96,6 +96,24 @@ spec:
           timeoutSeconds: 8
           failureThreshold: 10
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ids-api-service
+  namespace: smart-city
+  labels:
+    app: ids-api
+spec:
+  selector:
+    app: ids-api
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+    nodePort: 30800
+  type: NodePort
+---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -119,8 +137,8 @@ spec:
     kind: Deployment
     name: ids-api
   minReplicas: 1
-  # Demo-safe default: keep IDS API single-replica because dedup/rate-limit
-  # state is currently in-memory per pod. Increase only after moving those
+  # Current safety default: keep IDS API single-replica because dedup/rate-limit
+  # state is still maintained per pod. Increase only after moving those
   # controls to shared state (e.g., Redis/Postgres-backed counters).
   maxReplicas: 1
   behavior:

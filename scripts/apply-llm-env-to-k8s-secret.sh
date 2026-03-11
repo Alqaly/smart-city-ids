@@ -73,21 +73,28 @@ if [[ ${#PATCH_ENV_ARGS[@]} -gt 0 ]]; then
   kubectl -n "$NAMESPACE" set env deployment/"$RESTART_DEPLOYMENT" "${PATCH_ENV_ARGS[@]}"
 fi
 
-# Ensure ANTHROPIC_API_KEY is referenced from secret (not hardcoded inline).
-# We do a JSON patch to guarantee the secretKeyRef form.
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-  kubectl -n "$NAMESPACE" patch deployment "$RESTART_DEPLOYMENT" --type=json -p='[
-    {"op":"remove","path":"/spec/template/spec/containers/0/env/2"},
-    {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{
-      "name":"ANTHROPIC_API_KEY",
-      "valueFrom":{"secretKeyRef":{"name":"ids-secrets","key":"anthropic-api-key","optional":true}}
-    }}
-  ]' 2>/dev/null || \
-  kubectl -n "$NAMESPACE" set env deployment/"$RESTART_DEPLOYMENT" \
-    "ANTHROPIC_API_KEY=$(kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" -o jsonpath='{.data.anthropic-api-key}' | base64 -d)" \
-    2>/dev/null || true
-  echo "✅ ANTHROPIC_API_KEY now reads from secret"
-fi
+# Normalize the full ids-api env list from the canonical manifest so repeated
+# key-sync runs do not append duplicate secret-backed variables.
+normalize_ids_api_env() {
+  local desired_env_json patch_payload
+  desired_env_json="$(python - <<'PY'
+import json
+import yaml
+
+with open("k8s-manifests/ids-api-FINAL.yaml", "r", encoding="utf-8") as fh:
+    for doc in yaml.safe_load_all(fh):
+        if doc and doc.get("kind") == "Deployment" and doc.get("metadata", {}).get("name") == "ids-api":
+            print(json.dumps(doc["spec"]["template"]["spec"]["containers"][0]["env"]))
+            break
+PY
+)"
+  [[ -n "$desired_env_json" ]] || return 0
+  patch_payload="$(jq -cn --argjson env "$desired_env_json" '[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":$env}]')"
+  kubectl patch deployment "$RESTART_DEPLOYMENT" -n "$NAMESPACE" --type=json -p "$patch_payload" >/dev/null
+}
+
+normalize_ids_api_env
+echo "✅ ids-api env normalized from k8s-manifests/ids-api-FINAL.yaml"
 
 echo "Restarting deployment $NAMESPACE/$RESTART_DEPLOYMENT to pick up all changes…"
 kubectl -n "$NAMESPACE" rollout restart deployment "$RESTART_DEPLOYMENT"

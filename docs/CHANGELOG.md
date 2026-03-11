@@ -1,5 +1,49 @@
 # Changelog
 
+This file is a historical engineering log. It contains completed changes, experiments, and intermediate implementation notes across multiple repository states. It is not the canonical source of current runtime truth.
+
+For the current live deployment contract, use:
+
+- `README.md`
+- `docs/INDEX.md`
+- `docs/DEPLOYMENT.md`
+- `docs/CURRENT_DOCS_VERIFIED.md`
+- `docs/API_REFERENCE.md`
+
+## 2026-03-10
+
+### LLM provider recovery
+
+- Fixed `services/ids-api/src/llm_providers/manager.py` so startup probing no longer marks providers `auth_failed` on every ambiguous probe exception or temporary startup failure.
+- Startup validation now:
+  - keeps explicit invalid-key failures as `auth_failed`
+  - places temporary quota/server failures into cooldown
+  - leaves inconclusive startup probe failures retryable instead of permanently disabling the provider
+- Verified live after redeploy:
+  - `gemini` strict provider test: success
+  - `kimi` strict provider test: success
+  - live diagnostics recovered to `3/5 operational`
+
+### LLM provider card truth-pass
+
+- Updated `services/ids-api/static/index.html` so provider cards no longer collapse analysis health, billing endpoint state, and balance visibility into one ambiguous badge.
+- Cards now show three separate live facts:
+  - `Analysis`
+  - `Billing endpoint`
+  - `Balance visibility`
+- This prevents misleading states such as:
+  - OpenAI analysis working while billing metadata remains restricted
+  - Gemini/Kimi working even when provider APIs do not expose a balance figure
+- Updated operator help and troubleshooting docs to match the new semantics.
+
+### Governance validation stability
+
+- Fixed `scripts/test-governance-modes.sh` to assert against the tested alert's own audit trace instead of global pending-queue noise.
+- This prevents unrelated background alerts from causing false failures in the autonomous benign case.
+- Verified live:
+  - `bash scripts/test-governance-modes.sh` -> pass
+  - `bash scripts/e2e-verbose-test.sh --quick` -> pass
+
 All notable changes to the Smart City IDS project.
 
 ---
@@ -9,6 +53,90 @@ All notable changes to the Smart City IDS project.
 ### Summary
 
 Completed a live-stack hardening pass for governance mode validation, automation UI reliability, and operator help guidance. Focus was end-to-end behavior with real APIs and safe cleanup semantics.
+
+### Additional Reliability / Evaluation Updates
+
+- **`scripts/deploy-code.sh` + `scripts/start-everything.sh`**
+  - Active deploy path now reapplies:
+    - `k8s-manifests/ids-api-FINAL.yaml`
+    - `k8s-manifests/services-no-build.yaml`
+    - `k8s-manifests/suricata-fixed.yaml`
+    - `k8s-manifests/falco-forwarder.yaml`
+  - Eliminates the extra manual `kubectl apply -f k8s-manifests/services-no-build.yaml` step after normal updates.
+
+- **`k8s-manifests/suricata-fixed.yaml`**
+  - Added protocol-abuse detection rules for:
+    - MQTT parking control-topic abuse
+    - MQTT parking occupancy/fault tamper
+    - Modbus write tamper
+    - ONVIF capability/profile enumeration
+    - ONVIF PTZ control abuse
+    - ONVIF snapshot / ANPR scraping
+  - Enabled Suricata MQTT app-layer parsing in the active config.
+
+- **`k8s-manifests/falco-forwarder.yaml`**
+  - Added repo-managed `falco-new` ConfigMap so active Falco custom rules are represented in the deployable manifest set.
+  - Added runtime tooling rule for unexpected control/network tools inside IoT workload containers.
+
+- **`scripts/deploy-code.sh`**
+  - Deployment now refreshes all mounted static ConfigMaps:
+    - `ids-app-static`
+    - `ids-app-static-js`
+    - `ids-app-static-js-modules`
+  - Prevents stale UI/API-client code after backend image redeploys.
+
+- **`k8s-manifests/ids-api-FINAL.yaml`**
+  - Added canonical `ids-api-service` Service manifest (NodePort `30800` + Cluster-internal service DNS).
+  - Makes fresh deployments reproducible without relying on pre-existing cluster objects.
+
+- **`scripts/access-stack.sh`**
+  - Added managed local access helper (`start|stop|status|restart`) for stable localhost URLs.
+  - Decouples operator access from changing Wi-Fi/node IP.
+  - Exposes consistent local endpoints:
+    - `http://localhost:8000` (IDS API/UI)
+    - `http://localhost:3000` (Grafana)
+    - `http://localhost:9090` (Prometheus)
+
+- **`scripts/start-everything.sh` + `scripts/pre-demo-check.sh`**
+  - Startup now uses managed local access helper instead of ad-hoc single forward.
+  - Readiness check now auto-attempts managed localhost access when API URL cannot be detected.
+  - Reduced false-negative readiness failures when NodePort is not reachable on localhost.
+
+- **`scripts/scale-profile.sh`**
+  - Added repeatable scale profiles (`small`, `medium`, `large`) for emulator workloads.
+  - Applies both replica scaling and logical-device env scaling (`DEVICE_COUNT`, `ENV_SENSOR_STATION_COUNT`, `PARKING_SLOT_MULTIPLIER`).
+  - Keeps `ids-api` single-replica by default with optional override for advanced shared-state setups.
+
+- **`scripts/run-live-attacks.sh`**
+  - Added real MQTT attack mode (`--mode mqtt`) with:
+    - wildcard topic traversal subscriptions,
+    - unauthorized control-topic publishes,
+    - client-ID spoof reconnect churn.
+  - Updated mode validation/usage text and attack metadata to include MQTT behavior.
+  - Runner dependencies now install `paho-mqtt` in addition to `httpx`.
+
+- **`services/ids-api/src/api/llm.py` + `services/ids-api/src/llm_providers/manager.py`**
+  - Added strict provider diagnostics support:
+    - `POST /api/llm/test/{provider}?strict=true` disables fallback for the test path.
+    - Response now includes `strict_requested` and `strict_satisfied`.
+  - Cost estimation for provider tests now uses the effective provider actually used by analysis.
+
+- **`services/ids-api/static/js/api.js` + `services/ids-api/static/js/modules/attacks.js`**
+  - Removed stale client wiring to deleted `/api/attacks/*` backend endpoints.
+  - Attack tab now uses an explicit local catalog aligned to live runner modes rather than dead registry calls.
+
+- **`docs/reference/LLM_EVALUATION_CANONICAL.md`**
+  - Added canonical paper-evaluation method:
+    - required quality/performance/reliability/cost/safety metrics,
+    - fixed table/chart set,
+    - strict scope limits and truth boundaries,
+    - reproducible export procedure using existing APIs/scripts.
+
+- **Core docs alignment (`README.md`, `docs/API_REFERENCE.md`, `docs/OPERATIONS.md`, `docs/COMMANDS_REFERENCE.md`, `docs/TROUBLESHOOTING.md`, `docs/ATTACK_SIMULATION_GUIDE.md`)**
+  - Removed stale endpoint guidance tied to deleted `/api/attacks/*` paths.
+  - Added strict provider diagnostic usage (`/api/llm/test/{provider}?strict=true`).
+  - Added MQTT attack-chain runner documentation (`scripts/run-live-attacks.sh --mode mqtt`).
+  - Corrected deployment note for ConfigMap-mounted static assets.
 
 ### Automation / Governance
 
@@ -164,7 +292,7 @@ Focused upgrades in response to examiner feedback on IoT realism, staged attack 
 - **`docs/ARCHITECTURE.md`**
   - Added “Current vs Target Architecture” table (current implementation vs research-grade roadmap).
 
-- **`docs/EXAMINER_QA_30.md`**
+- **`docs/reference/EXAMINER_QA_30.md`**
   - Added “Research Limitations + Roadmap” viva section.
   - Added scenario-spec link in the QA Master Guide.
 
@@ -295,7 +423,7 @@ Implemented the three highest-priority P0 production fixes: no-LLM safe mode, pe
 - `services/ids-api/src/api/alerts.py`
 - `services/ids-api/src/api/analyst.py`
 - `services/ids-api/src/k8s_automation.py`
-- `docs/FORCED_ARCHITECTURE_50Q.md`
+- `docs/reference/FORCED_ARCHITECTURE_50Q.md`
 - `CHANGELOG.md`
 
 ---
@@ -343,7 +471,7 @@ Added a code-grounded architecture reference that answers 50 operational questio
 
 ### Documentation
 
-- Added [docs/FORCED_ARCHITECTURE_50Q.md](docs/FORCED_ARCHITECTURE_50Q.md):
+- Added [docs/reference/FORCED_ARCHITECTURE_50Q.md](docs/reference/FORCED_ARCHITECTURE_50Q.md):
   - 50 direct Q&A items mapped to current implementation.
   - Clear distinction between implemented behavior vs missing capability.
   - Prioritized improvement backlog (P0-P3) for production hardening.
@@ -1969,3 +2097,98 @@ sum(ids_alerts_received_total{job="ids-api"} and on() vector(1))
   - NIST SP 800-82 Rev.2, "Guide to Industrial Control Systems (ICS) Security" (governance considerations).
 
 These additions should be used during the Capstone defense to explain modelling choices, safety mitigations, and evaluation methodology.
+
+### Dashboard Truthfulness Improvements - 2026-03-07
+
+- **Alert history grouping**: changed the dashboard alert-history collapse logic from per-second/per-summary matching to a 5-minute incident bucket keyed by detector, rule, severity, workload context, and threat signature. This reduces duplicate governance/Falco rows and makes mixed-detector windows easier to read.
+- **Alert source visibility**: increased the default alert fetch window used by the dashboard and added detector-mix metadata to explain when Suricata events are absent from the visible window because Falco/governance traffic dominates recent alerts.
+- **LLM provider diagnostics**: normalized provider failure reasons into readable categories (invalid key, quota/rate limit, timeout, circuit open) instead of surfacing raw startup probe blobs as the primary status text.
+- **Manual diagnostic recovery**: successful per-provider manual tests now update the provider runtime health state so the dashboard reflects real recovery instead of showing stale startup-failure status.
+- **Usage semantics clarified**: provider usage cards/table now label DB-backed values as **alert-analysis calls**. Manual probes remain visible in diagnostics/runtime attempt counters but do not inflate the pipeline usage totals.
+- **Model defaults refreshed**: aligned `.env`, `.env.example`, provider registry defaults, and docs to current default models (`gpt-4o`, `gemini-2.5-flash`, `claude-sonnet-4-20250514`, `moonshot-v1-128k`).
+- **Deploy script truthfulness**: `scripts/deploy-code.sh` now loads local `.env` before printing provider key status, so deploy output matches the repo-local configuration operators expect to apply.
+- **LLM config workflow clarified**: canonical path remains `.env` -> `scripts/apply-llm-env-to-k8s-secret.sh` -> `scripts/deploy-code.sh`.
+- **Overview metric wording**: removed misleading “current window” phrasing from flood suppression and suppressed fake 100% dedup displays when no real duplicate-capable alerts have been processed yet.
+- **Alert history usability**: added inline search to the live dashboard alert-history tab and de-prioritized low-signal governance validation rows in the overview’s recent-alert feed.
+- **IoT IP visibility**: logical devices now surface `metadata.ip` / `device_ip` in the device mesh when no pod IP exists.
+# 2026-03-07 — IoT realism + protocol attack upgrade
+
+- **`smart-city-services/parking-system/app.py`**
+  - Added a real MQTT gateway loop using `paho-mqtt`.
+  - Parking emulator now publishes live MQTT telemetry/status/SenML samples to the broker instead of only exposing MQTT-shaped REST views.
+  - Added MQTT control topic handling so occupancy/fault/reserve/restore commands can modify emulator state during live attack runs.
+  - Exposed gateway MQTT runtime status and publish/control counters in parking stats/gateway endpoints.
+
+- **`smart-city-services/parking-system/Dockerfile`**
+  - Added `paho-mqtt` to the service image so MQTT gateway behavior works after rebuild/redeploy.
+
+- **`smart-city-services/environmental-sensor/app.py`**
+  - Added bounded `POST /modbus/write` override path for protocol-state tamper testing.
+  - Station overrides now persist for a TTL and affect AQI/status/readings in live telemetry instead of being overwritten immediately by the background model.
+
+- **`smart-city-services/street-lighting/app.py`**
+  - DALI `OFF` / `RECALL_MAX` commands now create a bounded manual override window.
+  - This makes blackout / forced-lighting scenarios persist long enough to observe in telemetry and dashboard state.
+
+- **`scripts/run-live-attacks.sh`**
+  - Added `--mode protocol` for protocol-state tamper evaluation.
+  - Extended live attack coverage to include:
+    - parking MQTT control-topic abuse,
+    - environmental Modbus-style register tamper,
+    - street-lighting DALI blackout commands.
+  - Updated script help/explanation text to describe the stronger protocol-specific paths.
+
+- **Dashboard / help / docs**
+  - Updated IoT UI wording to describe the system honestly as protocol-faithful software emulation with state models.
+  - Replaced remaining “attack simulation” wording in overview text with “live attack scenario”.
+  - Updated `help.html`, `docs/QUICKSTART.md`, `docs/ATTACK_SIMULATION_GUIDE.md`, and `docs/IOT_EMULATION_REPORT.md` to document the new protocol-state attack paths and current realism scope.
+
+- **Kubernetes deployment path**
+  - Standardized the preferred emulator deployment model around a shared runtime image plus ConfigMap-mounted application code.
+  - Updated `k8s-manifests/services-no-build.yaml` so `healthcare-api` and `parking-system` use the shared image pattern instead of startup-time `pip install`.
+  - Added first-class `env-sensor` and `street-lighting` manifests to the active `services-no-build.yaml` manifest set.
+  - Updated `scripts/start-everything.sh` to refresh emulator code ConfigMaps before manifest apply.
+  - Updated `scripts/deploy-code.sh` to refresh emulator code ConfigMaps and restart the known emulator workloads.
+
+- **`docker/smart-city-service/Dockerfile` + `smart-city-services/environmental-sensor/app.py`**
+  - Added `opcua` to the shared emulator runtime image.
+  - Environmental sensor now starts a native OPC UA endpoint on `opc.tcp://0.0.0.0:4840/env` in addition to the REST helper endpoints.
+
+- **`scripts/run-live-attacks.sh`**
+  - Added ONVIF-specific protocol activity to `--mode protocol`:
+    - device/media/PTZ SOAP calls,
+    - snapshot scraping,
+    - ANPR data retrieval.
+
+- **`services/ids-api/src/api/alerts.py`**
+  - Extended `POST /api/alerts/{id}/reanalyze` with:
+    - `strict=true` to disable fallback during reanalysis
+    - `persist=false` to run non-destructive evaluation passes without overwriting stored alerts
+  - Returned usage metadata and strict-mode flags for evaluation tooling.
+
+- **`scripts/llm-compare-report.py`**
+  - Filtered pseudo-providers (`none`, `unknown`, `cached`, etc.) from all scored outputs.
+  - Added strict multi-provider evaluation mode driven by live stored alerts:
+    - `--strict-eval`
+    - `--providers`
+    - `--runs`
+    - `--max-per-family`
+  - Strict-evaluation summaries now derive latency, reliability, token totals, and estimated cost from the strict-run raw results instead of stale dashboard snapshots.
+
+- **`docs/reference/LLM_EVAL_GROUND_TRUTH_CORE.csv`**
+  - Expanded ground-truth coverage to current live protocol alerts:
+    - MQTT misuse
+    - Modbus write tamper
+    - ONVIF recon / PTZ misuse
+    - ANPR data scraping
+
+- **`docs/LLM_EVALUATION.md`**
+  - Consolidated the LLM evaluation documentation into one canonical file.
+  - Combined:
+    - implementation steps
+    - experimental method
+    - exact commands
+    - measured provider results
+    - artifact-to-figure mapping
+    - plain-language runbook guidance
+    - guidance for a real `500` x `5-provider` study

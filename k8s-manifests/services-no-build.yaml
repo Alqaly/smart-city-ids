@@ -130,10 +130,11 @@ spec:
     spec:
       containers:
       - name: healthcare-api
-        image: python:3.9-slim
-        command: ["/bin/sh", "-c"]
+        image: smart-city-ids/smart-city-service:latest
+        imagePullPolicy: Never
+        command: ["python"]
         args:
-          - "pip install --no-cache-dir flask==3.0.0 && python /app/app.py"
+          - "/app/app.py"
         ports:
         - containerPort: 5001
         env:
@@ -240,10 +241,11 @@ spec:
     spec:
       containers:
       - name: parking-system
-        image: python:3.9-slim
-        command: ["/bin/sh", "-c"]
+        image: smart-city-ids/smart-city-service:latest
+        imagePullPolicy: Never
+        command: ["python"]
         args:
-          - "pip install --no-cache-dir flask==3.0.0 && python /app/app.py"
+          - "/app/app.py"
         ports:
         - containerPort: 5002
         env:
@@ -316,6 +318,238 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: parking-system
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
+# Environmental Sensor Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: env-sensor
+  namespace: smart-city
+  labels:
+    app: env-sensor
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: env-sensor
+  template:
+    metadata:
+      labels:
+        app: env-sensor
+    spec:
+      containers:
+      - name: env-sensor
+        image: smart-city-ids/smart-city-service:latest
+        imagePullPolicy: Never
+        command: ["python"]
+        args:
+          - "/app/app.py"
+        ports:
+        - containerPort: 5000
+        - containerPort: 4840
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: PORT
+          value: "5000"
+        - name: OPCUA_ENABLED
+          value: "1"
+        - name: OPCUA_ENDPOINT
+          value: "opc.tcp://0.0.0.0:4840/env"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: code
+        configMap:
+          name: env-sensor-code
+      - name: tmp
+        emptyDir: {}
+
+---
+# Environmental Sensor Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: env-sensor-service
+  namespace: smart-city
+  labels:
+    app: env-sensor
+spec:
+  selector:
+    app: env-sensor
+  ports:
+  - name: http
+    port: 80
+    targetPort: 5000
+    protocol: TCP
+  - name: opcua
+    port: 4840
+    targetPort: 4840
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: env-sensor-pdb
+  namespace: smart-city
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: env-sensor
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: env-sensor-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: env-sensor
+  minReplicas: 2
+  maxReplicas: 10
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 180
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
+# Street Lighting Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: street-lighting
+  namespace: smart-city
+  labels:
+    app: street-lighting
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: street-lighting
+  template:
+    metadata:
+      labels:
+        app: street-lighting
+    spec:
+      containers:
+      - name: street-lighting
+        image: smart-city-ids/smart-city-service:latest
+        imagePullPolicy: Never
+        command: ["python"]
+        args:
+          - "/app/app.py"
+        ports:
+        - containerPort: 5000
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: PORT
+          value: "5000"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        volumeMounts:
+        - name: code
+          mountPath: /app
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: code
+        configMap:
+          name: street-lighting-code
+      - name: tmp
+        emptyDir: {}
+
+---
+# Street Lighting Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: street-lighting-service
+  namespace: smart-city
+  labels:
+    app: street-lighting
+spec:
+  selector:
+    app: street-lighting
+  ports:
+  - port: 80
+    targetPort: 5000
+    protocol: TCP
+  type: ClusterIP
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: street-lighting-pdb
+  namespace: smart-city
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: street-lighting
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: street-lighting-hpa
+  namespace: smart-city
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: street-lighting
   minReplicas: 2
   maxReplicas: 10
   behavior:

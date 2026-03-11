@@ -21,7 +21,7 @@ log_info() { echo -e "  $1"; }
 section() {
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}$1${RESET}"
+    echo -e "${CYAN}$1${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
@@ -172,21 +172,80 @@ fi
 log_info "Priority: ${CYAN}${LLM_PRIORITY:-kimi,xai,anthropic,openai,gemini}${NC}"
 
 # =============================================================================
-# Phase 4: Deploy Services
+# Phase 4: Build Shared Emulator Image
 # =============================================================================
-section "Phase 4: Deploying Services"
+section "Phase 4: Building Shared Emulator Image"
+
+if command -v docker >/dev/null 2>&1 && [[ -f "$PROJECT_ROOT/docker/smart-city-service/Dockerfile" ]]; then
+    log_info "Building smart-city-ids/smart-city-service:latest..."
+    if docker build -t smart-city-ids/smart-city-service:latest -f "$PROJECT_ROOT/docker/smart-city-service/Dockerfile" "$PROJECT_ROOT" >/tmp/smart-city-service.build.log 2>&1; then
+        if sudo k3s ctr images import <(docker save smart-city-ids/smart-city-service:latest) >/dev/null 2>&1; then
+            log_ok "Shared emulator image imported into k3s"
+        else
+            log_warn "Built shared emulator image but failed to import into k3s"
+        fi
+    else
+        log_warn "Shared emulator image build failed; see /tmp/smart-city-service.build.log"
+    fi
+else
+    log_warn "Docker or shared emulator Dockerfile not found; assuming image already exists in cluster runtime"
+fi
+
+# =============================================================================
+# Phase 5: Deploy Services
+# =============================================================================
+section "Phase 5: Deploying Services"
 
 log_info "Creating namespaces..."
 for ns in smart-city monitoring falco-system; do
     kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
 done
 
+log_info "Refreshing emulator code ConfigMaps..."
+declare -A EMULATOR_CONFIGMAPS=(
+    ["traffic-camera-code"]="$PROJECT_ROOT/smart-city-services/traffic-camera/app.py"
+    ["healthcare-api-code"]="$PROJECT_ROOT/smart-city-services/healthcare-api/app.py"
+    ["parking-system-code"]="$PROJECT_ROOT/smart-city-services/parking-system/app.py"
+    ["env-sensor-code"]="$PROJECT_ROOT/smart-city-services/environmental-sensor/app.py"
+    ["street-lighting-code"]="$PROJECT_ROOT/smart-city-services/street-lighting/app.py"
+)
+for cm in "${!EMULATOR_CONFIGMAPS[@]}"; do
+    src="${EMULATOR_CONFIGMAPS[$cm]}"
+    if [[ -f "$src" ]]; then
+        kubectl create configmap "$cm" -n smart-city \
+            --from-file=app.py="$src" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+    fi
+done
+
 log_info "Applying manifests..."
+normalize_ids_api_env() {
+    local desired_env_json patch_payload
+    desired_env_json="$(python - <<'PY'
+import json
+import yaml
+
+with open("k8s-manifests/ids-api-FINAL.yaml", "r", encoding="utf-8") as fh:
+    for doc in yaml.safe_load_all(fh):
+        if doc and doc.get("kind") == "Deployment" and doc.get("metadata", {}).get("name") == "ids-api":
+            print(json.dumps(doc["spec"]["template"]["spec"]["containers"][0]["env"]))
+            break
+PY
+)"
+    [[ -n "$desired_env_json" ]] || return 0
+    patch_payload="$(jq -cn --argjson env "$desired_env_json" '[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":$env}]')"
+    kubectl patch deploy ids-api -n smart-city --type=json -p "$patch_payload" >/dev/null 2>&1 || true
+}
+
+normalize_ids_api_env
+
 MANIFESTS=(
     "k8s-manifests/postgres-deployment.yaml"
     "k8s-manifests/mqtt-broker.yaml"
     "k8s-manifests/ids-api-FINAL.yaml"
     "k8s-manifests/services-no-build.yaml"
+    "k8s-manifests/suricata-fixed.yaml"
+    "k8s-manifests/falco-forwarder.yaml"
     "k8s-manifests/prometheus-deployment.yaml"
     "k8s-manifests/grafana-deployment.yaml"
 )
@@ -198,9 +257,9 @@ for m in "${MANIFESTS[@]}"; do
 done
 
 # =============================================================================
-# Phase 5: Wait for Ready
+# Phase 6: Wait for Ready
 # =============================================================================
-section "Phase 5: Waiting for Services"
+section "Phase 6: Waiting for Services"
 
 echo ""
 echo -n "  Waiting for IDS API..."
@@ -234,24 +293,14 @@ for i in {1..20}; do
 done
 
 # =============================================================================
-# Phase 6: Port Forwarding
+# Phase 7: Port Forwarding
 # =============================================================================
-section "Phase 6: Port Forwarding"
+section "Phase 7: Port Forwarding"
 
-# Kill old port-forwards
-pkill -f "kubectl.*port-forward.*ids-api" 2>/dev/null || true
-sleep 1
-
-# Start new port-forward
-log_info "Starting port-forward (localhost:8000)..."
-kubectl -n smart-city port-forward svc/ids-api-service 8000:8000 --address 127.0.0.1 > /tmp/pf.log 2>&1 &
-PF_PID=$!
-sleep 3
-
-if kill -0 $PF_PID 2>/dev/null; then
-    log_ok "Port-forward active (PID: $PF_PID)"
+if bash "$SCRIPT_DIR/access-stack.sh" start; then
+    log_ok "Managed localhost access is active"
 else
-    log_warn "Port-forward failed - use NodePort: http://localhost:30800"
+    log_warn "Managed localhost access failed; NodePort may still be reachable via node IP"
 fi
 
 # =============================================================================
@@ -262,12 +311,24 @@ section "System Ready"
 echo ""
 log_ok "Smart City IDS is running!"
 echo ""
-echo -e "  ${CYAN}Dashboard:${NC}      http://localhost:8000/ui"
-echo -e "  ${CYAN}API Docs:${NC}       http://localhost:8000/docs"
-echo -e "  ${CYAN}Grafana:${NC}        http://localhost:30300"
-echo -e "  ${CYAN}Prometheus:${NC}     http://localhost:31106"
+NODE_IP="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null | awk '{print $1}')"
+IDS_PORT="$(kubectl -n smart-city get svc ids-api-service -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo 30800)"
+GRAFANA_PORT="$(kubectl -n monitoring get svc grafana -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo 30300)"
+PROM_PORT="$(kubectl -n monitoring get svc prometheus -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo 31106)"
+
+echo -e "  ${CYAN}Local Dashboard:${NC} http://localhost:8000/ui"
+echo -e "  ${CYAN}Local API Docs:${NC}  http://localhost:8000/docs"
+echo -e "  ${CYAN}Local Grafana:${NC}   http://localhost:3000"
+echo -e "  ${CYAN}Local Prometheus:${NC} http://localhost:9090"
+if [[ -n "${NODE_IP:-}" ]]; then
+    echo ""
+    echo -e "  ${CYAN}NodePort Dashboard:${NC} http://${NODE_IP}:${IDS_PORT}/ui"
+    echo -e "  ${CYAN}NodePort Grafana:${NC}   http://${NODE_IP}:${GRAFANA_PORT}"
+    echo -e "  ${CYAN}NodePort Prometheus:${NC} http://${NODE_IP}:${PROM_PORT}"
+fi
 echo ""
 echo -e "  ${YELLOW}Login:${NC}          operator / operator"
 echo ""
 echo -e "  ${CYAN}LLM Control:${NC}    ./scripts/llm-manager.sh status"
+echo -e "  ${CYAN}Access Control:${NC} ./scripts/access-stack.sh [start|stop|status]"
 echo ""

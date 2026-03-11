@@ -1,410 +1,198 @@
-# Smart City IDS - Operations Guide
+# Smart City IDS Operations Guide
 
-Day-to-day operations, monitoring, and demo procedures.
-
----
-
-## Table of Contents
-
-1. [Daily Operations](#daily-operations)
-2. [Monitoring](#monitoring)
-3. [Demo Procedures](#demo-procedures)
-4. [Attack Simulation](#attack-simulation)
-5. [Incident Response](#incident-response)
-6. [Maintenance](#maintenance)
+Day-to-day operating procedures for the active Smart City IDS research deployment.
 
 ---
 
-## Daily Operations
-
-### Check System Health
+## 1) Daily Health Checks
 
 ```bash
-# Quick status check
-kubectl get pods -A | grep -E "(smart-city|monitoring)"
+bash scripts/access-stack.sh start
+bash scripts/access-stack.sh status
 
-# Detailed status
-kubectl get pods -n smart-city -o wide
-kubectl get pods -n monitoring -o wide
-
-# Check node resources
-kubectl top nodes
-kubectl top pods -n smart-city
+kubectl get pods -n smart-city
+kubectl get pods -n monitoring
+kubectl get pods -n falco-system
 ```
 
-### View Logs
-
 ```bash
-# IDS API logs (follow mode)
-kubectl logs -n smart-city -l app=ids-api -f
-
-# Last 100 lines
-kubectl logs -n smart-city -l app=ids-api --tail=100
-
-# All containers in a pod
-kubectl logs -n smart-city <pod-name> --all-containers
-
-# Falco logs
-kubectl logs -n falco-system -l app=falco --tail=50
+curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
+curl -s http://localhost:30800/api/metrics | jq '{total_alerts,iot_devices_active,llm_engines}'
 ```
 
-### Common kubectl Commands
+If `localhost:30800` is not reachable in your environment:
 
 ```bash
-# Get node IP for external access
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-echo "Node IP: $NODE_IP"
-
-# Port forward for local access (service name may be ids-api-service)
-kubectl port-forward -n smart-city svc/ids-api-service 8000:8000
-
-# Exec into pod for debugging
-kubectl exec -it -n smart-city <pod-name> -- /bin/sh
-
-# Restart deployment
-kubectl rollout restart deployment/ids-api -n smart-city
+bash scripts/access-stack.sh start
+curl -s http://127.0.0.1:8000/health | jq .
 ```
 
 ---
 
-## Monitoring
-
-### Access Dashboards
-
-| Dashboard | URL | Credentials |
-|-----------|-----|-------------|
-| Grafana | http://NODE_IP:30300 | admin / admin |
-| Prometheus | http://NODE_IP:PROM_PORT | Run: `kubectl get svc -n monitoring prometheus -o jsonpath='{.spec.ports[0].nodePort}'` |
-| IDS API Docs | http://NODE_IP:30800/docs | - |
-
-### Key Metrics to Watch
-
-In Grafana, monitor these panels:
-
-| Metric | Warning Threshold | Action |
-|--------|-------------------|--------|
-| `smartcity_ids_alerts_received_total` rate | >50/min | Check for attack or misconfiguration |
-| `smartcity_ids_llm_latency_seconds` p95 | >5s | Check LLM API status |
-| `smartcity_ids_severity_total` | Many 8+ | Review automated actions |
-| Pod CPU/Memory | >80% | Consider scaling |
-
-### Prometheus Queries
-
-```promql
-# Total alerts in last hour
-sum(increase(smartcity_ids_alerts_received_total[1h]))
-
-# Alerts by severity
-sum by (severity) (smartcity_ids_severity_total)
-
-# LLM response time (95th percentile)
-histogram_quantile(0.95, rate(smartcity_ids_llm_latency_seconds_bucket[5m]))
-
-# Actions taken
-sum by (action) (smartcity_ids_actions_executed_total)
-
-# Time to mitigation (p95)
-histogram_quantile(0.95, sum(rate(smartcity_ids_time_to_mitigation_seconds_bucket[5m])) by (le))
-```
-
-### Reading Histogram Percentiles in Grafana
-
-Use `histogram_quantile()` on the `_bucket` series to compute p50/p95/p99. Example:
-
-```promql
-histogram_quantile(0.95, sum(rate(smartcity_ids_alert_processing_seconds_bucket[5m])) by (le))
-```
-
----
-
-## Demo Procedures
-
-### Pre-Demo Checklist
-
-Use the maintained script first:
+## 2) Authentication and Governance Checks
 
 ```bash
-bash scripts/pre-demo-check.sh
-```
-
-It checks cluster health, API/UI reachability, login, and database persistence mode (including detection of `memory-fallback`).
-
-### Demo Script: Full System Walkthrough
-
-**1. Show Architecture (2 min)**
-```bash
-# Show running pods
-kubectl get pods -n smart-city -o wide
-```
-
-**2. Explain Smart City Services (2 min)**
-- Open traffic camera: http://NODE_IP:30080 (if NodePort configured)
-- Explain intentional vulnerabilities
-
-**3. Show IDS API (2 min)**
-```bash
-# API documentation
-open http://NODE_IP:30800/docs
-
-# Health endpoint
-curl http://NODE_IP:30800/health | jq .
-```
-
-**4. Demonstrate Attack Detection (5 min)**
-```bash
-# Run live attack script (real Falco/Suricata detections)
-bash scripts/run-live-attacks.sh --duration 30 --show-alerts 3
-
-# Watch logs in another terminal
-kubectl logs -n smart-city -l app=ids-api -f
-```
-
-**5. Show LLM Analysis (3 min)**
-- Point to Grafana dashboard
-- Explain severity scoring
-- Show automated action triggers
-
-**6. Demonstrate Automated Response / Governance (3 min)**
-```bash
-# Get auth token
-TOKEN=$(curl -s http://NODE_IP:30800/api/auth/login \
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin"}' | jq -r .access_token)
+  -d '{"username":"operator","password":"operator"}' | jq -r '.access_token')
+```
 
-# Generate a test alert (demo sanity / governance path)
-curl -X POST http://NODE_IP:30800/api/alerts \
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:30800/api/governance/status | jq '{mode,pending_count,metrics}'
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:30800/api/governance/pending | jq .
+```
+
+---
+
+## 3) Alert Pipeline Monitoring
+
+```bash
+curl -s http://localhost:30800/api/alerts?limit=10 | jq '.alerts'
+curl -s http://localhost:30800/api/rate-limiter/status | jq .
+curl -s http://localhost:30800/api/circuit-breaker/status | jq .
+```
+
+Alert History semantics in the dashboard:
+
+- The UI loads a wider recent alert window and groups repeated alerts into 5-minute incident buckets.
+- Grouping key: detector, rule, severity, namespace/pod/container context, and threat signature.
+- The detector summary above the table explains why a detector may be missing from view. If Suricata is not shown there, the loaded window is dominated by other detectors.
+
+Audit a specific alert end-to-end:
+
+```bash
+ALERT_ID=123
+curl -s http://localhost:30800/api/audit/trace/alert-${ALERT_ID} | jq .
+```
+
+---
+
+## 4) LLM Operations
+
+```bash
+curl -s http://localhost:30800/api/llm/diagnostics | jq .
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/llm/status | jq .
+```
+
+Dashboard usage semantics:
+
+- `Provider Breakdown (today)` is DB-backed usage for real IDS alert-analysis calls.
+- Manual `Test Key` / `Probe` actions affect provider diagnostics and runtime status only.
+- A provider can recover from stale startup-failure state after a successful strict/manual test.
+- `Hist` in the success column means historical DB usage exists, but runtime success counters were reset after restart.
+
+Overview metric semantics:
+
+- `Dedup + LLM Savings` is shown only after the deduplicator has processed real duplicate-capable security alerts in the current process.
+- `Flood Suppression` reflects cumulative alert-rate throttling since the last rate-limiter reset/startup, not a rolling live-only UI window.
+
+Strict provider diagnostic:
+
+```bash
+curl -s -X POST \
   -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:30800/api/llm/test/openai?strict=true" \
   -H "Content-Type: application/json" \
-  -d '{
-    "source": "demo",
-    "rule": "Critical Security Event",
-    "priority": "Critical",
-    "output": "Suspicious root shell spawned in container",
-    "output_fields": {
-      "container.name": "traffic-camera",
-      "proc.cmdline": "/bin/bash"
-    }
-  }'
-
-# Check governance/actions and network policies (if action executed)
-curl -s http://NODE_IP:30800/api/governance/status -H "Authorization: Bearer $TOKEN" | jq .
-kubectl get networkpolicies -n smart-city
+  -d '{"test_prompt":"strict provider diagnostic"}' | jq .
 ```
 
 ---
 
-## Demo Verification Checklist (Must Pass)
+## 5) Attack-Chain Exercise Workflow
 
-Use this checklist before any examiner/demo session:
+Current deployment path is CLI-driven via `scripts/run-live-attacks.sh`.
 
-1. **Prometheus Targets Up**
-   ```bash
-   kubectl exec -n monitoring deploy/prometheus -- /bin/sh -c \
-     "wget -qO- http://localhost:9090/api/v1/targets | grep -q 'smart-city-ids' && echo OK"
-   ```
-2. **IDS API Metrics Present**
-   ```bash
-   kubectl exec -n monitoring deploy/prometheus -- /bin/sh -c \
-     "wget -qO- 'http://localhost:9090/api/v1/query?query=sum(smartcity_ids_alerts_received_total)'"
-   ```
-3. **LLM Activity Visible**
-   ```bash
-   kubectl exec -n monitoring deploy/prometheus -- /bin/sh -c \
-     "wget -qO- 'http://localhost:9090/api/v1/query?query=sum(smartcity_ids_llm_requests_total)'"
-   ```
-4. **Forwarder → IDS API Pipeline**
-   - Check Falco forwarder logs:
-     ```bash
-     kubectl logs -n falco-system -l app=falco-forwarder --tail=20
-     ```
-   - Check Suricata forwarder logs:
-     ```bash
-     kubectl logs -n suricata-system -l app=suricata-forwarder --tail=20
-     ```
-5. **Grafana Dashboard Freshness**
-   - Open `Smart City IDS - IEEE Capstone II (Improved)`.
-   - Confirm panels show values from last 15 minutes (queries use `increase()`/`rate()`).
+```bash
+# Baseline preflight (script name retained for compatibility)
+bash scripts/pre-demo-check.sh
+
+# Dry-run exercise plan
+bash scripts/run-live-attacks.sh --mode all --duration 20 --dry-run --verbose
+
+# MQTT abuse chain
+bash scripts/run-live-attacks.sh --mode mqtt --duration 30 --show-alerts 5 --verbose
+
+# Full exercise
+bash scripts/run-live-attacks.sh --mode all --duration 30 --show-alerts 3 --verbose
+```
+
+Governance mode validation:
+
+```bash
+bash scripts/test-governance-modes.sh
+bash scripts/e2e-verbose-test.sh --quick
+```
+
+These checks require at least one operational LLM provider. With zero operational providers, they fail early with the live diagnostics summary instead of producing a misleading governance result.
 
 ---
 
-## Attack Simulation
-
-### Available Attack Scripts
-
-| Script | Purpose | Usage |
-|--------|---------|-------|
-| `ddos_simulator.py` | DDoS attack | `python attack-simulator/ddos_simulator.py <url> <threads> <duration>` |
-| `data_exfiltration.py` | Data theft | `python attack-simulator/data_exfiltration.py` |
-| `privilege_escalation.py` | Privilege escalation | `python attack-simulator/privilege_escalation.py` |
-
-### Basic Attack Demo
+## 6) Deployment and Update Workflow
 
 ```bash
-# DDoS (5 threads, 10 seconds)
-python attack-simulator/ddos_simulator.py http://NODE_IP:30800 5 10
-
-# Privilege escalation simulation
-python attack-simulator/privilege_escalation.py
-
-# Data exfiltration simulation
-python attack-simulator/data_exfiltration.py
+# Build/import ids-api image, refresh static ConfigMaps, restart pods
+bash scripts/deploy-code.sh
 ```
 
-### Advanced Attack Scenarios
+`deploy-code.sh` now refreshes:
+- `ids-app-static`
+- `ids-app-static-js`
+- `ids-app-static-js-modules`
+
+This is required because the deployment mounts `/app/static*` from ConfigMaps.
+
+---
+
+## 7) Incident Response Checks
+
+When high-severity alerts occur:
 
 ```bash
-# Full smart city attack simulation
-python attack-simulator/phase4-smart-city-attacks.py
-
-# Generate security events
-./attack-simulations/generate-security-events.sh
-
-# Network-based attacks
-./attack-simulations/generate-network-attacks.sh
-```
-
-### Manual Alert Injection
-
-```bash
-# Inject test alert directly to API
-curl -X POST http://NODE_IP:30800/api/alerts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "source": "manual-test",
-    "rule": "Test Alert",
-    "priority": "Warning",
-    "output": "This is a test alert for demo purposes",
-    "output_fields": {
-      "container.name": "test-container"
-    }
-  }'
+curl -s http://localhost:30800/api/alerts?limit=20 | jq '.alerts[] | {id,rule,severity,threat_type,actions_taken}'
+kubectl get networkpolicy -n smart-city
+kubectl get deploy -n smart-city
 ```
 
 ---
 
-## Incident Response
-
-### When High Severity Alert Occurs
-
-1. **Check Alert Details**
-   ```bash
-   # View recent alerts
-   curl http://NODE_IP:30800/api/alerts?limit=10 | jq .
-   
-   # Check specific alert
-   curl http://NODE_IP:30800/api/alerts/{alert_id} | jq .
-   ```
-
-2. **Verify Automated Actions**
-   ```bash
-   # Check network policies (isolation)
-   kubectl get networkpolicies -n smart-city
-   
-   # Check deployment replicas (scaling)
-   kubectl get deployments -n smart-city
-   ```
-
-3. **Investigate Affected Pod**
-   ```bash
-   # Get pod details
-   kubectl describe pod <affected-pod> -n smart-city
-   
-   # Check pod logs
-   kubectl logs -n smart-city <affected-pod> --previous
-   ```
-
-4. **Manual Intervention (if needed)**
-   ```bash
-   # Manually isolate pod
-   kubectl label pod <pod-name> -n smart-city quarantine=true
-   
-   # Delete suspicious pod (will recreate)
-   kubectl delete pod <pod-name> -n smart-city
-   
-   # Scale down to zero
-   kubectl scale deployment/<deployment-name> -n smart-city --replicas=0
-   ```
-
-### Reverting Automated Actions
+## 8) Common Recovery Actions
 
 ```bash
-# Remove isolation network policy
-kubectl delete networkpolicy isolate-<pod-name> -n smart-city
-
-# Scale back to normal
-kubectl scale deployment/<deployment-name> -n smart-city --replicas=1
-```
-
----
-
-## Maintenance
-
-### Backup Procedures
-
-```bash
-# Backup PostgreSQL data
-kubectl exec -n smart-city $(kubectl get pods -n smart-city -l app=postgres -o jsonpath='{.items[0].metadata.name}') \
-  -- pg_dump -U idsuser idsdb > backup-$(date +%Y%m%d).sql
-
-# Backup Grafana dashboards
-kubectl exec -n monitoring $(kubectl get pods -n monitoring -l app=grafana -o jsonpath='{.items[0].metadata.name}') \
-  -- grafana-cli admin export > grafana-backup.json
-```
-
-### Update Procedures
-
-```bash
-# Update IDS API code
-# 1. Edit services/ids-api/src/*.py
-
-# 2. Rebuild image
-./scripts/build-images.sh
-
-# 3. Restart deployment
+kubectl logs -n smart-city -l app=ids-api --tail=200
 kubectl rollout restart deployment/ids-api -n smart-city
-
-# 4. Watch rollout
 kubectl rollout status deployment/ids-api -n smart-city
 ```
 
-### Cleanup
-
 ```bash
-# Delete all in namespace (careful!)
-kubectl delete all --all -n smart-city
-
-# Full cleanup script
-./scripts/cleanup.sh
-
-# Remove k3s completely
-/usr/local/bin/k3s-uninstall.sh
+kubectl logs -n falco-system -l app=falco-forwarder --tail=100
+kubectl logs -n monitoring -l app=suricata-forwarder --tail=100
 ```
 
-### Log Rotation
-
-Kubernetes handles container log rotation. For persistent logs:
+If DB fallback is suspected:
 
 ```bash
-# Export logs to file
-kubectl logs -n smart-city -l app=ids-api --since=24h > ids-api-logs-$(date +%Y%m%d).txt
-
-# Clean up old logs
-find /var/log/pods -name "*.log" -mtime +7 -delete
+curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
 ```
 
 ---
 
-## Troubleshooting Quick Reference
+## 9) Capacity Scaling
 
-| Issue | Command | Solution |
-|-------|---------|----------|
-| Pod not starting | `kubectl describe pod <name> -n smart-city` | Check events for errors |
-| API key error | `kubectl get secret ids-api-secrets -n smart-city` | Recreate secret |
-| Database connection | `kubectl logs -n smart-city -l app=postgres` | Check postgres pod |
-| LLM timeout | Check API status | Consider fallback provider |
-| High CPU | `kubectl top pods -n smart-city` | Scale or optimize |
+Use repeatable profiles instead of ad-hoc manual scaling:
 
----
+```bash
+bash scripts/scale-profile.sh status
+bash scripts/scale-profile.sh small
+bash scripts/scale-profile.sh medium
+bash scripts/scale-profile.sh large
+```
 
-*For setup instructions, see [SETUP.md](SETUP.md)*  
-*For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md)*
+For advanced `ids-api` scaling:
+
+```bash
+IDS_API_REPLICAS=2 bash scripts/scale-profile.sh medium
+```
+
+Keep `ids-api` at one replica unless shared state for dedup/rate-limit is enabled.

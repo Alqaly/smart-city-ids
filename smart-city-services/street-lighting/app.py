@@ -104,6 +104,7 @@ def _init_fleet():
             "comm_fault": False,
             "energy_kwh": random.uniform(50, 500),
             "last_motion": None,
+            "manual_override": None,
             "firmware": "v2.1.4-DALI2",
         }
 
@@ -135,6 +136,12 @@ def _update_luminaires():
     with _lock:
         for lid, lum in luminaires.items():
             target_pct = _get_target_dim(lum["zone"])
+
+            override = lum.get("manual_override")
+            if override and override.get("until", 0) > time.time():
+                target_pct = max(0, min(100, int(override.get("dim_pct", target_pct))))
+            elif override:
+                lum["manual_override"] = None
 
             # Motion boost: if motion detected, boost to full for that zone
             if lum["last_motion"] and (time.time() - lum["last_motion"]) < 120:
@@ -211,6 +218,7 @@ def dali_command():
     addr = body.get("address", "broadcast")
     cmd = body.get("command", 0xA3)
     cmd_name = DALI_COMMANDS.get(cmd, f"UNKNOWN_{cmd:#04x}")
+    override_minutes = max(1, min(int(body.get("override_minutes", 5)), 60))
 
     targets = []
     if addr == "broadcast":
@@ -234,12 +242,10 @@ def dali_command():
         elif cmd == 0xA5:  # QUERY_LAMP_FAILURE
             responses.append({"address": lum["dali_address"], "luminaire": lum["luminaire_id"], "reply": 1 if lum["lamp_failure"] else 0})
         elif cmd == 0x00:  # OFF
-            lum["dim_level"] = 0
-            lum["dim_pct"] = 0
+            lum["manual_override"] = {"dim_pct": 0, "until": time.time() + override_minutes * 60, "source": cmd_name}
             responses.append({"address": lum["dali_address"], "luminaire": lum["luminaire_id"], "reply": "OK"})
         elif cmd == 0x05:  # RECALL_MAX
-            lum["dim_level"] = 254
-            lum["dim_pct"] = 100
+            lum["manual_override"] = {"dim_pct": 100, "until": time.time() + override_minutes * 60, "source": cmd_name}
             responses.append({"address": lum["dali_address"], "luminaire": lum["luminaire_id"], "reply": "OK"})
         else:
             responses.append({"address": lum["dali_address"], "luminaire": lum["luminaire_id"], "reply": f"CMD_{cmd_name}"})
@@ -250,6 +256,7 @@ def dali_command():
         "command": cmd_name,
         "command_code": f"{cmd:#04x}",
         "target_address": addr,
+        "override_minutes": override_minutes,
         "responses": responses,
     })
 

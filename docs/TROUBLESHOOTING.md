@@ -124,6 +124,22 @@ python3 motion_sensor.py --ids-url http://<IP>:30800
 
 ## Common Issues
 
+### Alert History shows mostly Falco / governance rows and no Suricata
+
+**Cause:** the visible recent window is dominated by higher-volume Falco or governance alerts. This does not necessarily mean Suricata is down.
+
+**How to check:**
+```bash
+curl -s http://localhost:30800/api/alerts?limit=120 | jq '.alerts | group_by(.source) | map({source: (.[0].source // "unknown"), count: length})'
+curl -s http://localhost:30800/health | jq '.components.suricata'
+kubectl logs -n monitoring -l app=suricata-forwarder --tail=50
+```
+
+**Dashboard behavior:**
+- Alert History groups repeated alerts into 5-minute incident buckets.
+- The detector summary above the table shows the source mix in the loaded window.
+- If Suricata is absent from that summary, it simply did not contribute alerts in the current loaded window.
+
 ### Deploy Script Fails
 
 **Error:** `command not found: ./deploy.sh`
@@ -184,7 +200,19 @@ bash scripts/deploy-code.sh
 # Reset provider latches/circuit state after fixing keys
 curl -s -X POST http://localhost:30800/api/llm/retry-all \
   -H "Authorization: Bearer $TOKEN" | jq .
+
+# Strict per-provider diagnostic (no fallback masking)
+curl -s -X POST \
+  "http://localhost:30800/api/llm/test/openai?strict=true" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"test_prompt":"strict provider diagnostic"}' | jq .
 ```
+
+Provider panel note:
+- `Provider Breakdown (today)` counts only DB-backed alert-analysis usage.
+- Manual provider tests and probes update diagnostics/runtime status but do not increase those usage counters.
+- `Hist` means historical DB usage exists, but the current runtime process has not accumulated enough success counters to compute a live percentage for that same window.
 
 ---
 
@@ -203,6 +231,22 @@ curl -s http://localhost:30800/api/rate-limiter/status | jq .
 
 # LLM provider diagnostics (cooldown/quota/auth state)
 curl -s http://localhost:30800/api/llm/diagnostics | jq .
+```
+
+Interpretation:
+- `401` on a provider card usually means invalid or expired API key.
+- `429` usually means quota exhaustion or provider-side rate limiting.
+- A successful strict test can clear stale runtime provider-failure state, but it will not change DB-backed historical usage totals.
+
+### Alert History has no search box / filtering is weak
+
+The live inline dashboard now includes a search field in the `Alert History` tab.
+It searches rule, detector, summary, threat type, namespace/pod/container, and LLM analysis text.
+
+If search still does not appear:
+```bash
+bash scripts/deploy-code.sh
+bash scripts/access-stack.sh restart
 ```
 
 ---
@@ -317,6 +361,46 @@ kubectl logs -n smart-city ids-api | grep "LLM.*latency"
 **Error:** Pod stuck pulling image
 
 **Cause:** Docker image not found in registry
+
+---
+
+### Dashboard/UI Looks Stale After Deploy
+
+**Symptoms:**
+- Backend behavior changed but dashboard still shows old UI/API client behavior
+- Removed routes still appear in browser calls
+
+**Cause:** `ids-api` deployment mounts static assets from ConfigMaps (`ids-app-static*`), so image rebuild alone is not enough.
+
+**Fix:**
+```bash
+# Recommended: deploy script now refreshes all static ConfigMaps + restarts ids-api
+bash scripts/deploy-code.sh
+
+# Verify mounted ConfigMaps exist
+kubectl -n smart-city get configmap ids-app-static ids-app-static-js ids-app-static-js-modules
+```
+
+---
+
+### NodePort URL Not Reachable on localhost
+
+**Symptoms:**
+- `curl http://localhost:30800/health` fails
+- Service exists as NodePort but localhost access is refused
+
+**Cause:** NodePort is exposed on the Kubernetes node network, not guaranteed on localhost loopback.
+
+**Fix (recommended):**
+```bash
+bash scripts/access-stack.sh start
+bash scripts/access-stack.sh status
+```
+
+Then use stable local URLs:
+- `http://localhost:8000` (IDS API/UI via `scripts/access-stack.sh start`)
+- `http://localhost:3000` (Grafana)
+- `http://localhost:9090` (Prometheus)
 
 **Fix:**
 ```bash

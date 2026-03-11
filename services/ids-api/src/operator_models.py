@@ -93,7 +93,7 @@ class RecommendedAction(BaseModel):
 
 class AutomationGovernance(BaseModel):
     """Governance decision: what happens automatically vs needs approval"""
-    automation_mode: str = Field(..., description="autopilot | assisted | manual")
+    automation_mode: str = Field(..., description="autonomous | assisted | manual | emergency")
     requires_approval: bool = Field(..., description="Does this action need human approval?")
     approval_reason: Optional[str] = Field(None, description="Why approval is needed")
     why_automated: Optional[str] = Field(None, description="Why this is automated (if applies)")

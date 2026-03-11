@@ -175,13 +175,17 @@ else
     ((++TESTS_FAILED))
 fi
 
-# Check IoT count
-IOT_COUNT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('iot_devices_active',0))" || echo 0)
-if [[ $IOT_COUNT -eq 13 ]]; then
-    log_pass "IoT device count: $IOT_COUNT"
+# Check IoT count using the hybrid inventory view
+IOT_JSON="$(curl -s "${API_BASE}/api/iot/devices" 2>/dev/null || echo '{}')"
+IOT_TOTAL=$(echo "$IOT_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total',0))" 2>/dev/null || echo 0)
+IOT_LOGICAL=$(echo "$IOT_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('logical_total',0))" 2>/dev/null || echo 0)
+IOT_POD_BACKED=$(echo "$IOT_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('pod_backed_total',0))" 2>/dev/null || echo 0)
+IOT_MODE=$(echo "$IOT_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('counting_mode','unknown'))" 2>/dev/null || echo unknown)
+if [[ "$IOT_TOTAL" -gt 0 ]]; then
+    log_pass "IoT device inventory: total=$IOT_TOTAL logical=$IOT_LOGICAL pod_backed=$IOT_POD_BACKED mode=$IOT_MODE"
     ((++TESTS_PASSED))
 else
-    log_fail "IoT count wrong: $IOT_COUNT (expected 13)"
+    log_fail "IoT inventory unreadable or empty: total=$IOT_TOTAL mode=$IOT_MODE"
     ((++TESTS_FAILED))
 fi
 

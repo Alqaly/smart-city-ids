@@ -14,9 +14,9 @@ The cluster runs intentionally vulnerable IoT services — emulating real smart-
 | **healthcare-api** | Patient records, medical data | SQL injection, no input validation |
 | **parking-system** | Reservations, payments | Injection, weak session handling |
 | **mqtt-broker** | MQTT pub/sub for sensors | Unauthenticated, no TLS |
-| **iot-devices** | 20 pods generating sensor telemetry | High event volume for realism |
+| **env-sensor / street-lighting** | Environmental and lighting control workloads | Protocol abuse surface and state tamper paths |
 
-These services are deployed from `smart-city-services/` and mounted into Kubernetes via ConfigMaps — no Docker builds required.
+These services are deployed from `smart-city-services/` using the active shared-runtime-image + ConfigMap-mounted code pattern. The supported update path is `bash scripts/deploy-code.sh`.
 
 ---
 
@@ -153,7 +153,7 @@ The governance controller mediates between automated analysis and K8s actions:
 
 | Mode | Behavior |
 |---|---|
-| **Autopilot** | All actions execute immediately without approval |
+| **Autonomous** | Policy-approved actions execute automatically according to governance rules |
 | **Assisted** | Actions auto-execute if severity < 8; severity ≥ 8 queued for approval |
 | **Manual** | All actions queued for operator approval |
 

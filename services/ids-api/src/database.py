@@ -12,15 +12,50 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import time
 import json
+from urllib.parse import urlparse, unquote
 
 logger = logging.getLogger(__name__)
 
 # Database configuration
-DB_HOST = os.environ.get("DB_HOST", "postgres")
-DB_PORT = os.environ.get("DB_PORT", "5432")
-DB_NAME = os.environ.get("DB_NAME", "smartcity_ids")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
+def _resolve_db_config() -> Dict[str, str]:
+    """Resolve DB connection settings from DATABASE_URL and DB_* overrides.
+
+    Precedence:
+    1. Explicit DB_* environment variables
+    2. Parsed DATABASE_URL
+    3. Hard-coded defaults
+    """
+    parsed = {}
+    db_url = (os.environ.get("DATABASE_URL") or "").strip()
+    if db_url:
+        try:
+            u = urlparse(db_url)
+            if u.scheme.startswith("postgres"):
+                parsed = {
+                    "host": (u.hostname or ""),
+                    "port": str(u.port or ""),
+                    "name": (u.path or "").lstrip("/"),
+                    "user": unquote(u.username or ""),
+                    "password": unquote(u.password or ""),
+                }
+        except Exception as e:
+            logger.warning(f"Could not parse DATABASE_URL (falling back to DB_*): {e}")
+
+    return {
+        "host": os.environ.get("DB_HOST", parsed.get("host") or "postgres"),
+        "port": os.environ.get("DB_PORT", parsed.get("port") or "5432"),
+        "name": os.environ.get("DB_NAME", parsed.get("name") or "smartcity_ids"),
+        "user": os.environ.get("DB_USER", parsed.get("user") or "postgres"),
+        "password": os.environ.get("DB_PASSWORD", parsed.get("password") or "postgres"),
+    }
+
+
+_db_cfg = _resolve_db_config()
+DB_HOST = _db_cfg["host"]
+DB_PORT = _db_cfg["port"]
+DB_NAME = _db_cfg["name"]
+DB_USER = _db_cfg["user"]
+DB_PASSWORD = _db_cfg["password"]
 
 # Try to import psycopg2
 try:
@@ -51,6 +86,8 @@ class Database:
         self._db_reconnect_interval_s = max(2, int(os.environ.get("DB_RECONNECT_INTERVAL_SECONDS", "10")))
         self._db_monitor_started = False
         self._db_last_mode = "memory" if self.use_memory else "postgresql"
+        self._memory_lock = threading.RLock()
+        self._flush_in_progress = False
         self._memory_alerts: List[Dict[str, Any]] = []
         self._memory_iot_events: List[Dict[str, Any]] = []
         self._memory_iot_devices: Dict[str, Dict[str, Any]] = {}
@@ -92,6 +129,7 @@ class Database:
                 self._pool.putconn(conn)
             self.use_memory = False
             self._init_tables()
+            self._flush_memory_buffers()
             self._log_db_mode_transition()
             logger.info(f"✅ PostgreSQL pool ready ({_DB_MIN_CONN}-{_DB_MAX_CONN} conns) at {DB_HOST}:{DB_PORT}/{DB_NAME}")
         except Exception as e:
@@ -137,6 +175,358 @@ class Database:
 
         t = threading.Thread(target=_loop, name="db-reconnect-monitor", daemon=True)
         t.start()
+
+    def _coerce_datetime(self, value):
+        """Best-effort conversion for mixed datetime/string payloads."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except Exception:
+                return datetime.now()
+        return datetime.now()
+
+    def _flush_memory_buffers(self):
+        """Flush fallback-memory records into PostgreSQL after DB recovery.
+
+        This prevents data loss when the API starts in memory-fallback mode and
+        PostgreSQL becomes available later.
+        """
+        if self.use_memory or self._pool is None:
+            return
+
+        with self._memory_lock:
+            if self._flush_in_progress:
+                return
+            has_buffer = any(
+                [
+                    self._memory_alerts,
+                    self._memory_analysis_results,
+                    self._memory_automation_actions,
+                    self._memory_audit_logs,
+                    self._memory_system_logs,
+                    self._memory_throttled_alerts,
+                    self._memory_iot_devices,
+                    self._memory_iot_events,
+                    self._memory_llm_api_calls,
+                    self._memory_llm_provider_health,
+                ]
+            )
+            if not has_buffer:
+                return
+
+            self._flush_in_progress = True
+            snapshot = {
+                "alerts": list(self._memory_alerts),
+                "analysis": list(self._memory_analysis_results),
+                "actions": list(self._memory_automation_actions),
+                "audit": list(self._memory_audit_logs),
+                "system": list(self._memory_system_logs),
+                "throttled": list(self._memory_throttled_alerts),
+                "iot_devices": dict(self._memory_iot_devices),
+                "iot_events": list(self._memory_iot_events),
+                "llm_calls": list(self._memory_llm_api_calls),
+                "llm_health": dict(self._memory_llm_provider_health),
+            }
+            self._memory_alerts.clear()
+            self._memory_analysis_results.clear()
+            self._memory_automation_actions.clear()
+            self._memory_audit_logs.clear()
+            self._memory_system_logs.clear()
+            self._memory_throttled_alerts.clear()
+            self._memory_iot_devices.clear()
+            self._memory_iot_events.clear()
+            self._memory_llm_api_calls.clear()
+            self._memory_llm_provider_health.clear()
+
+        def _restore_list(name: str, rows: List[Dict[str, Any]]):
+            if not rows:
+                return
+            with self._memory_lock:
+                getattr(self, name).extend(rows)
+
+        def _restore_dict(name: str, rows: Dict[str, Dict[str, Any]]):
+            if not rows:
+                return
+            with self._memory_lock:
+                getattr(self, name).update(rows)
+
+        logger.warning(
+            "Flushing memory-fallback buffers to PostgreSQL: alerts=%s iot_events=%s actions=%s",
+            len(snapshot["alerts"]),
+            len(snapshot["iot_events"]),
+            len(snapshot["actions"]),
+        )
+
+        alert_id_map: Dict[int, int] = {}
+        alerts_flushed = True
+
+        try:
+            if snapshot["alerts"]:
+                with self._cursor() as cur:
+                    for alert in snapshot["alerts"]:
+                        cur.execute(
+                            """
+                            INSERT INTO alerts (source, rule, priority, severity, summary, threat_type,
+                                                recommendations, automated_actions, raw_alert, analysis, timestamp)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING id
+                            """,
+                            (
+                                alert.get("source"),
+                                alert.get("rule"),
+                                alert.get("priority"),
+                                alert.get("severity"),
+                                alert.get("summary"),
+                                alert.get("threat_type"),
+                                json.dumps(alert.get("recommendations", [])),
+                                json.dumps(alert.get("automated_actions", [])),
+                                json.dumps(alert.get("raw_alert", {})),
+                                json.dumps(alert.get("analysis", {})),
+                                self._coerce_datetime(alert.get("timestamp")),
+                            ),
+                        )
+                        new_id = cur.fetchone()[0]
+                        old_id = alert.get("id")
+                        if isinstance(old_id, int):
+                            alert_id_map[old_id] = new_id
+        except Exception as e:
+            alerts_flushed = False
+            logger.error(f"Failed to flush memory alerts to PostgreSQL: {e}")
+            _restore_list("_memory_alerts", snapshot["alerts"])
+
+        if snapshot["analysis"]:
+            if alerts_flushed:
+                try:
+                    with self._cursor() as cur:
+                        for row in snapshot["analysis"]:
+                            old_alert_id = row.get("alert_id")
+                            mapped_alert_id = alert_id_map.get(old_alert_id, old_alert_id)
+                            cur.execute(
+                                """
+                                INSERT INTO analysis_results (alert_id, model, analysis, analysis_time_ms, confidence_score, analyzed_at)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    mapped_alert_id,
+                                    row.get("model"),
+                                    json.dumps(row.get("analysis", {})),
+                                    row.get("analysis_time_ms"),
+                                    row.get("confidence_score"),
+                                    self._coerce_datetime(row.get("analyzed_at")),
+                                ),
+                            )
+                except Exception as e:
+                    logger.error(f"Failed to flush analysis buffers: {e}")
+                    _restore_list("_memory_analysis_results", snapshot["analysis"])
+            else:
+                _restore_list("_memory_analysis_results", snapshot["analysis"])
+
+        if snapshot["actions"]:
+            if alerts_flushed:
+                try:
+                    with self._cursor() as cur:
+                        for row in snapshot["actions"]:
+                            old_alert_id = row.get("alert_id")
+                            mapped_alert_id = alert_id_map.get(old_alert_id, old_alert_id)
+                            cur.execute(
+                                """
+                                INSERT INTO automation_actions (
+                                    alert_id, action_type, target_resource, target_namespace, status,
+                                    error_message, execution_time_ms, mode, triggered_by, created_at, completed_at
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                """,
+                                (
+                                    mapped_alert_id,
+                                    row.get("action_type"),
+                                    row.get("target_resource"),
+                                    row.get("target_namespace"),
+                                    row.get("status"),
+                                    row.get("error_message"),
+                                    row.get("execution_time_ms"),
+                                    row.get("mode"),
+                                    row.get("triggered_by"),
+                                    self._coerce_datetime(row.get("created_at")),
+                                    self._coerce_datetime(row.get("completed_at")) if row.get("completed_at") else None,
+                                ),
+                            )
+                except Exception as e:
+                    logger.error(f"Failed to flush automation action buffers: {e}")
+                    _restore_list("_memory_automation_actions", snapshot["actions"])
+            else:
+                _restore_list("_memory_automation_actions", snapshot["actions"])
+
+        try:
+            if snapshot["audit"]:
+                with self._cursor() as cur:
+                    for row in snapshot["audit"]:
+                        cur.execute(
+                            """
+                            INSERT INTO audit_logs (action, resource_type, resource_id, details, status, error_message, actor, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                row.get("action"),
+                                row.get("resource_type"),
+                                row.get("resource_id"),
+                                json.dumps(row.get("details", {})),
+                                row.get("status"),
+                                row.get("error_message"),
+                                row.get("actor"),
+                                self._coerce_datetime(row.get("created_at")),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush audit buffers: {e}")
+            _restore_list("_memory_audit_logs", snapshot["audit"])
+
+        try:
+            if snapshot["system"]:
+                with self._cursor() as cur:
+                    for row in snapshot["system"]:
+                        cur.execute(
+                            """
+                            INSERT INTO system_logs (level, component, message, details, created_at)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (
+                                row.get("level"),
+                                row.get("component"),
+                                row.get("message"),
+                                json.dumps(row.get("details", {})),
+                                self._coerce_datetime(row.get("created_at")),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush system log buffers: {e}")
+            _restore_list("_memory_system_logs", snapshot["system"])
+
+        try:
+            if snapshot["throttled"]:
+                with self._cursor() as cur:
+                    for row in snapshot["throttled"]:
+                        cur.execute(
+                            """
+                            INSERT INTO throttled_alerts (source, rule, priority, throttle_reason, raw_alert, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                row.get("source"),
+                                row.get("rule"),
+                                row.get("priority"),
+                                row.get("throttle_reason"),
+                                json.dumps(row.get("raw_alert", {})),
+                                self._coerce_datetime(row.get("created_at")),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush throttled-alert buffers: {e}")
+            _restore_list("_memory_throttled_alerts", snapshot["throttled"])
+
+        try:
+            if snapshot["iot_devices"]:
+                with self._cursor() as cur:
+                    for device_id, row in snapshot["iot_devices"].items():
+                        cur.execute(
+                            """
+                            INSERT INTO iot_devices (device_id, device_type, first_seen, last_seen, event_count, metadata)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (device_id) DO UPDATE SET
+                                last_seen = GREATEST(iot_devices.last_seen, EXCLUDED.last_seen),
+                                event_count = GREATEST(iot_devices.event_count, EXCLUDED.event_count),
+                                metadata = COALESCE(EXCLUDED.metadata, iot_devices.metadata)
+                            """,
+                            (
+                                device_id,
+                                row.get("device_type"),
+                                self._coerce_datetime(row.get("first_seen")),
+                                self._coerce_datetime(row.get("last_seen")),
+                                int(row.get("event_count") or 0),
+                                json.dumps(row.get("metadata", {})),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush IoT device buffers: {e}")
+            _restore_dict("_memory_iot_devices", snapshot["iot_devices"])
+
+        try:
+            if snapshot["iot_events"]:
+                with self._cursor() as cur:
+                    for row in snapshot["iot_events"]:
+                        cur.execute(
+                            """
+                            INSERT INTO iot_events (device_id, device_type, event_type, value, timestamp, metadata)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                row.get("device_id"),
+                                row.get("device_type"),
+                                row.get("event_type"),
+                                json.dumps(row.get("value", {})),
+                                self._coerce_datetime(row.get("timestamp")),
+                                json.dumps(row.get("metadata", {})),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush IoT event buffers: {e}")
+            _restore_list("_memory_iot_events", snapshot["iot_events"])
+
+        try:
+            if snapshot["llm_calls"]:
+                with self._cursor() as cur:
+                    for row in snapshot["llm_calls"]:
+                        cur.execute(
+                            """
+                            INSERT INTO llm_api_calls
+                                (provider_name, purpose, model, prompt_tokens, completion_tokens, success, latency_ms, error_message, meta, created_at)
+                            VALUES
+                                (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                row.get("provider_name"),
+                                row.get("purpose"),
+                                row.get("model"),
+                                int(row.get("prompt_tokens") or 0),
+                                int(row.get("completion_tokens") or 0),
+                                bool(row.get("success", True)),
+                                row.get("latency_ms"),
+                                row.get("error_message"),
+                                json.dumps(row.get("meta", {})),
+                                self._coerce_datetime(row.get("created_at")),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush LLM call buffers: {e}")
+            _restore_list("_memory_llm_api_calls", snapshot["llm_calls"])
+
+        try:
+            if snapshot["llm_health"]:
+                with self._cursor() as cur:
+                    for provider, row in snapshot["llm_health"].items():
+                        cur.execute(
+                            """
+                            INSERT INTO llm_provider_health (provider_name, status, checked_at, details)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (provider_name)
+                            DO UPDATE SET status=EXCLUDED.status, checked_at=EXCLUDED.checked_at, details=EXCLUDED.details
+                            """,
+                            (
+                                provider,
+                                row.get("status"),
+                                self._coerce_datetime(row.get("checked_at")),
+                                json.dumps(row.get("details", {})),
+                            ),
+                        )
+        except Exception as e:
+            logger.error(f"Failed to flush LLM health buffers: {e}")
+            _restore_dict("_memory_llm_provider_health", snapshot["llm_health"])
+
+        with self._memory_lock:
+            self._flush_in_progress = False
+            self._prom_restore_cache = None
+            self._prom_restore_cache_ts = 0
 
     # ── Connection helpers ────────────────────────────────────────────
 
@@ -452,12 +842,13 @@ class Database:
         """Set a system configuration value."""
         if self.use_memory or not self._ensure_connection():
             # Fallback to memory
-            if not hasattr(self, '_memory_system_config'):
-                self._memory_system_config = {
-                    'llm_priority': ["kimi", "gemini", "openai", "anthropic", "xai"],
-                    'llm_cost_ceiling': {"max_daily_usd": 10.0, "current_daily_usd": 0.0, "last_reset": None}
-                }
-            self._memory_system_config[key] = value
+            with self._memory_lock:
+                if not hasattr(self, '_memory_system_config'):
+                    self._memory_system_config = {
+                        'llm_priority': ["kimi", "gemini", "openai", "anthropic", "xai"],
+                        'llm_cost_ceiling': {"max_daily_usd": 10.0, "current_daily_usd": 0.0, "last_reset": None}
+                    }
+                self._memory_system_config[key] = value
             return True
 
         try:
@@ -477,9 +868,10 @@ class Database:
     def add_alert(self, alert: Dict[str, Any]) -> int:
         """Add an alert to the database."""
         if self.use_memory or not self._ensure_connection():
-            alert["id"] = len(self._memory_alerts) + 1
-            self._memory_alerts.append(alert)
-            return alert["id"]
+            with self._memory_lock:
+                alert["id"] = len(self._memory_alerts) + 1
+                self._memory_alerts.append(alert)
+                return alert["id"]
 
         try:
             with self._cursor() as cur:
@@ -523,9 +915,10 @@ class Database:
         }
 
         if self.use_memory or not self._ensure_connection():
-            record["id"] = len(self._memory_analysis_results) + 1
-            self._memory_analysis_results.append(record)
-            return record["id"]
+            with self._memory_lock:
+                record["id"] = len(self._memory_analysis_results) + 1
+                self._memory_analysis_results.append(record)
+                return record["id"]
 
         try:
             with self._cursor() as cur:
@@ -552,9 +945,10 @@ class Database:
     def add_automation_action(self, action: Dict[str, Any]) -> int:
         """Record an automation action for auditability."""
         if self.use_memory or not self._ensure_connection():
-            action["id"] = len(self._memory_automation_actions) + 1
-            self._memory_automation_actions.append(action)
-            return action["id"]
+            with self._memory_lock:
+                action["id"] = len(self._memory_automation_actions) + 1
+                self._memory_automation_actions.append(action)
+                return action["id"]
 
         try:
             with self._cursor() as cur:
@@ -588,9 +982,10 @@ class Database:
     def add_audit_log(self, log_entry: Dict[str, Any]) -> int:
         """Record an audit log entry for governance decisions."""
         if self.use_memory or not self._ensure_connection():
-            log_entry["id"] = len(self._memory_audit_logs) + 1
-            self._memory_audit_logs.append(log_entry)
-            return log_entry["id"]
+            with self._memory_lock:
+                log_entry["id"] = len(self._memory_audit_logs) + 1
+                self._memory_audit_logs.append(log_entry)
+                return log_entry["id"]
 
         try:
             with self._cursor() as cur:
@@ -627,9 +1022,10 @@ class Database:
         }
         
         if self.use_memory or not self._ensure_connection():
-            log_entry["id"] = len(self._memory_system_logs) + 1
-            self._memory_system_logs.append(log_entry)
-            return log_entry["id"]
+            with self._memory_lock:
+                log_entry["id"] = len(self._memory_system_logs) + 1
+                self._memory_system_logs.append(log_entry)
+                return log_entry["id"]
 
         try:
             with self._cursor() as cur:
@@ -663,9 +1059,10 @@ class Database:
         }
         
         if self.use_memory or not self._ensure_connection():
-            record["id"] = len(self._memory_throttled_alerts) + 1
-            self._memory_throttled_alerts.append(record)
-            return record["id"]
+            with self._memory_lock:
+                record["id"] = len(self._memory_throttled_alerts) + 1
+                self._memory_throttled_alerts.append(record)
+                return record["id"]
 
         try:
             with self._cursor() as cur:
@@ -941,20 +1338,21 @@ class Database:
         now = datetime.now()
         
         if self.use_memory or not self._ensure_connection():
-            if device_id not in self._memory_iot_devices:
-                self._memory_iot_devices[device_id] = {
-                    "device_id": device_id,
-                    "device_type": device_type,
-                    "first_seen": now.isoformat(),
-                    "last_seen": now.isoformat(),
-                    "event_count": 0,
-                    "metadata": metadata or {}
-                }
-                return True  # New device
-            else:
-                self._memory_iot_devices[device_id]["last_seen"] = now.isoformat()
-                self._memory_iot_devices[device_id]["event_count"] += 1
-                return False  # Existing device
+            with self._memory_lock:
+                if device_id not in self._memory_iot_devices:
+                    self._memory_iot_devices[device_id] = {
+                        "device_id": device_id,
+                        "device_type": device_type,
+                        "first_seen": now.isoformat(),
+                        "last_seen": now.isoformat(),
+                        "event_count": 0,
+                        "metadata": metadata or {}
+                    }
+                    return True  # New device
+                else:
+                    self._memory_iot_devices[device_id]["last_seen"] = now.isoformat()
+                    self._memory_iot_devices[device_id]["event_count"] += 1
+                    return False  # Existing device
         
         try:
             with self._cursor() as cur:
@@ -1003,9 +1401,10 @@ class Database:
     def add_iot_event(self, event: Dict[str, Any]) -> int:
         """Add an IoT event to the database."""
         if self.use_memory or not self._ensure_connection():
-            event["id"] = len(self._memory_iot_events) + 1
-            self._memory_iot_events.append(event)
-            return event["id"]
+            with self._memory_lock:
+                event["id"] = len(self._memory_iot_events) + 1
+                self._memory_iot_events.append(event)
+                return event["id"]
         
         try:
             with self._cursor() as cur:
@@ -1289,7 +1688,8 @@ class Database:
         }
 
         if self.use_memory or not self._ensure_connection():
-            self._memory_llm_api_calls.append(row)
+            with self._memory_lock:
+                self._memory_llm_api_calls.append(row)
             return
 
         try:
@@ -1337,7 +1737,8 @@ class Database:
         }
 
         if self.use_memory or not self._ensure_connection():
-            self._memory_llm_provider_health[provider] = row
+            with self._memory_lock:
+                self._memory_llm_provider_health[provider] = row
             return
 
         try:

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Smart City IDS - Demo Day Consolidated Runner
+# Smart City IDS - Evaluation Runbook Orchestrator
 # One real script for readiness, access URLs, key checks, and controlled attacks.
 # Usage: bash scripts/demo-day.sh [--profile minimal|standard|full] [--runs N]
 # =============================================================================
@@ -12,7 +12,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 source "$SCRIPT_DIR/lib/llm-control.sh"
 
-init_script "$0" "Smart City IDS Demo Day"
+init_script "$0" "Smart City IDS Evaluation Run"
 
 PROFILE="minimal"
 RUNS=1
@@ -38,12 +38,19 @@ done
 ensure_commands kubectl curl jq awk
 ensure_kubeconfig
 
+API_BASE="${IDS_API_URL:-}"
+if [[ -z "$API_BASE" ]]; then
+    API_BASE="$(resolve_ids_api_url || true)"
+fi
+API_BASE="${API_BASE:-http://localhost:8000}"
+
 print_access_urls() {
-    local node_ip ids_port grafana_port prom_port
+    local node_ip ids_port grafana_port prom_port local_base
     node_ip="$(get_node_ip)"
     ids_port="$(get_service_nodeport ids-api-service smart-city 30800)"
     grafana_port="$(get_service_nodeport grafana monitoring 30300)"
     prom_port="$(get_service_nodeport prometheus monitoring 31106)"
+    local_base="$API_BASE"
 
     echo ""
     echo "Access URLs:"
@@ -51,8 +58,8 @@ print_access_urls() {
     echo "  IDS UI:      http://${node_ip}:${ids_port}/ui"
     echo "  Grafana:     http://${node_ip}:${grafana_port}"
     echo "  Prometheus:  http://${node_ip}:${prom_port}"
-    echo "  Local IDS:   http://localhost:8000 (via port-forward)"
-    echo "  Local UI:    http://localhost:8000/ui"
+    echo "  Local IDS:   ${local_base}"
+    echo "  Local UI:    ${local_base}/ui"
     echo ""
 }
 
@@ -88,11 +95,11 @@ check_keys_three_places() {
 check_llm_runtime_status() {
     log_section "LLM Runtime Status"
     local token
-    token="$(curl -s -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' \
+    token="$(curl -s -X POST "${API_BASE}/api/auth/login" -H 'Content-Type: application/json' \
         -d '{"username":"admin","password":"admin"}' | jq -r '.access_token // empty')"
-    [[ -n "$token" ]] || die "Could not login to ids-api on localhost:8000 with admin/admin (or port-forward missing)"
+    [[ -n "$token" ]] || die "Could not login to ids-api at ${API_BASE} with admin/admin"
 
-    curl -s http://localhost:8000/api/llm/status -H "Authorization: Bearer $token" | jq .
+    curl -s "${API_BASE}/api/llm/status" -H "Authorization: Bearer $token" | jq .
     
     # Also check credits
     echo ""
@@ -165,4 +172,4 @@ run_controlled_attacks
 log_section "Phase 2 - Final Checks"
 bash "$SCRIPT_DIR/demo-readiness.sh" --quick || true
 
-log_info "Demo day script completed"
+log_info "Evaluation runbook script completed"

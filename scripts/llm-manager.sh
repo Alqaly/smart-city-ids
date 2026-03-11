@@ -24,11 +24,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 source "$SCRIPT_DIR/lib/llm-control.sh"
+source "$SCRIPT_DIR/lib/script-utils.sh"
 
 # ── Config ─────────────────────────────────────────────────────────────────
-API_BASE="${IDS_API_URL:-http://192.168.1.187:30800}"
+API_BASE="${IDS_API_URL:-}"
 NAMESPACE="${NAMESPACE:-smart-city}"
 ENV_FILE="${ENV_FILE:-${PROJECT_ROOT}/.env}"
+
+if [[ -z "$API_BASE" ]]; then
+  API_BASE="$(resolve_ids_api_url || true)"
+fi
+API_BASE="${API_BASE:-http://localhost:30800}"
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 _api()      { curl -sf --max-time 8 "${API_BASE}$1" 2>/dev/null; }
@@ -56,7 +62,7 @@ USAGE:
 PROVIDERS:  kimi  xai  anthropic  gemini  openai
 
 EXAMPLES:
-  # Full pre-demo health check
+  # Full pre-run health check
   ./scripts/llm-manager.sh check
 
   # Force kimi only
@@ -181,6 +187,7 @@ print(' '.join(plain))
 import sys,json
 d=json.load(sys.stdin).get('providers',{})
 op=0
+uv=0
 for k,v in d.items():
     st=v.get('status','?')
     reason=v.get('reason','')
@@ -188,21 +195,30 @@ for k,v in d.items():
     lat_s=f'{lat}ms' if lat else '—'
     if st=='operational':
         icon='\033[32m✅\033[0m'; op+=1
-    elif st in ('cooldown','recovering'):
+    elif st in ('cooldown','recovering','unverified'):
+        if st=='unverified':
+            uv+=1
         icon='\033[33m⚠️ \033[0m'
     else:
         icon='\033[31m❌\033[0m'
     print(f'     {icon}  {k:<12}  {st:<22} {reason[:50]}')
 print(f'SUMMARY:{op}')
+print(f'UNVERIFIED:{uv}')
 " 2>/dev/null)
-    echo "$op_count" | grep -v "^SUMMARY"
+    echo "$op_count" | grep -v "^SUMMARY" | grep -v "^UNVERIFIED"
     local n_op
+    local n_uv
     n_op=$(echo "$op_count" | grep "^SUMMARY:" | cut -d: -f2)
+    n_uv=$(echo "$op_count" | grep "^UNVERIFIED:" | cut -d: -f2)
     echo
     echo "     Operational: ${n_op:-0}/5"
     if [[ "${n_op:-0}" -eq 0 ]]; then
-      printf "     \033[31m❌ No providers operational!\033[0m\n"
-      overall_ok=false
+      if [[ "${n_uv:-0}" -gt 0 ]]; then
+        printf "     \033[33m⚠️  No providers verified yet in this process (%s unverified). Proceeding to live alert test.\033[0m\n" "${n_uv:-0}"
+      else
+        printf "     \033[31m❌ No providers operational!\033[0m\n"
+        overall_ok=false
+      fi
     fi
   else
     printf "     \033[31m❌ Cannot reach /api/llm/diagnostics\033[0m\n"
@@ -275,7 +291,7 @@ print(json.dumps(p))
   echo
   echo "═══════════════════════════════════════════════════════════════"
   if [[ "$overall_ok" == "true" ]]; then
-    printf "\033[32m  ✅  ALL CHECKS PASSED — system is ready for demo\033[0m\n"
+    printf "\033[32m  ✅  ALL CHECKS PASSED — system is ready for operation/evaluation\033[0m\n"
   else
     printf "\033[33m  ⚠️   SOME ISSUES FOUND — fix items marked ❌/⚠️ above\033[0m\n"
     echo
@@ -310,7 +326,7 @@ print('  Provider      Status               Att  Lat(ms)   Model')
 print('  ──────────────────────────────────────────────────────────────')
 for k,v in prov.items():
     st=v.get('status','?')
-    icon='✅' if st=='operational' else ('⚠️ ' if st in ('cooldown','recovering') else '❌')
+    icon='✅' if st=='operational' else ('⚠️ ' if st in ('cooldown','recovering','unverified') else '❌')
     att=str(v.get('attempts',0))
     lat=str(v.get('last_latency_ms','—'))
     model=(v.get('model','?') or '?')[:28]

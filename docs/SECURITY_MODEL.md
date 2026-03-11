@@ -1,209 +1,127 @@
-# Security Model & Attack Justification
-
-**Status:** Research/capstone security model documentation (time-bound examples; verify live config before citing runtime behavior)
-
----
-
-## Academic Disclaimer
-
-> **"All traffic and attacks are emulated but statistically grounded, reproducible, and mapped to real-world threat behaviors. The objective is not to mirror a specific city, but to evaluate system behavior under realistic operational stress."**
-
----
-
-## Attack Classification
-
-### What This Project Does NOT Do
-
-- We do **not** simulate zero-day exploits
-- We do **not** attack real systems
-- We do **not** claim to detect novel threats
-
-### What This Project DOES Do
-
-We simulate **observable attacker behaviors** that runtime IDS systems (Falco, Suricata) are designed to detect.
-
-> **"We do not simulate zero-day exploits. We simulate observable attacker behaviors that runtime IDS systems are designed to detect."**
-
----
-
-## MITRE ATT&CK Mapping
-
-All attack simulations are mapped to the MITRE ATT&CK framework for traceability:
-
-| Attack Simulation | What It Represents | MITRE ID | MITRE Technique | Detection Source |
-|-------------------|-------------------|----------|-----------------|------------------|
-| Privileged shell spawn | Container escape attempt | **T1611** | Escape to Host | Falco |
-| Shell in container | Command execution | **T1059.004** | Unix Shell | Falco |
-| Unexpected outbound traffic | Data exfiltration | **T1041** | Exfiltration Over C2 Channel | Suricata |
-| Excessive connection flood | DDoS attack | **T1498** | Network Denial of Service | Suricata |
-| Sensitive file read | Credential access | **T1552.001** | Credentials In Files | Falco |
-| Binary download/exec | Malware execution | **T1105** | Ingress Tool Transfer | Falco |
-| Netcat listener | Reverse shell | **T1059.004** | Unix Shell | Falco |
-| Process in /tmp | Suspicious execution location | **T1036.005** | Match Legitimate Name or Location | Falco |
-| Kernel module load | Rootkit installation | **T1547.006** | Kernel Modules and Extensions | Falco |
-| Cron modification | Persistence | **T1053.003** | Cron | Falco |
-
----
-
-## Detection Chain
-
-### How Attacks Flow Through the System
-
-```
-Attack Simulator → Container Runtime → Falco/Suricata → Forwarder → IDS API → LLM Analysis → Automated Response
-```
-
-### Traceability Per Attack
-
-| Step | Observable Evidence |
-|------|---------------------|
-| 1. Attack injected | Attack simulator log timestamp |
-| 2. Syscall detected | Falco rule name + output |
-| 3. Alert forwarded | Forwarder log + HTTP POST |
-| 4. Alert stored | PostgreSQL `alerts` table |
-| 5. LLM analyzed | `smartcity_ids_llm_latency_seconds` metric |
-| 6. Action taken | `smartcity_ids_actions_executed_total{action}` metric |
-
----
-
-## Falco Rules Triggered
-
-The following Falco rules are intentionally triggered by our attack simulations:
-
-| Falco Rule | Triggered By | Severity |
-|------------|--------------|----------|
-| `Terminal shell in container` | Shell spawn attacks | Warning |
-| `Read sensitive file untrusted` | Credential access attempts | Critical |
-| `Contact K8S API Server From Container` | Container escape attempts | Critical |
-| `Drop and execute new binary in container` | Malware execution | Critical |
-| `Netcat Remote Code Execution in Container` | Reverse shell attempts | Critical |
-| `Modify binary dirs` | Persistence attempts | Warning |
-| `Write below etc` | Configuration tampering | Warning |
-
----
-
-## Suricata Rules Triggered
-
-| Suricata Rule Category | Triggered By | Severity |
-|------------------------|--------------|----------|
-| `ET SCAN` | Port scanning | Medium |
-| `ET DOS` | DDoS flood attacks | High |
-| `ET POLICY` | Suspicious outbound connections | Medium |
-| `ET TROJAN` | Known malware patterns | Critical |
-
----
-
-## Attack Simulator Scripts
-
-### Available Attack Simulations
-
-| Script | Purpose | MITRE Techniques |
-|--------|---------|------------------|
-| `attack-simulator/ddos_simulator.py` | Connection flooding | T1498 |
-| `attack-simulator/privilege_escalation.py` | Container escape | T1611, T1059 |
-| `attack-simulator/data_exfiltration.py` | Outbound data theft | T1041 |
-| `attack-simulator/phase4-smart-city-attacks.py` | Combined attack scenarios | Multiple |
-
-### Attack Injection Protocol
-
-1. **Baseline Period**: Run system without attacks for 5 minutes
-2. **Attack Window**: Inject specific attack for 2 minutes
-3. **Recovery Period**: Stop attack, observe system recovery
-4. **Measurement**: Compare metrics across all three periods
-
----
-
-## Falsifiability Tests
-
-### How to Prove Attacks Are Not Random
-
-**Test 1: Correlation with Injection**
-```bash
-# Inject attack at known time
-python attack-simulator/privilege_escalation.py
-
-# Query alert timestamps
-psql -c "SELECT created_at, severity FROM alerts WHERE created_at > NOW() - INTERVAL '5 minutes'"
-
-# Expect: Alert timestamps cluster around injection time
-```
-
-**Test 2: Alert Disappearance**
-```bash
-# Stop all attack simulators
-pkill -f attack-simulator
-
-# Wait 2 minutes, query alerts
-psql -c "SELECT COUNT(*) FROM alerts WHERE created_at > NOW() - INTERVAL '1 minute'"
-
-# Expect: Near-zero new alerts (only noise from failure injection)
-```
-
-**Test 3: Severity Correlation**
-```bash
-# Inject low-severity attack (port scan)
-# Expect: Alerts with severity 3-5
-
-# Inject high-severity attack (shell spawn)
-# Expect: Alerts with severity 8-10
-```
-
----
-
-## Examiner FAQ
-
-**Q: How do you know the IDS isn't just triggering randomly?**  
-A: Because alert rate, severity, and mitigation actions correlate with injected attack windows and disappear when the injection stops. This is falsifiable and testable.
-
-**Q: Are these real attacks?**  
-A: No. These are emulated behaviors that trigger real detection rules. The behaviors are mapped to MITRE ATT&CK techniques that represent documented attacker TTPs.
-
-**Q: Why not use real attack traffic?**  
-A: 1) Ethical constraints prevent attacking real systems. 2) Reproducibility requires controlled injection. 3) MITRE-mapped emulation is accepted methodology in security research.
-
-**Q: How do you know Falco/Suricata rules are correct?**  
-A: Falco and Suricata rule sets are based on community-maintained rules (Falco Project, Emerging Threats) plus project-specific custom rules/tuning for the smart-city demo environment. Runtime claims should be validated against the currently deployed manifests/rules.
-
----
-
-## Metrics for Attack Verification
-
-### Key Prometheus Queries
-
-```promql
-# Alert rate during attack window
-rate(smartcity_ids_alerts_received_total[5m])
-
-# Severity distribution during attack
-sum by (severity) (smartcity_ids_severity_total)
-
-# Automated actions triggered
-increase(smartcity_ids_actions_executed_total[5m])
-
-# LLM latency under load
-histogram_quantile(0.95, rate(smartcity_ids_llm_latency_seconds_bucket[5m]))
-
-# Time to mitigation (decision-to-action)
-histogram_quantile(0.95, sum(rate(smartcity_ids_time_to_mitigation_seconds_bucket[5m])) by (le))
-
-# LLM decision outcomes
-sum by (outcome) (increase(smartcity_ids_llm_decision_outcome_total[5m]))
-```
-
-### Expected Observations
-
-| Metric | Baseline | During Attack | Recovery |
-|--------|----------|---------------|----------|
-| `smartcity_ids_alerts_received_total` rate | <1/min | 10-50/min | <1/min |
-| `smartcity_ids_severity_total` | Mostly 3-4 | 7-9 | 3-4 |
-| `smartcity_ids_actions_executed_total` | 0 | 1-5 | 0 |
-| `smartcity_ids_llm_latency_seconds` p95 | <2s | 2-5s | <2s |
-
----
-
-## References
-
-- MITRE ATT&CK Framework: https://attack.mitre.org/
-- Falco Rules Repository: https://github.com/falcosecurity/rules
-- Emerging Threats Suricata Rules: https://rules.emergingthreats.net/
-- NIST Cybersecurity Framework: https://www.nist.gov/cyberframework
+# Security Model
+
+This document describes the current security and attack-model assumptions for the Smart City IDS research testbed.
+
+## 1. Scope
+
+The system is designed to evaluate:
+- runtime and network detection behavior
+- LLM-supported alert analysis
+- governance-controlled response automation
+- protocol-aware IoT attack scenarios in a Kubernetes testbed
+
+It is not designed to:
+- attack real third-party systems
+- emulate undisclosed exploits
+- claim complete production hardening
+
+## 2. Threat model
+
+### Adversary behaviors in scope
+- suspicious shell execution in containers
+- credential/file access attempts
+- protocol abuse against exposed smart-city services
+- network flooding and repeated request pressure
+- outbound connection patterns associated with exfiltration or command-and-control
+- unauthorized control operations against IoT-facing services
+
+### Adversary behaviors out of scope
+- real zero-day weaponization
+- physical hardware compromise chains
+- full ICS/OT protocol fidelity for every service in the project
+
+## 3. Detection model
+
+### Falco
+Falco covers runtime/syscall behaviors such as:
+- shell spawns
+- sensitive file reads
+- downloader/package-manager execution
+- suspicious tooling inside containers
+
+### Suricata
+Suricata covers network/protocol patterns such as:
+- SQLi-like payload delivery
+- HTTP flood behavior
+- MQTT parking control abuse
+- Modbus write tamper
+- ONVIF enumeration and scraping patterns
+- ANPR scraping
+
+## 4. Reality boundary
+
+### Real execution
+The following are executed for real in the cluster:
+- HTTP requests to live services
+- MQTT traffic to the live broker
+- state-changing protocol operations against emulator services
+- `kubectl exec` runtime actions that trigger Falco telemetry
+- IDS ingestion, LLM analysis, governance, and Kubernetes response logic
+
+### Signature-driven validation
+Some detections still validate recognizable malicious patterns rather than full backend exploitation. Examples include:
+- SQLi string delivery without proving a real database compromise
+- protocol misuse detection without a full long-lived adversary campaign
+
+This is an accepted research-testbed approach if the limitation is stated explicitly.
+
+## 5. Automation safety model
+
+The system uses governance modes:
+- `manual`
+- `assisted`
+- `autonomous`
+
+Safety controls include:
+- protected services
+- approval queue in manual paths
+- separable force-execution profile for full autonomy testing
+- action audit traces
+
+## 6. IoT realism model
+
+The emulator fleet is best described as:
+- protocol-faithful software emulation with state models
+
+It is not accurate to describe the whole fleet as:
+- purely physical-device emulation
+- fully native industrial protocol deployment across all services
+
+Current stronger realism areas:
+- parking MQTT gateway behavior
+- environmental sensor Modbus-style state tamper
+- environmental sensor native OPC UA endpoint
+- traffic camera ONVIF-like device/media/PTZ behavior
+- street-lighting stateful control behavior
+
+## 7. Verification sources
+
+Runtime behavior should be verified from the live system, not assumed from documentation alone.
+
+Use:
+- `bash scripts/pre-demo-check.sh`
+- `bash scripts/test-governance-modes.sh`
+- `bash scripts/e2e-verbose-test.sh --quick`
+- `bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 8 --verbose`
+
+And inspect:
+- `/api/alerts`
+
+Governance and action-path validation depend on real LLM analysis. If all providers are unavailable, these checks cannot demonstrate mode gating.
+- `/api/governance/status`
+- `/api/llm/diagnostics`
+- `/api/iot/telemetry`
+
+## 8. Claims that are safe to make
+
+- The system demonstrates end-to-end alert analysis and response control in a live Kubernetes testbed.
+- The system mixes real detector telemetry with bounded signature-driven attack validation.
+- The system supports protocol-aware emulation for selected smart-city workloads.
+- The system includes explicit governance controls for automated actions.
+
+## 9. Claims to avoid
+
+- “Production ready” without qualification
+- “All attacks are fully real exploit chains”
+- “All emulators are equivalent to physical hardware”
+- “All providers are operational” without current diagnostics

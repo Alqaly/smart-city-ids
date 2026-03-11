@@ -6,7 +6,7 @@ This guide explains how to configure LLM providers for the Smart City IDS.
 
 You only need **ONE** working API key. The system auto-detects available providers.
 
-### Option 1: Google Gemini (Recommended - Free Tier Available)
+### Option 1: Google Gemini
 
 ```bash
 # Get free API key at: https://aistudio.google.com/apikey
@@ -29,7 +29,7 @@ kubectl create secret generic ids-secrets -n smart-city \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### Option 3: OpenAI GPT-4
+### Option 3: OpenAI
 
 ```bash
 # Get API key at: https://platform.openai.com/api-keys
@@ -78,7 +78,7 @@ kubectl rollout restart deployment/ids-api -n smart-city
 LLM_PRIORITY=kimi,xai,anthropic,openai
 ```
 
-Current config default chain is `kimi -> xai -> anthropic -> openai` (and may be overridden by `LLM_PROVIDER_CHAIN` / runtime control actions).
+Current config default chain is `kimi -> xai -> anthropic -> gemini -> openai` (and may be overridden by `LLM_PROVIDER_CHAIN` / runtime control actions).
 
 ---
 
@@ -87,10 +87,10 @@ Current config default chain is `kimi -> xai -> anthropic -> openai` (and may be
 | Provider | Model | Speed | Cost | Free Tier | Best For |
 |----------|-------|-------|------|-----------|----------|
 | **xAI Grok** | grok-4-latest | ⚡ Fast | $$ | No | Primary engine |
-| **Anthropic** | claude-3-5-sonnet | ⚡ Fast | $$$ | Limited | Strong reasoning |
-| **OpenAI** | gpt-4-turbo | ⚡ Fast | $$$ | No | Reliability |
-| **Gemini** | gemini-2.0-flash | ⚡⚡ Fastest | $ | **Yes** | Cost-effective |
-| **Kimi** | moonshot-v1-8k (default in current config) | ⚡/⚡⚡ (provider/runtime dependent) | $ | Limited | Primary/default in current chain |
+| **Anthropic** | claude-sonnet-4-20250514 | ⚡ Fast | $$$ | Limited | Strong reasoning |
+| **OpenAI** | gpt-4o | ⚡ Fast | $$$ | No | Reliability |
+| **Gemini** | gemini-2.5-flash | ⚡⚡ Fastest | $ | API quota/billing dependent | Cost-effective |
+| **Kimi** | moonshot-v1-128k | ⚡/⚡⚡ (provider/runtime dependent) | $ | Limited | Primary/default in current chain |
 
 ---
 
@@ -106,10 +106,10 @@ KIMI_API_KEY=sk-...
 
 # Model overrides (optional)
 XAI_MODEL=grok-4-latest
-ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
-OPENAI_MODEL=gpt-4-turbo-preview
-GEMINI_MODEL=gemini-2.0-flash
-KIMI_MODEL=moonshot-v1-8k
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+OPENAI_MODEL=gpt-4o
+GEMINI_MODEL=gemini-2.5-flash
+KIMI_MODEL=moonshot-v1-128k
 
 # Behavior settings (optional)
 LLM_PRIORITY=kimi,xai,anthropic,openai
@@ -121,6 +121,14 @@ LLM_TIMEOUT=30           # API timeout in seconds
 ---
 
 ## Verifying Configuration
+
+Source of truth:
+
+1. Project `.env`
+2. `bash scripts/apply-llm-env-to-k8s-secret.sh .env`
+3. `bash scripts/deploy-code.sh`
+4. `bash scripts/access-stack.sh start`
+5. Strict provider test from UI or API
 
 After setting up, verify the IDS API detected your keys:
 
@@ -211,7 +219,7 @@ Invalid API key. Verify:
 
 ## Cost Optimization Tips
 
-1. **Use Gemini** as primary (free tier: 1500 requests/day)
+1. **Use the cheapest healthy provider** as primary only after strict provider testing confirms it is actually usable
 2. **Enable caching** - duplicate alerts reuse cached analysis
 3. **Set appropriate timeout** - don't wait too long for slow APIs
 4. **Monitor usage** in provider dashboards
@@ -267,7 +275,7 @@ export LLM_PRIORITY="kimi,xai,anthropic"
 
 ```
 🔧 LLM Manager: 1 provider(s) available
-   ✅ kimi (moonshot-v1-8k)
+   ✅ kimi (moonshot-v1-128k)
 ✅ IDS API ready with 1 LLM provider(s)
 ```
 
@@ -276,8 +284,8 @@ Or with multiple:
 ```
 🔧 LLM Manager: 3 provider(s) available
    ✅ xai (grok-4-latest)
-   ✅ anthropic (claude-3-5-sonnet-20241022)
-   ✅ gemini (gemini-2.0-flash)
+   ✅ anthropic (claude-sonnet-4-20250514)
+   ✅ gemini (gemini-2.5-flash)
 ✅ IDS API ready with 3 LLM provider(s)
 ```
 
@@ -302,7 +310,7 @@ curl -s http://localhost:30800/api/llm/status -H "Authorization: Bearer $TOKEN" 
   "priority_order": ["kimi"],
   "details": {
     "kimi": {
-      "model": "moonshot-v1-8k",
+      "model": "moonshot-v1-128k",
       "attempts": 12,
       "successes": 12,
       "failures": 0,

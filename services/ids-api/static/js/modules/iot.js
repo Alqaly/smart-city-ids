@@ -48,7 +48,7 @@ export function loadIoT() {
     if (iotStatsEl) iotStatsEl.innerHTML =
       '<div class="stat-card green"><div class="stat-label">Active Devices</div><div class="stat-value">' + runningPods + '</div><div class="stat-sub">Running in cluster</div></div>' +
       '<div class="stat-card blue"><div class="stat-label">Total Pods</div><div class="stat-value">' + totalPods + '</div><div class="stat-sub">IoT workloads deployed</div></div>' +
-      '<div class="stat-card purple"><div class="stat-label">Protocol Emulators</div><div class="stat-value">' + protos + '/5</div><div class="stat-sub">ONVIF, MQTT, FHIR, Modbus, DALI</div></div>' +
+      '<div class="stat-card purple"><div class="stat-label">Protocol Emulators</div><div class="stat-value">' + protos + '/5</div><div class="stat-sub">Protocol-faithful services with software state models</div></div>' +
       '<div class="stat-card ' + (healthPct >= 90 ? 'green' : healthPct >= 50 ? 'yellow' : 'red') + '"><div class="stat-label">Fleet Health</div><div class="stat-value">' + healthPct + '%</div><div class="stat-sub">' + runningPods + '/' + totalPods + ' pods running</div></div>';
 
     // ── Traffic Camera ONVIF ─────────────────────────────────────────

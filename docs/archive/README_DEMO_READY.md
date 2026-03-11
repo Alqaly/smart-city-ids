@@ -1,9 +1,9 @@
 # Smart City IDS - Demo Ready Documentation
 
 > Use the current validated runbook/checklist for the examiner demo:
-> - `docs/DEMO_DAY_RUNBOOK.md`
-> - `docs/DEMO_QA_CHECKLIST.md`
-> - `docs/DEMO_SCRIPT_VALIDATION_REPORT_2026-02-24.md`
+> - `docs/reference/DEMO_DAY_RUNBOOK.md`
+> - `docs/reference/DEMO_QA_CHECKLIST.md`
+> - `docs/reference/DEMO_SCRIPT_VALIDATION_REPORT_2026-02-24.md`
 >
 > Demo login is now: `admin / admin`
 

@@ -35,9 +35,17 @@
 <body>
   <div class="wrap">
     <h1>Smart City IDS - Operator Guide</h1>
-    <p class="muted">Truth-first guide for analysts and examiners. All steps below use live IDS APIs and cluster behavior, not mock data.</p>
+    <p class="muted">Truth-first guide for analysts and examiners. This page is the full in-site reference for the dashboard. All definitions below map to live API behavior and cluster state, not mock data.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0 14px;">
+      <input id="helpSearchInput" placeholder="Search this guide: degraded, circuit open, IoT, alerts, automation..." style="flex:1;min-width:280px;background:#0a0f1a;border:1px solid rgba(148,163,184,.2);border-radius:10px;padding:11px 12px;color:var(--txt);font-size:13px;">
+      <button id="helpSearchClear" style="padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(148,163,184,.2);border-radius:10px;color:var(--txt);font-size:12px;cursor:pointer;">Clear</button>
+      <div id="helpSearchCount" class="muted" style="font-size:12px;">Showing all sections</div>
+    </div>
+    <div id="helpSearchEmpty" class="panel" style="display:none;margin-bottom:14px;">
+      <p style="margin:0;">No guide sections matched this search. Try terms like <code>degraded</code>, <code>circuit open</code>, <code>alerts</code>, <code>iot</code>, or <code>automation</code>.</p>
+    </div>
 
-    <div class="panel">
+    <div class="panel help-section">
       <h2>1) Dashboard Map</h2>
       <div class="grid">
         <div class="card">
@@ -46,11 +54,11 @@
         </div>
         <div class="card">
           <h3>Alerts</h3>
-          <p>Alert history with severity, detector source, Kubernetes context, LLM outcome, and trace access.</p>
+          <p>Alert history with severity, detector source, Kubernetes context, grouped incident counts, LLM outcome, and trace access.</p>
         </div>
         <div class="card">
           <h3>IoT Mesh</h3>
-          <p>Device/workload visibility and fleet status. Count quality is source-qualified (cluster telemetry vs fallback source).</p>
+          <p>Device/workload visibility and fleet status. Count quality is source-qualified (cluster telemetry vs fallback source). Protocol cards represent software emulators with real protocol shapes and synthetic state models unless a hardware path is explicitly used.</p>
         </div>
         <div class="card">
           <h3>K8s Cluster</h3>
@@ -67,8 +75,116 @@
       </div>
     </div>
 
-    <div class="panel" style="margin-top:14px;">
-      <h2>2) Automation Control (Governance)</h2>
+    <div class="panel help-section" style="margin-top:14px;">
+      <h2>2) Status Glossary</h2>
+      <table>
+        <thead>
+          <tr><th>Label</th><th>Where It Appears</th><th>Actual Meaning</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="pill ok">Healthy / Operational</span></td>
+            <td>Provider cards, component pills, service health views</td>
+            <td>The live analysis or component path is working now. For LLMs, this means the provider has completed successful alert-analysis calls in the current process.</td>
+          </tr>
+          <tr>
+            <td><span class="pill warn">Degraded</span></td>
+            <td>Provider tables, system status, IoT source-quality notices</td>
+            <td>The system is still available, but a warning condition exists. For LLM providers, this usually means cooldown after a recent provider failure or a partial health state. For IoT metrics, it means telemetry is being derived from fallback sources rather than the full preferred path.</td>
+          </tr>
+          <tr>
+            <td><span class="pill warn">Cooldown</span></td>
+            <td>Detailed provider cards in LLM Control</td>
+            <td>The provider recently failed and is temporarily suppressed by the retry/circuit-breaker logic. It will retry automatically after the cooldown expires or after a manual reset.</td>
+          </tr>
+          <tr>
+            <td><span class="pill bad">Circuit open</span></td>
+            <td>Detailed provider cards in LLM Control</td>
+            <td>The provider crossed repeated-failure thresholds and the circuit breaker blocked additional traffic. This protects the IDS from repeatedly calling a failing or overloaded provider.</td>
+          </tr>
+          <tr>
+            <td><span class="pill warn">Analysis unverified</span></td>
+            <td>Overview provider list</td>
+            <td>The provider is configured, but this process has not yet recorded a successful alert-analysis call. Do not treat it as proven operational until a strict provider test or real alert analysis succeeds.</td>
+          </tr>
+          <tr>
+            <td><span class="pill bad">Auth failed / Unhealthy</span></td>
+            <td>Provider cards, health views</td>
+            <td>The configured provider or component is failing. Typical causes are invalid API keys, expired credentials, connectivity failures, or backend startup errors.</td>
+          </tr>
+          <tr>
+            <td><span class="pill warn">In-memory fallback</span></td>
+            <td>Overview and health views</td>
+            <td>The IDS API is still serving requests, but PostgreSQL is unavailable and persistence is temporarily degraded. Data created in this mode resets on restart unless the database reconnects.</td>
+          </tr>
+          <tr>
+            <td><span class="pill warn">Registered</span></td>
+            <td>IoT Mesh device table</td>
+            <td>The device exists in the logical registry, but there is no recent evidence that it is currently live. A registered row is inventory, not proof of active hardware.</td>
+          </tr>
+          <tr>
+            <td><span class="pill ok">Online / Healthy (device)</span></td>
+            <td>IoT Mesh device table</td>
+            <td>The device has recent heartbeat/telemetry or is backed by a currently running pod. This is the strongest dashboard evidence that the device is active now.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel help-section" style="margin-top:14px;">
+      <h2>3) Tab-by-Tab Field Guide</h2>
+      <h3>Overview</h3>
+      <ul>
+        <li><strong>Total Alerts / Critical Alerts:</strong> current recent alert totals from the IDS backend.</li>
+        <li><strong>IoT Devices:</strong> hybrid inventory count using logical registry rows plus pod-backed workloads. Read the source-quality note under the number before making fleet-size claims.</li>
+        <li><strong>Flood Suppression:</strong> cumulative rate-limiter throttling count since startup or last reset, not a hidden rolling minute.</li>
+        <li><strong>Dedup + LLM Savings:</strong> real deduplicator savings shown only after duplicate-capable security alerts have been processed in the current process.</li>
+        <li><strong>Recent Alerts:</strong> grouped into 5-minute incident buckets for readability. This reduces repeated Falco bursts that would otherwise drown out lower-volume Suricata rows.</li>
+      </ul>
+
+      <h3>Alerts</h3>
+      <ul>
+        <li><strong>Search:</strong> filters by rule, summary, detector, or threat text.</li>
+        <li><strong>Severity:</strong> normalized IDS severity on a 1-10 scale. The rule and summary text still come from the original detector or IDS pipeline.</li>
+        <li><strong>Where:</strong> namespace, pod, and container context when available. Platform rows come from monitoring/security infrastructure rather than city service workloads.</li>
+        <li><strong>Count:</strong> grouped-incident frequency within the collapse window, not a lifetime count.</li>
+        <li><strong>View Full LLM Trace:</strong> audit viewer for prompts, parsed output, raw provider response, and metadata.</li>
+      </ul>
+
+      <h3>IoT Mesh</h3>
+      <ul>
+        <li><strong>Source:</strong> distinguishes pod-backed devices from logical registry rows.</li>
+        <li><strong>Last Seen:</strong> most recent heartbeat/telemetry or pod-derived activity timestamp used for device status classification.</li>
+        <li><strong>Device / Pod IP:</strong> pod IP for pod-backed workloads, or the last registered device IP/metadata IP when available for external logical devices.</li>
+        <li><strong>Important:</strong> a logical registry row without recent heartbeat and without IP should be treated as inventory only, not live hardware proof.</li>
+      </ul>
+
+      <h3>K8s Cluster</h3>
+      <ul>
+        <li>Shows live pod and service state for IDS API, detectors, database, and emulator workloads.</li>
+        <li>Use this tab to confirm whether a dashboard problem is really a cluster runtime problem.</li>
+      </ul>
+
+      <h3>LLM Control</h3>
+      <ul>
+        <li><strong>Analysis:</strong> whether live alert-analysis calls are succeeding for that provider.</li>
+        <li><strong>Billing endpoint:</strong> whether the provider credit/billing health path is reachable. This is separate from inference success.</li>
+        <li><strong>Balance visibility:</strong> whether the provider/account actually exposes a usable balance value to the dashboard.</li>
+        <li><strong>Provider Breakdown:</strong> DB-backed alert-analysis usage only. Manual probes and sanity tests do not increment these call totals.</li>
+        <li><strong>Strict provider test:</strong> disables fallback during diagnostics so a provider either succeeds on its own or fails honestly.</li>
+      </ul>
+
+      <h3>Automation</h3>
+      <ul>
+        <li><strong>Approved:</strong> total executed actions, combining auto-executed and manually approved actions.</li>
+        <li><strong>Rejected:</strong> analyst rejections from the governance queue.</li>
+        <li><strong>Pending:</strong> actions awaiting analyst review now.</li>
+        <li><strong>Action history:</strong> authoritative trail for what governance decided and who approved or rejected it.</li>
+      </ul>
+    </div>
+
+    <div class="panel help-section" style="margin-top:14px;">
+      <h2>4) Automation Control (Governance)</h2>
       <table>
         <thead>
           <tr><th>Mode</th><th>Execution Behavior</th><th>Expected Queue Behavior</th></tr>
@@ -101,8 +217,8 @@
       </p>
     </div>
 
-    <div class="panel" style="margin-top:14px;">
-      <h2>3) How to Read "View Full LLM Trace"</h2>
+    <div class="panel help-section" style="margin-top:14px;">
+      <h2>5) How to Read "View Full LLM Trace"</h2>
       <ul>
         <li><strong>Parsed output:</strong> normalized severity, threat type, confidence, and recommended actions.</li>
         <li><strong>System prompt:</strong> IDS policy/instruction context sent to provider.</li>
@@ -115,20 +231,54 @@
         <span class="pill warn">Cached analysis</span> means output was served from dedup/cache logic.
       </p>
       <p>If a row reports missing inline trace, use the trace identifier and query <code>/api/audit/trace/&lt;trace_id&gt;</code>.</p>
+      <p>
+        <strong>Provider diagnostics note:</strong> in LLM Control, enable
+        <code>Strict provider test</code> to disable fallback during test calls.
+        This verifies whether a specific provider actually succeeds, instead of silently failing over.
+      </p>
+      <p>
+        <strong>Provider card note:</strong> each provider card now separates
+        <code>Analysis</code>, <code>Billing endpoint</code>, and <code>Balance visibility</code>.
+        These are different checks. A provider can have a working analysis path while the billing endpoint is restricted or the balance is not exposed by that provider API.
+      </p>
+      <p>
+        <strong>Unverified analysis note:</strong> if a provider has no successful alert-analysis calls in the current process, the dashboard marks it as <code>Analysis unverified</code> even when the provider is configured. This avoids overstating readiness after restart.
+      </p>
+      <p>
+        <strong>Usage accounting note:</strong> the provider breakdown table is DB-backed and counts only alert-analysis calls that were executed as part of the IDS pipeline.
+        Manual probes, sanity tests, and strict evaluation reanalysis with <code>persist=false</code> update provider health/diagnostics, but they do not increment the DB-backed alert-analysis usage counters shown in the provider breakdown table.
+      </p>
+      <p>
+        <strong>Success column note:</strong> a provider marked <code>Hist</code> means historical DB-backed usage exists, but runtime success counters were reset after restart, so the UI cannot compute a live success percentage for that same window.
+      </p>
+      <p>
+        <strong>Overview metrics note:</strong> `Dedup + LLM Savings` appears only after real duplicate-capable security alerts were seen by the deduplicator in the current process. `Flood Suppression` is cumulative since startup/reset, not a hidden rolling UI window.
+      </p>
+      <p>
+        <strong>Alert history note:</strong> repeated alerts are grouped into 5-minute incident buckets by detector, rule, severity, workload, and threat signature.
+        This keeps repeated Falco/governance bursts readable and makes lower-volume Suricata rows easier to surface in the loaded history window.
+      </p>
+      <p>
+        <strong>IoT realism note:</strong> the strongest current emulator paths are ONVIF traffic camera, FHIR healthcare gateway, MQTT/SenML parking gateway, Modbus/OPC-UA environmental sensor, and DALI/TALQ street lighting.
+        These are protocol-faithful software emulators, not physical devices. Parking MQTT, Modbus write, and DALI command paths now modify emulator state during live attack runs.
+      </p>
     </div>
 
-    <div class="panel" style="margin-top:14px;">
-      <h2>4) Live Validation Commands</h2>
+    <div class="panel help-section" style="margin-top:14px;">
+      <h2>6) Live Validation Commands</h2>
       <pre>curl -s -o /dev/null -w "HEALTH:%{http_code}\n" http://localhost:30800/health
 curl -s -o /dev/null -w "UI:%{http_code}\n" http://localhost:30800/ui
 
 bash scripts/test-governance-modes.sh --api-url http://localhost:30800
-bash scripts/e2e-verbose-test.sh --quick</pre>
+bash scripts/e2e-verbose-test.sh --quick
+bash scripts/run-live-attacks.sh --mode mqtt --duration 30 --show-alerts 5 --verbose
+bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose</pre>
       <p>Use <code>E2E_ENABLE_FULL_AUTONOMY=1</code> with the E2E script if you want to include force-autonomy profile in the run.</p>
+      <p class="muted">Attack catalog cards are maintained locally in the UI and aligned with the live runner script. Removed backend registry endpoints are not used.</p>
     </div>
 
-    <div class="panel" style="margin-top:14px;">
-      <h2>5) Troubleshooting</h2>
+    <div class="panel help-section" style="margin-top:14px;">
+      <h2>7) Troubleshooting</h2>
       <h3>Automation panel shows unavailable/session expired</h3>
       <ul>
         <li>Sign in again to refresh token.</li>
@@ -149,7 +299,51 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:30800/api/governance/
       <pre>curl -s http://localhost:30800/health | jq '.components.database'
 kubectl get networkpolicy -n smart-city
 kubectl rollout restart deploy/ids-api -n smart-city</pre>
+
+      <h3>LLM provider shows Degraded, Cooldown, or Circuit open</h3>
+      <ul>
+        <li><strong>Degraded:</strong> the provider is configured but temporarily limited or partially unhealthy.</li>
+        <li><strong>Cooldown:</strong> a recent provider failure triggered temporary suppression; retry after the cooldown or use the retry/reset API.</li>
+        <li><strong>Circuit open:</strong> repeated failures crossed the circuit-breaker threshold and traffic is blocked until recovery or reset.</li>
+        <li>Check the exact live reason in <code>/api/llm/diagnostics</code> before changing keys or billing settings.</li>
+      </ul>
+      <pre>curl -s http://localhost:30800/api/llm/diagnostics | jq .
+curl -s http://localhost:30800/api/circuit-breaker/status | jq .
+
+TOKEN=$(curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' \
+  http://localhost:30800/api/auth/login | jq -r '.access_token')
+
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:30800/api/llm/retry-all | jq .</pre>
     </div>
   </div>
+  <script>
+    (function () {
+      const input = document.getElementById('helpSearchInput');
+      const clearBtn = document.getElementById('helpSearchClear');
+      const countEl = document.getElementById('helpSearchCount');
+      const emptyEl = document.getElementById('helpSearchEmpty');
+      const sections = Array.from(document.querySelectorAll('.help-section'));
+      function applyFilter(query) {
+        const q = String(query || '').trim().toLowerCase();
+        let visible = 0;
+        sections.forEach((section) => {
+          const match = !q || String(section.textContent || '').toLowerCase().includes(q);
+          section.style.display = match ? '' : 'none';
+          if (match) visible += 1;
+        });
+        countEl.textContent = q ? `${visible} section${visible === 1 ? '' : 's'} match "${query}"` : 'Showing all sections';
+        emptyEl.style.display = visible ? 'none' : 'block';
+      }
+      input.addEventListener('input', () => applyFilter(input.value));
+      clearBtn.addEventListener('click', () => {
+        input.value = '';
+        applyFilter('');
+        input.focus();
+      });
+      applyFilter('');
+    })();
+  </script>
 </body>
 </html>

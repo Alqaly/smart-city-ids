@@ -182,7 +182,7 @@ export function renderPipelineOverview(data) {
   if (!hasData) {
     fatigueEl.innerHTML =
       `<div style="color:var(--text3);font-size:13px;text-align:center;padding:8px">` +
-      `No alerts processed in this session yet. Send alerts or run an attack simulation to see fatigue metrics.` +
+      `No alerts processed in this session yet. Send alerts or run a live attack scenario to see fatigue metrics.` +
       `</div>`;
   } else {
     fatigueEl.innerHTML =
@@ -209,7 +209,7 @@ export function renderAlertFeed(data) {
   if (badgeEl) badgeEl.textContent = data.total || 0;
 
   if (!data.alerts.length) {
-    el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No alerts yet - run an attack simulation!</div>';
+    el.innerHTML = '<div style="padding:20px;color:var(--text3);text-align:center">No alerts yet - run a live attack scenario.</div>';
     return;
   }
 

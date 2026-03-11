@@ -113,7 +113,6 @@ upsert_ids_secret_from_env() {
     kubectl create secret generic ids-secrets -n smart-city "${secret_args[@]}" \
         --dry-run=client -o yaml | kubectl apply --validate=false -f - >/dev/null
     log_info "Updated ids-secrets with available LLM keys"
-    kubectl rollout restart deployment/ids-api -n smart-city >/dev/null || true
 }
 
 load_local_env_keys() {
@@ -163,8 +162,25 @@ sync_ids_code_configmaps() {
     kubectl create configmap ids-app-static -n smart-city \
         --from-file="$PROJECT_ROOT/services/ids-api/static" \
         --dry-run=client -o yaml | kubectl apply --validate=false --server-side --force-conflicts -f - >/dev/null
-    kubectl rollout restart deployment/ids-api -n smart-city >/dev/null || true
-    log_info "Synced ids-app-code/ids-app-static and restarted ids-api"
+    log_info "Synced ids-app-code/ids-app-static"
+}
+
+normalize_ids_api_env() {
+    local desired_env_json patch_payload
+    desired_env_json="$(python - <<'PY'
+import json
+import yaml
+
+with open("k8s-manifests/ids-api-FINAL.yaml", "r", encoding="utf-8") as fh:
+    for doc in yaml.safe_load_all(fh):
+        if doc and doc.get("kind") == "Deployment" and doc.get("metadata", {}).get("name") == "ids-api":
+            print(json.dumps(doc["spec"]["template"]["spec"]["containers"][0]["env"]))
+            break
+PY
+)"
+    [[ -n "$desired_env_json" ]] || return 0
+    patch_payload="$(jq -cn --argjson env "$desired_env_json" '[{"op":"replace","path":"/spec/template/spec/containers/0/env","value":$env}]')"
+    kubectl patch deployment ids-api -n smart-city --type=json -p "$patch_payload" >/dev/null 2>&1 || true
 }
 
 apply_iot_manifest() {
@@ -227,7 +243,7 @@ seed_demo_data_if_needed() {
     suricata_seen="$(kubectl exec -n smart-city "$exec_target" -- sh -lc "curl -s localhost:8000/metrics | awk '/^smartcity_ids_alerts_received_total\\{/ && /source=\"suricata\"/ {sum+=\$NF} END{print sum+0}'" 2>/dev/null || echo "0")"
     if [[ "${suricata_seen%.*}" -eq 0 ]]; then
         log_warn "Suricata alert metric is 0; injecting one Suricata-format internal alert for pipeline validation"
-        echo "Skipping synthetic alert injection (live-only demo)." || true
+        echo "Skipping synthetic alert injection (live-only evaluation flow)." || true
     fi
 }
 
@@ -287,7 +303,7 @@ print_workload_summary() {
     local smart_running monitoring_running iot_running
     smart_running="$(kubectl get pods -n smart-city --no-headers 2>/dev/null | awk '$3=="Running"{c++} END{print c+0}')"
     monitoring_running="$(kubectl get pods -n monitoring --no-headers 2>/dev/null | awk '$3=="Running"{c++} END{print c+0}')"
-    iot_running="$(kubectl get pods -n smart-city --no-headers 2>/dev/null | awk '$1 ~ /iot-/{if($3=="Running") c++} END{print c+0}')"
+    iot_running="$(kubectl get pods -n smart-city --no-headers 2>/dev/null | awk '$1 ~ /(traffic-camera|healthcare-api|parking-system|env-sensor|street-lighting|mqtt-broker)/ {if($3=="Running") c++} END{print c+0}')"
     echo ""
     echo "Workloads:"
     echo "  smart-city running pods: ${smart_running}"
@@ -321,12 +337,12 @@ if ! $CLUSTER_OK; then
 fi
 
 log_section "Phase 2 - Core Sync"
+normalize_ids_api_env
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/ids-api-FINAL.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/services-no-build.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/prometheus-deployment.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/grafana-deployment.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/suricata-fixed.yaml"
-apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/suricata-forwarder-deployment.yaml"
 apply_manifest_retry "$PROJECT_ROOT/k8s-manifests/falco-forwarder.yaml"
 
 if [[ $WITH_IOT_EMULATION -eq 1 ]]; then
@@ -339,6 +355,7 @@ fi
 
 sync_ids_code_configmaps
 upsert_ids_secret_from_env
+kubectl rollout restart deployment/ids-api -n smart-city >/dev/null || true
 
 log_section "Phase 3 - Wait and Validate"
 kubectl rollout status deployment/ids-api -n smart-city --timeout=180s >/dev/null || true

@@ -33,9 +33,9 @@ status = manager.get_status()
 
 | Provider | API Key Env Var | Default Model |
 |----------|-----------------|---------------|
-| OpenAI | `OPENAI_API_KEY` | gpt-4-turbo-preview |
-| Anthropic | `ANTHROPIC_API_KEY` | claude-3-5-sonnet-20241022 |
-| Google Gemini | `GEMINI_API_KEY` | gemini-1.5-pro |
+| OpenAI | `OPENAI_API_KEY` | gpt-4o |
+| Anthropic | `ANTHROPIC_API_KEY` | claude-sonnet-4-20250514 |
+| Google Gemini | `GEMINI_API_KEY` | gemini-2.5-flash |
 | xAI (Grok) | `XAI_API_KEY` | grok-4-latest |
 | Moonshot (Kimi) | `KIMI_API_KEY` | moonshot-v1-128k |
 | Custom | `CUSTOM_API_KEY` | (configurable) |

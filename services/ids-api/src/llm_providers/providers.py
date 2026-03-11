@@ -51,7 +51,7 @@ class OpenAIProvider(BaseProvider):
     """OpenAI GPT models"""
     NAME = "openai"
     ENV_KEY = "OPENAI_API_KEY"
-    DEFAULT_MODEL = "gpt-4-turbo-preview"
+    DEFAULT_MODEL = "gpt-4o"
     DEFAULT_BASE_URL = "https://api.openai.com/v1"
     
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
@@ -118,7 +118,7 @@ class KimiProvider(BaseProvider):
     """Moonshot Kimi models (OpenAI-compatible)"""
     NAME = "kimi"
     ENV_KEY = "KIMI_API_KEY"
-    DEFAULT_MODEL = "moonshot-v1-8k"
+    DEFAULT_MODEL = "moonshot-v1-128k"
     DEFAULT_BASE_URL = "https://api.moonshot.ai/v1"
     
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
@@ -155,7 +155,7 @@ class AnthropicProvider(BaseProvider):
     """Anthropic Claude models"""
     NAME = "anthropic"
     ENV_KEY = "ANTHROPIC_API_KEY"
-    DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
+    DEFAULT_MODEL = "claude-sonnet-4-20250514"
     DEFAULT_BASE_URL = "https://api.anthropic.com/v1"
     
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
@@ -195,7 +195,7 @@ class GeminiProvider(BaseProvider):
     """Google Gemini models"""
     NAME = "gemini"
     ENV_KEY = "GEMINI_API_KEY"
-    DEFAULT_MODEL = "gemini-2.0-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash"
     DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:

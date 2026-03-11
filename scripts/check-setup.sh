@@ -227,8 +227,8 @@ for provider in xai openai anthropic gemini kimi; do
     var_name="${provider^^}_API_KEY"
     if [[ -n "${!var_name:-}" ]]; then
         log_info "$provider: API key configured ✓"
-        ((LLM_CONFIGURED++))
-        ((PASSED++))
+        ((LLM_CONFIGURED+=1))
+        ((PASSED+=1))
     else
         log_warn "$provider: No API key"
     fi
@@ -246,7 +246,7 @@ else
 fi
 
 log_subsection "Current Priority"
-log_info "Priority order: ${CYAN}${LLM_PRIORITY}${RESET}"
+log_info "Priority order: ${CYAN}${LLM_PRIORITY}${NC}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Summary

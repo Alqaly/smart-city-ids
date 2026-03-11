@@ -14,16 +14,16 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/script-utils.sh"
+
 NAMESPACE="smart-city"
 SERVICES=(traffic-camera parking-system healthcare-api env-sensor street-lighting)
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 show_status() {
-    echo -e "\n${BOLD}IoT Fleet Status${RESET} (namespace: ${NAMESPACE})"
+    echo -e "\n${BOLD}IoT Fleet Status${NC} (namespace: ${NAMESPACE})"
     echo "──────────────────────────────────────────────"
     printf "%-20s %8s %8s %8s\n" "SERVICE" "DESIRED" "READY" "AVAIL"
     echo "──────────────────────────────────────────────"
@@ -40,7 +40,7 @@ show_status() {
         local color="$GREEN"
         [[ "$ready" -lt "$desired" ]] && color="$YELLOW"
         [[ "$ready" -eq 0 ]] && color="$RED"
-        printf "%-20s ${color}%8s %8s %8s${RESET}\n" "$svc" "$desired" "$ready" "$avail"
+        printf "%-20s ${color}%8s %8s %8s${NC}\n" "$svc" "$desired" "$ready" "$avail"
     done
     echo "──────────────────────────────────────────────"
     printf "%-20s %8s %8s\n" "TOTAL" "$total_desired" "$total_ready"
@@ -49,13 +49,17 @@ show_status() {
 
 scale_service() {
     local svc=$1 replicas=$2
-    echo -e "${CYAN}Scaling ${BOLD}$svc${RESET}${CYAN} to $replicas replicas...${RESET}"
+    echo -e "${CYAN}Scaling ${BOLD}$svc${NC}${CYAN} to $replicas replicas...${NC}"
     kubectl scale deployment "$svc" -n "$NAMESPACE" --replicas="$replicas"
 }
 
 # Notify dashboard API so the web UI reflects the change
 notify_dashboard() {
-    local api_url="${IDS_API_URL:-http://localhost:30800}"
+    local api_url="${IDS_API_URL:-}"
+    if [[ -z "$api_url" ]]; then
+        api_url="$(resolve_ids_api_url || true)"
+    fi
+    api_url="${api_url:-http://localhost:30800}"
     curl -s -X POST "${api_url}/api/iot/scale" \
         -H "Content-Type: application/json" \
         -d '{"replicas": '"${1:-1}"'}' \
@@ -73,7 +77,7 @@ ARG2="${2:-}"
 
 case "$ARG1" in
     up)
-        echo -e "${GREEN}Scaling all IoT services UP (+1)${RESET}"
+        echo -e "${GREEN}Scaling all IoT services UP (+1)${NC}"
         for svc in "${SERVICES[@]}"; do
             current=$(kubectl get deployment "$svc" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1)
             new=$((current + 1))
@@ -82,7 +86,7 @@ case "$ARG1" in
         done
         ;;
     down)
-        echo -e "${YELLOW}Scaling all IoT services DOWN (-1)${RESET}"
+        echo -e "${YELLOW}Scaling all IoT services DOWN (-1)${NC}"
         for svc in "${SERVICES[@]}"; do
             current=$(kubectl get deployment "$svc" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 1)
             new=$((current - 1))
@@ -95,10 +99,10 @@ case "$ARG1" in
         [[ $REPLICAS -lt 1 ]] && REPLICAS=1
         [[ $REPLICAS -gt 10 ]] && REPLICAS=10
         if [[ -n "$ARG2" ]]; then
-            echo -e "${GREEN}Scaling ${BOLD}$ARG2${RESET}${GREEN} to $REPLICAS replicas${RESET}"
+            echo -e "${GREEN}Scaling ${BOLD}$ARG2${NC}${GREEN} to $REPLICAS replicas${NC}"
             scale_service "$ARG2" "$REPLICAS"
         else
-            echo -e "${GREEN}Scaling ALL IoT services to $REPLICAS replicas${RESET}"
+            echo -e "${GREEN}Scaling ALL IoT services to $REPLICAS replicas${NC}"
             for svc in "${SERVICES[@]}"; do
                 scale_service "$svc" "$REPLICAS"
             done

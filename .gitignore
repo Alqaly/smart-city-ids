@@ -49,3 +49,8 @@ a
 *.bak
 node_modules/
 puppeteer-config.json
+
+artifacts/
+ALL_SERVICES_CODE.txt
+scripts/.attack-metrics.csv
+d

@@ -13,9 +13,13 @@ This file lists the documents and runtime checks that were verified against the 
 Use these before trusting any report/snapshot claim:
 
 ```bash
+# Preferred if direct NodePort is reachable locally
 curl -s http://localhost:30800/health | jq '{status,storage_type,db:.components.database}'
 curl -s http://localhost:30800/api/alerts?limit=3 | jq '.alerts | length'
 curl -s http://localhost:30800/api/metrics | jq '{total_alerts,iot_devices_active}'
+
+# If localhost:30800 is not reachable in your environment
+bash scripts/access-stack.sh start
 ```
 
 Auth-required checks:
@@ -45,9 +49,11 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 - Removed attack UI backend routes are not active:
   - `GET /api/attacks/registry` -> `404`
-  - `GET /api/demo/chaos/status` -> `404`
+  - `GET /api/demo/chaos/status` -> `404` (legacy chaos route)
 - Dashboard source indicates attack UI is removed (`Attack Simulation removed: live attacks only`)
 - `GET /health` returns healthy status and connected PostgreSQL persistence
+- `GET /api/iot/devices` returns hybrid inventory with `counting_mode: "hybrid_registry_plus_pods"`
+- stale logical registry rows are no longer rendered as healthy/live devices
 - `GET /api/rate-limiter/status` returns valid status/config payload
 - `GET /api/governance/status` (with auth) returns mode + metrics payload
 - `scripts/run-live-attacks.sh --dry-run --verbose` runs and prints phased scenario execution plan
@@ -57,9 +63,9 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 The following are still useful, but should be treated as context/snapshot material, not authoritative runtime truth:
 
 - Time-bound validation reports (for example `*_2026-*.md`)
-- Metrics/reporting snapshots (for example `docs/PROJECT_METRICS.md`, `docs/IOT_EMULATION_REPORT.md`)
+- Metrics/reporting snapshots (for example `docs/reference/PROJECT_METRICS.md`, `docs/IOT_EMULATION_REPORT.md`)
 - Historical changelog entries describing removed/optional features
-- Anything under `docs/archive/` or `docs/_archive/`
+- Anything under `docs/archive/` or `docs/archive-legacy/`
 
 ## Review policy (recommended)
 

@@ -1,6 +1,10 @@
 # API Reference — Smart City IDS
 
-Complete endpoint reference for the IDS API (FastAPI). Base URL: `http://localhost:30800`.
+Complete endpoint reference for the IDS API (FastAPI).
+
+Preferred base URL when NodePort is locally reachable: `http://localhost:30800`  
+Stable port-forward fallback: `http://localhost:8000` (via `scripts/access-stack.sh start`)  
+NodePort base URL from another host: `http://<NODE_IP>:30800`
 
 ---
 
@@ -92,7 +96,7 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 | GET | `/api/llm/providers/health-summary` | No | Aggregated provider health summary |
 | POST | `/api/llm/retry-all` | Yes | Reset provider states/cooldowns and breaker latches (operator recovery) |
 | POST | `/api/llm/reset-cooldown` | Yes | Clear provider cooldown/auth-disable timers |
-| POST | `/api/llm/test/{provider}` | Yes | Send probe/test request to provider |
+| POST | `/api/llm/test/{provider}` | Yes | Send provider-specific probe/test (`?strict=true` disables fallback for diagnostics) |
 | POST | `/api/llm/force/{provider}` | Yes | Force active provider selection |
 | GET | `/api/llm/metrics/24h` | Yes | Runtime in-memory 24h-shaped metrics payload (resets on `ids-api` restart) |
 | GET | `/api/metrics/llm-usage?window=today|7d|...` | Yes | DB-backed LLM usage/cost/tokens by provider (preferred for reporting) |
@@ -107,7 +111,7 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 | GET | `/api/llm/feedback/stats` | No | Feedback aggregate statistics |
 | GET | `/api/llm-stats/export` | No | Export per-engine latency/cost/token aggregates |
 
-### LLM Credits
+### LLM Credits (Legacy Visibility)
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -134,7 +138,7 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 |---|---|---|---|
 | GET | `/api/governance/status` | Yes | Current mode, pending count, decision metrics |
 | GET | `/api/governance/mode` | Yes | Current automation mode |
-| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (`autonomous`/`assisted`/`manual`/`emergency`, depending policy/build) |
+| POST | `/api/governance/mode` | Yes | Set mode. Param: `mode` (`autonomous`/`assisted`/`manual`/`emergency`) |
 | GET | `/api/governance/pending` | Yes | List pending actions awaiting approval |
 | POST | `/api/governance/approve/{action_id}` | Yes | Approve + execute pending action. Params: `operator`, `comment` |
 | POST | `/api/governance/reject/{action_id}` | Yes | Reject pending action. Params: `operator`, `reason` |
@@ -158,7 +162,7 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 |---|---|---|---|
 | GET | `/api/iot/telemetry` | No | Current telemetry snapshot for discovered devices |
 | POST | `/api/iot/sensor` | No | Receive sensor telemetry. Security events auto-create alerts |
-| GET | `/api/iot/devices` | No | List registered IoT devices |
+| GET | `/api/iot/devices` | No | List hybrid IoT inventory: logical registry rows + pod-backed emulator rows |
 | GET | `/api/iot/pods` | No | List IoT pods and status metadata |
 | GET | `/api/iot/events` | No | Recent IoT events. Params: `limit`, `device_id` |
 | GET | `/api/iot/discover` | No | Discover IoT devices from cluster inventory |
@@ -173,16 +177,16 @@ Tokens expire after 24 hours. `/api/alerts/internal` is cluster-internal and req
 | GET | `/api/audit/export` | No | Export audit records |
 | GET | `/api/logs/events` | Yes | Unified SOC logs feed |
 
-### Demo Controls
+### IoT Scaling Controls
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/iot/scale` | No | Read current IoT scaling profile |
 | POST | `/api/iot/scale` | No | Update IoT scaling profile |
 
-Note: Synthetic “chaos” demo endpoints were removed. Live demo runs should use
-real traffic/runtimes (Falco + Suricata) and the `scripts/run-live-attacks.sh`
-runner.
+Note: legacy synthetic chaos endpoints were removed. Live evaluation runs should use
+real traffic/runtimes (Falco + Suricata) and `scripts/run-live-attacks.sh`
+(including `--mode mqtt` for MQTT abuse chains).
 
 Source inventory note: endpoint count and auth mix evolve as the operator UI/API changes. Treat the tables above as the maintained reference; verify against `services/ids-api/src/api/*.py` for exact route inventory.
 
@@ -330,8 +334,12 @@ All settings via environment variables. Source: `config.py` and `main.py`.
 |---|---|---|
 | `CRITICAL_SEVERITY_THRESHOLD` | `8` | Severity ≥ value → isolate pod |
 | `HIGH_SEVERITY_THRESHOLD` | `6` | Severity ≥ value → scale up |
-| `AUTOMATION_MODE` | `assisted` | `autonomous` / `assisted` / `manual` / `emergency` (legacy aliases normalized) |
-| `ASSISTED_THRESHOLD` | `8` | Severity ≥ value requires approval in assisted mode |
+| `AUTOMATION_MODE` | `assisted` | `autonomous` / `assisted` / `manual` / `emergency` |
+| `AUTONOMOUS_FORCE_EXECUTION` | `false` | If `true`, autonomous mode executes all recommended actions |
+| `AUTONOMOUS_MIN_CONFIDENCE` | `0.90` | Minimum confidence for automatic execution in autonomous mode |
+| `ASSISTED_MIN_CONFIDENCE` | `0.70` | Minimum confidence for auto execution in assisted mode |
+| `EMERGENCY_MIN_CONFIDENCE` | `0.85` | Confidence gate used in emergency mode |
+| `EMERGENCY_SEVERITY_THRESHOLD` | `10` | Severity gate used in emergency mode |
 | `PROTECTED_SERVICES` | `healthcare-api,ids-api,postgres` | Never auto-isolated |
 | `ACTION_EXPIRY_SECONDS` | `300` | Pending action TTL |
 
@@ -364,7 +372,7 @@ All settings via environment variables. Source: `config.py` and `main.py`.
 |---|---|---|
 | `DATABASE_URL` | `postgresql://postgres:idspassword@postgres:5432/smartcity_ids` | PostgreSQL connection |
 | `DB_RECONNECT_INTERVAL_SECONDS` | `10` | Background retry interval for auto-recovery from DB fallback |
-| `SECRET_KEY` | `smart-city-ids-demo-secret-change-in-production` | JWT signing key |
+| `SECRET_KEY` | random runtime value | JWT signing key; set explicitly for stable multi-replica deployments |
 | `APP_HOST` | `0.0.0.0` | Bind address |
 | `APP_PORT` | `8000` | Listen port |
 | `LOG_LEVEL` | `INFO` | Logging level |

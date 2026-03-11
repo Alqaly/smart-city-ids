@@ -1,87 +1,160 @@
 # Validation Checklist
 
-> [!IMPORTANT]
-> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
-> Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
-> and live checks (`/health`, `/api/alerts`, `/api/metrics`).
+This checklist covers the current supported validation path for the live Smart City IDS stack.
 
-
-This checklist provides reproducible steps to validate IDS performance and run replay tests for the Capstone demonstration.
-
-## Objectives
-- Replay attack scenarios with ground-truth labels
-- Measure IDS detection (precision, recall, F1, AUC)
-- Validate automation safety (dry-run vs assisted vs autonomous)
-
-## 1) Environment
-- Ensure `KUBECONFIG` points to the demo cluster (single-node K3s)
-- IDS API, Prometheus, and Grafana should be running
-
-## 2) Set safe automation mode
+## 1. Bootstrap and access
 
 ```bash
-export AUTOMATION_MODE=assisted
+bash scripts/apply-llm-env-to-k8s-secret.sh .env
+sudo bash scripts/start-everything.sh
+bash scripts/deploy-code.sh
+bash scripts/access-stack.sh start
 ```
 
-## 3) Replay attack scenarios (example)
+Expected local endpoints:
+- direct NodePort: `http://localhost:30800`
+- optional stable port-forward: `http://localhost:8000`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
 
-Use the attack-simulations scripts to generate labeled traffic. Each run produces a ground-truth JSON file in `scalability-results/` when run with `--label <label>`.
-
-Example: send 50 DDoS-like alerts
+## 2. Baseline health
 
 ```bash
-cd attack-simulations
-./generate-network-attacks.sh --count 50 --label DDoS
+bash scripts/check-setup.sh
+bash scripts/pre-demo-check.sh
+bash scripts/demo-readiness.sh --quick
 ```
 
-## 4) Record ground-truth
+Pass criteria:
+- IDS API healthy
+- PostgreSQL connected
+- Prometheus and Grafana reachable
+- Falco and Suricata visible
 
-Collect the generated ground-truth file (e.g. `scalability-results/ddos_2026-02-03.json`). This file contains timestamps and expected labels.
+## 3. Governance validation
 
-## 5) Query Prometheus for detected alerts
-
-Prometheus can be queried via HTTP API or `kubectl port-forward`.
-
-Example Prometheus query (last 10 minutes):
-
-```
-sum(ids_alerts_received_total{job="ids-api"})
+```bash
+bash scripts/test-governance-modes.sh
 ```
 
-Count alerts by threat type over last 10m:
+Prerequisite:
+- at least one LLM provider must be operational; otherwise alert analysis cannot produce governance decisions
 
+Pass criteria:
+- manual mode creates pending approvals
+- assisted mode auto-executes high-confidence actions
+- autonomous benign case does not trigger destructive action
+- original governance mode is restored
+- no residual pending queue remains
+
+## 4. End-to-end pipeline validation
+
+```bash
+bash scripts/e2e-verbose-test.sh --quick
 ```
-sum by (threat_type) (ids_alerts_received_total{job="ids-api"}[10m])
+
+If `GET /api/llm/diagnostics` reports `summary.operational = 0`, fix provider credentials or quota first and then rerun the governance/E2E checks.
+
+Pass criteria:
+- auth works
+- health/metrics endpoints respond
+- governance check passes
+- dashboard/help endpoints are reachable
+- IoT device count is readable
+
+## 5. Protocol attack validation
+
+### MQTT / Modbus / ONVIF path
+
+```bash
+bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 8 --verbose
 ```
 
-## 6) Compute precision/recall (local script)
+Expected recent alert coverage includes some or all of:
+- `SMARTCITY MQTT parking control topic abuse`
+- `SMARTCITY MQTT parking fault-state tamper`
+- `SMARTCITY MQTT parking occupancy spoof`
+- `SMARTCITY Modbus write tamper`
+- `SMARTCITY ONVIF capability enumeration`
+- `SMARTCITY ONVIF profile enumeration`
+- `SMARTCITY ONVIF PTZ control abuse`
+- `SMARTCITY ONVIF snapshot scraping`
+- `SMARTCITY ANPR data scraping`
 
-A simple Python script can compare ground-truth timestamps/labels with detected alerts pulled from the Prometheus API or IDS API `/api/alerts` history.
+### MQTT-specific path
 
-Example (pseudo):
+```bash
+bash scripts/run-live-attacks.sh --mode mqtt --duration 30 --show-alerts 5 --verbose
+```
 
-1. Load ground-truth events -> list of (ts, label)
-2. Load detected events -> list of (ts, predicted_label)
-3. Match events within a time-window (e.g., ±5s)
-4. Compute TP, FP, FN, precision, recall, F1
+### Mixed network/runtime path
 
-Save results to `scalability-results/metrics_summary.json`.
+```bash
+bash scripts/run-live-attacks.sh --mode all --duration 30 --show-alerts 5 --verbose
+```
 
-## 7) Expected outcomes (demo-level)
-- Precision: >= 0.6 (varies by scenario)
-- Recall: >= 0.5 (varies by scenario)
-- LLM latency p95: < 2s for cached results, < 5s for cold calls
-- Deduplicator hit-rate: >40% during storms
+## 6. LLM provider validation
 
-## 8) Safety checks
-- Verify `AUTOMATION_MODE=assisted` prevents autonomous isolation without approval
-- Check `k8s_automation` logs for `[DRY-RUN]` entries if using `dry-run`
+Login first:
 
-## 9) Reporting
-- Store all artifacts in `scalability-results/` and include in demo artifacts tarball
-- Record Prometheus snapshot and Grafana dashboard image for slides
+```bash
+TOKEN=$(curl -s -X POST http://localhost:30800/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' | jq -r '.access_token')
+```
 
----
+Run strict diagnostics:
 
-Notes:
-- This is a reproducible checklist for Capstone-level evaluation. For rigorous academic experiments, increase repetitions, add cross-validation folds, and record resource usage (CPU, RAM) per run.
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  'http://localhost:30800/api/llm/test/gemini?strict=true' \
+  -d '{"prompt":"provider diagnostic"}' | jq .
+```
+
+Check health summary:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  http://localhost:30800/api/llm/diagnostics | jq .
+```
+
+## 7. IoT emulation validation
+
+```bash
+curl -s http://localhost:30800/api/iot/telemetry | jq .
+curl -s http://localhost:30800/api/iot/devices | jq .
+```
+
+Check for:
+- parking MQTT runtime counters
+- env-sensor OPC UA running state
+- emulator stats present for active services
+- `counting_mode` and fleet totals from `/api/iot/devices`
+
+Interpretation:
+- `iot_devices_active` in `/api/metrics` is an activity metric, not a guaranteed 1:1 pod count.
+- `/api/iot/devices` is the authoritative inventory view for hybrid logical-device plus pod-backed counting.
+- In the current active path, `counting_mode` may be `hybrid_registry_plus_pods`; this is expected.
+
+## 8. Failure interpretation
+
+Common non-code failures:
+- provider auth failure -> invalid API key
+- provider quota/rate failure -> billing/quota issue
+- reduced IoT count -> active profile/registration drift, not necessarily pipeline failure
+- protocol attacks visible in recent alerts but delta counters low -> detector/metric timing issue, not necessarily ingest failure
+
+## 9. Minimum evidence bundle
+
+For supervisor/examiner review, capture:
+- output of `bash scripts/pre-demo-check.sh`
+- output of `bash scripts/test-governance-modes.sh`
+- output of `bash scripts/e2e-verbose-test.sh --quick`
+- one `run-live-attacks.sh` protocol run
+- screenshots or JSON from:
+  - `/api/alerts`
+  - `/api/governance/status`
+  - `/api/llm/diagnostics`
+  - `/api/iot/telemetry`

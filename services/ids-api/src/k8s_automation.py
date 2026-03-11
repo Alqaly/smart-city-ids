@@ -32,7 +32,7 @@ class K8sAutomation:
                 config.load_kube_config()
                 logger.info("Loaded kubeconfig file")
             
-            # Read automation mode (dry-run | assisted | autopilot)
+            # Read automation mode (manual | assisted | autonomous | emergency)
             self.automation_mode = os.getenv('AUTOMATION_MODE', 'assisted').lower()
 
             # Initialize API clients

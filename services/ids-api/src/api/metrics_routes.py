@@ -40,6 +40,8 @@ from infrastructure.metrics import PROM_UPTIME_SECONDS
 
 router = APIRouter(tags=["metrics"])
 
+_PSEUDO_LLM_PROVIDERS = {"none", "unknown", "cache", "cached", "rule", "rule_based", "rule-based"}
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LAZY DEPENDENCY INJECTION
@@ -65,6 +67,7 @@ def _deps():
         request_queue,
         circuit_breaker,
         refresh_iot_active_metric,
+        get_iot_metric_metadata,
         update_circuit_breaker_metrics,
     )
     return {
@@ -77,6 +80,7 @@ def _deps():
         "rq": request_queue,            # RequestQueue — bounded async queue
         "cb": circuit_breaker,          # CircuitBreaker — per-engine LLM breakers
         "refresh_iot": refresh_iot_active_metric,      # callable → int (active device count)
+        "iot_meta": get_iot_metric_metadata,           # callable → source/degraded metadata
         "update_cb": update_circuit_breaker_metrics,   # callable — sync breaker state → Prometheus
     }
 
@@ -400,6 +404,7 @@ async def get_metrics():
 
     PROM_UPTIME_SECONDS.set(uptime)
     d["metrics"]["iot_devices_active"] = d["refresh_iot"]()
+    d["metrics"]["iot_devices_active_meta"] = d["iot_meta"]()
     return d["metrics"]
 
 
@@ -452,6 +457,8 @@ async def llm_usage(window: str = "today"):
     total_cost = 0.0
     for row in usage.get("providers", []) or []:
         prov = (row.get("provider") or "unknown").strip().lower() or "unknown"
+        if prov in _PSEUDO_LLM_PROVIDERS:
+            continue
         prompt_tokens = int(row.get("prompt_tokens") or 0)
         completion_tokens = int(row.get("completion_tokens") or 0)
         tokens_total = prompt_tokens + completion_tokens
@@ -510,6 +517,8 @@ async def llm_usage(window: str = "today"):
         "end_utc": usage.get("end_utc"),
         "totals": out_totals,
         "providers": providers_out,
+        "cost_values_are_estimated": True,
+        "cost_estimation_method": "token_based_rate_per_1k",
         "active_provider": (llm_last_provider_used or (llm_manager.get_status().get("active_provider") if llm_manager else None)),
         "cost_threshold_usd": 5.0,
         "generated_at": int(datetime.utcnow().timestamp()),

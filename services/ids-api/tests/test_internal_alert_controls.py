@@ -1,3 +1,4 @@
+import os
 import sys
 import types
 
@@ -70,8 +71,8 @@ client = TestClient(main.app)
 
 def test_internal_alerts_use_dedup_to_avoid_repeat_llm_calls():
     calls = {"count": 0}
+    test_token = "test-token"
 
-        os.environ.setdefault("IDS_INTERNAL_ALERT_TOKEN", "test-token")
     async def fake_analyze(alert_dict):
         calls["count"] += 1
         return (
@@ -87,11 +88,16 @@ def test_internal_alerts_use_dedup_to_avoid_repeat_llm_calls():
             0.01,
         )
 
-    original = main.analyze_with_fallback
-    main.analyze_with_fallback = fake_analyze
+    from api import _state
+    from config import Config
+
+    original = _state.analyze_with_fallback
+    original_internal_token = Config.IDS_INTERNAL_ALERT_TOKEN
+    _state.analyze_with_fallback = fake_analyze
+    Config.IDS_INTERNAL_ALERT_TOKEN = test_token
     try:
-        if main.deduplicator:
-            main.deduplicator.clear_cache()
+        if _state.deduplicator:
+            _state.deduplicator.clear_cache()
 
         payload = {
             "output": "duplicate-test",
@@ -104,12 +110,12 @@ def test_internal_alerts_use_dedup_to_avoid_repeat_llm_calls():
             },
         }
 
-        r1 = client.post("/api/alerts/internal", json=payload)
-            headers = {"X-IDS-Internal-Token": "test-token"}
-            r1 = client.post("/api/alerts/internal", json=payload, headers=headers)
-            r2 = client.post("/api/alerts/internal", json=payload, headers=headers)
+        headers = {"X-IDS-Internal-Token": test_token}
+        r1 = client.post("/api/alerts/internal", json=payload, headers=headers)
+        r2 = client.post("/api/alerts/internal", json=payload, headers=headers)
         assert r1.status_code == 200, r1.text
         assert r2.status_code == 200, r2.text
         assert calls["count"] == 1, "LLM should only be called once for duplicate internal alerts"
     finally:
-        main.analyze_with_fallback = original
+        _state.analyze_with_fallback = original
+        Config.IDS_INTERNAL_ALERT_TOKEN = original_internal_token

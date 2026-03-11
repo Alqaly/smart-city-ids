@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Smart City IDS - Complete End-to-End Demo
-==========================================
+Smart City IDS - Complete End-to-End Evaluation Run
+===================================================
 
-This script demonstrates the complete data flow with verbose logging:
+This script exercises the complete data flow with verbose logging:
 IoT Device → Suricata/Falco → IDS API → LLM Analysis → Automated Action → Dashboard
 
 Usage:
@@ -44,7 +44,7 @@ def log_section(title: str):
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Smart City IDS Complete Demo")
+    parser = argparse.ArgumentParser(description="Smart City IDS Complete End-to-End Evaluation Run")
     parser.add_argument("--api-url", default="http://localhost:8000", help="IDS API URL")
     parser.add_argument("--token", default=os.getenv("IDS_API_TOKEN", ""), help="API token")
     parser.add_argument("--username", default="admin", help="Login username (used if --token not provided)")
@@ -230,7 +230,7 @@ async def main():
         except Exception as e:
             log(f"Governance check failed: {e}", Colors.RED)
         
-        log_section("DEMO COMPLETE")
+        log_section("EVALUATION RUN COMPLETE")
         log("What was demonstrated:")
         log("  1. Alert sent to IDS API")
         if alert_result.get("status") == "success" and alert_result.get("analysis"):

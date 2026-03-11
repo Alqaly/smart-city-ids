@@ -24,6 +24,11 @@ import os
 import time, random, math, struct, threading, json
 from datetime import datetime, timezone
 
+try:
+    from opcua import Server
+except Exception:  # pragma: no cover - optional local fallback
+    Server = None
+
 app = Flask(__name__)
 
 # ── Station Configuration ──
@@ -110,9 +115,18 @@ AQI_BREAKPOINTS_PM25 = [
 # ── OPC UA namespace ──
 OPCUA_NAMESPACE = "urn:smartcity:env:monitor"
 OPCUA_NODES = {}
+OPCUA_ENDPOINT = os.environ.get("OPCUA_ENDPOINT", "opc.tcp://0.0.0.0:4840/env")
+OPCUA_ENABLED = os.environ.get("OPCUA_ENABLED", "1").lower() not in {"0", "false", "no"}
+opcua_runtime = {
+    "enabled": bool(OPCUA_ENABLED and Server),
+    "running": False,
+    "endpoint": OPCUA_ENDPOINT,
+    "last_error": None,
+}
 
 # ── Live sensor state ──
 sensor_state = {}
+station_overrides = {}
 _start_time = time.time()
 _lock = threading.Lock()
 
@@ -205,6 +219,35 @@ def _update_sensors():
                 15: status,
             }
 
+            override = station_overrides.get(sid, {})
+            override_until = override.get("until", 0)
+            if override and override_until and time.time() > override_until:
+                station_overrides.pop(sid, None)
+                override = {}
+
+            readings = {
+                "pm25": round(pm25, 1),
+                "pm10": round(pm10, 1),
+                "co_ppm": round(co, 2),
+                "no2_ppb": round(no2, 1),
+                "o3_ppb": round(o3, 1),
+                "so2_ppb": round(so2, 1),
+                "noise_dba": round(noise, 1),
+                "temperature_c": round(temp, 1),
+                "humidity_pct": round(humidity, 1),
+                "pressure_hpa": round(pressure, 1),
+                "wind_speed_ms": round(wind_speed, 1),
+                "wind_dir_deg": wind_dir,
+                "uv_index": round(uv, 1),
+                "rainfall_mm_h": round(rainfall, 2),
+            }
+            if override.get("readings"):
+                readings.update(override["readings"])
+            effective_aqi = int(override.get("aqi", aqi))
+            effective_status = override.get("status", ["operational", "calibrating", "fault"][status])
+            registers[14] = effective_aqi
+            registers[15] = {"operational": 0, "calibrating": 1, "fault": 2}.get(effective_status, status)
+
             sensor_state[sid] = {
                 "station_id": sid,
                 "name": cfg["name"],
@@ -212,26 +255,12 @@ def _update_sensors():
                 "location": cfg["location"],
                 "modbus_unit_id": cfg["modbus_unit_id"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "readings": {
-                    "pm25": round(pm25, 1),
-                    "pm10": round(pm10, 1),
-                    "co_ppm": round(co, 2),
-                    "no2_ppb": round(no2, 1),
-                    "o3_ppb": round(o3, 1),
-                    "so2_ppb": round(so2, 1),
-                    "noise_dba": round(noise, 1),
-                    "temperature_c": round(temp, 1),
-                    "humidity_pct": round(humidity, 1),
-                    "pressure_hpa": round(pressure, 1),
-                    "wind_speed_ms": round(wind_speed, 1),
-                    "wind_dir_deg": wind_dir,
-                    "uv_index": round(uv, 1),
-                    "rainfall_mm_h": round(rainfall, 2),
-                },
-                "aqi": aqi,
-                "aqi_category": _aqi_category(aqi),
-                "status": ["operational", "calibrating", "fault"][status],
+                "readings": readings,
+                "aqi": effective_aqi,
+                "aqi_category": _aqi_category(effective_aqi),
+                "status": effective_status,
                 "modbus_registers": registers,
+                "override_active": bool(override),
             }
 
 
@@ -252,6 +281,54 @@ def _sensor_loop():
 
 threading.Thread(target=_sensor_loop, daemon=True).start()
 _update_sensors()  # Initial reading
+
+
+def _run_native_opcua_server():
+    """Expose a real OPC UA endpoint for browse/read clients."""
+    if not opcua_runtime["enabled"]:
+        opcua_runtime["last_error"] = "python-opcua unavailable or OPC UA disabled"
+        return
+
+    try:
+        server = Server()
+        server.set_endpoint(OPCUA_ENDPOINT)
+        server.set_server_name("Smart City Environmental Sensor OPC UA Server")
+        idx = server.register_namespace(OPCUA_NAMESPACE)
+        stations_obj = server.get_objects_node().add_object(idx, "EnvironmentalStations")
+
+        node_map = {}
+        for sid, cfg in STATIONS.items():
+            station_obj = stations_obj.add_object(idx, sid)
+            station_obj.add_variable(idx, "stationName", cfg["name"]).set_writable(False)
+            for key in sensor_state.get(sid, {}).get("readings", {}).keys():
+                node_map[(sid, key)] = station_obj.add_variable(idx, key, 0.0)
+                node_map[(sid, key)].set_writable(False)
+            node_map[(sid, "AQI")] = station_obj.add_variable(idx, "AQI", 0)
+            node_map[(sid, "AQI")].set_writable(False)
+            node_map[(sid, "status")] = station_obj.add_variable(idx, "status", "operational")
+            node_map[(sid, "status")].set_writable(False)
+
+        server.start()
+        opcua_runtime["running"] = True
+        while True:
+            with _lock:
+                snapshot = dict(sensor_state)
+            for sid, state in snapshot.items():
+                for key, value in state.get("readings", {}).items():
+                    node = node_map.get((sid, key))
+                    if node is not None:
+                        node.set_value(value)
+                if node_map.get((sid, "AQI")) is not None:
+                    node_map[(sid, "AQI")].set_value(int(state.get("aqi", 0)))
+                if node_map.get((sid, "status")) is not None:
+                    node_map[(sid, "status")].set_value(str(state.get("status", "unknown")))
+            time.sleep(2)
+    except Exception as exc:
+        opcua_runtime["running"] = False
+        opcua_runtime["last_error"] = str(exc)
+
+
+threading.Thread(target=_run_native_opcua_server, daemon=True).start()
 
 
 # ── Modbus TCP Endpoint (simulated function codes) ──
@@ -296,6 +373,61 @@ def modbus_read():
             "raw": values[i] if i < len(values) else 0,
             "scaled": values[i] / MODBUS_REGISTER_MAP.get(start + i, ("", "", 1))[2] if i < len(values) and start + i in MODBUS_REGISTER_MAP else 0,
         } for i in range(min(count, 16 - start))},
+    })
+
+
+@app.route("/modbus/write", methods=["POST"])
+def modbus_write():
+    """Apply a bounded station override through a Modbus-style write interface."""
+    body = request.get_json(force=True) or {}
+    unit_id = int(body.get("unit_id", 1))
+    duration_s = max(10, min(int(body.get("duration_s", 300)), 3600))
+    register_updates = body.get("registers", {})
+
+    sid = None
+    for station_id, cfg in STATIONS.items():
+        if cfg["modbus_unit_id"] == unit_id:
+            sid = station_id
+            break
+    if not sid:
+        return jsonify({"error": "Modbus exception: unit not found", "exception_code": 0x0B}), 404
+
+    readings_override = {}
+    aqi_override = None
+    status_override = None
+    applied = {}
+    for raw_addr, raw_value in register_updates.items():
+        addr = int(raw_addr)
+        value = int(raw_value)
+        if addr not in MODBUS_REGISTER_MAP:
+            continue
+        name, _unit, scale, data_type = MODBUS_REGISTER_MAP[addr]
+        applied[str(addr)] = value
+        if addr == 14:
+            aqi_override = value
+        elif addr == 15:
+            status_override = {0: "operational", 1: "calibrating", 2: "fault"}.get(value, "fault")
+        else:
+            if data_type == "int16" and value > 32767:
+                value -= 65536
+            readings_override[name] = round(value / scale, 2)
+
+    station_overrides[sid] = {
+        "readings": readings_override,
+        "aqi": aqi_override,
+        "status": status_override,
+        "until": time.time() + duration_s,
+        "source": "modbus_write",
+    }
+    _update_sensors()
+    return jsonify({
+        "protocol": "Modbus TCP",
+        "unit_id": unit_id,
+        "station_id": sid,
+        "write_type": "holding_register_override",
+        "duration_s": duration_s,
+        "applied_registers": applied,
+        "override_active": True,
     })
 
 
@@ -390,6 +522,7 @@ def health():
         "uptime": int(time.time() - _start_time),
         "stations": len(STATIONS),
         "firmware": "v3.1.0-ENV-2024",
+        "opcua": opcua_runtime,
     })
 
 
@@ -438,6 +571,8 @@ def api_stats():
         "avg_aqi": avg_aqi,
         "aqi_category": _aqi_category(avg_aqi),
         "uptime_seconds": int(time.time() - _start_time),
+        "opcua_running": opcua_runtime["running"],
+        "opcua_endpoint": opcua_runtime["endpoint"],
     })
 
 

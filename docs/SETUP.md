@@ -119,11 +119,8 @@ If you have Docker installed:
 # Create namespaces
 kubectl apply -f k8s-manifests/namespace.yaml
 
-# Create secrets
-kubectl create secret generic ids-api-secrets \
-    --namespace=smart-city \
-    --from-literal=XAI_API_KEY="$XAI_API_KEY" \
-    --from-literal=OPENAI_API_KEY="$OPENAI_API_KEY"
+# Sync LLM/API keys from the repo-local .env file
+bash scripts/apply-llm-env-to-k8s-secret.sh .env
 
 # Deploy RBAC
 kubectl apply -f k8s-manifests/rbac.yaml
@@ -141,11 +138,20 @@ kubectl create configmap parking-system-code \
     --namespace=smart-city \
     --from-file=app.py=smart-city-services/parking-system/app.py
 
+kubectl create configmap env-sensor-code \
+    --namespace=smart-city \
+    --from-file=app.py=smart-city-services/environmental-sensor/app.py
+
+kubectl create configmap street-lighting-code \
+    --namespace=smart-city \
+    --from-file=app.py=smart-city-services/street-lighting/app.py
+
 # Deploy services
-kubectl apply -f k8s-manifests/services-no-build.yaml
-kubectl apply -f k8s-manifests/ids-api-FINAL.yaml
 kubectl apply -f k8s-manifests/mqtt-broker.yaml
-kubectl apply -f k8s-manifests/iot-simulator.yaml
+kubectl apply -f k8s-manifests/ids-api-FINAL.yaml
+kubectl apply -f k8s-manifests/services-no-build.yaml
+kubectl apply -f k8s-manifests/suricata-fixed.yaml
+kubectl apply -f k8s-manifests/falco-forwarder.yaml
 ```
 
 ### Step 6: Deploy Monitoring
@@ -331,14 +337,11 @@ kubectl describe node
 ### API Key Errors
 
 ```bash
-# Verify secret exists
-kubectl get secret ids-api-secrets -n smart-city -o yaml
+# Verify active secret exists
+kubectl get secret ids-secrets -n smart-city -o yaml
 
-# Update secret
-kubectl delete secret ids-api-secrets -n smart-city
-kubectl create secret generic ids-api-secrets \
-    --namespace=smart-city \
-    --from-literal=XAI_API_KEY="$XAI_API_KEY"
+# Update from repo-local .env
+bash scripts/apply-llm-env-to-k8s-secret.sh .env
 ```
 
 ### View Logs

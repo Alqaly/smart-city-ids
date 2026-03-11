@@ -47,8 +47,8 @@ pip install -r requirements.txt
 # Start the API
 uvicorn main:app --host 0.0.0.0 --port 8000
 
-# Dashboard: http://localhost:8000/ui
-# Health:    http://localhost:8000/health
+# Dashboard (local uvicorn only): http://localhost:8000/ui
+# Health (local uvicorn only):    http://localhost:8000/health
 ```
 
 If no LLM API key is set, startup validation fails (`Config.validate()`), and the API process exits.
@@ -57,7 +57,7 @@ If no LLM API key is set, startup validation fails (`Config.validate()`), and th
 
 ## Deploying to K3s
 
-The project uses a **Docker-free deploy** pattern — code is mounted into pods via ConfigMaps. No container registry required.
+The active Kubernetes deploy path uses a shared locally built runtime image plus ConfigMap-mounted application code. A remote container registry is not required, but the runtime image is rebuilt locally when shared dependencies change.
 
 ### Full Cluster Setup
 
@@ -79,11 +79,11 @@ This script:
 ```
 
 This script:
-1. Deletes existing ConfigMaps for IDS API and forwarders
-2. Recreates ConfigMaps from current source files on disk
-3. Deletes pods to trigger re-pull of ConfigMap data
-4. Waits for new pods to reach Ready state
-5. Reports deployment status
+1. Rebuilds and imports the active `ids-api` image if needed
+2. Reapplies the active manifests
+3. Refreshes ConfigMaps for mounted UI, forwarder, and emulator code
+4. Restarts affected workloads
+5. Verifies health and reports deployment status
 
 Use `deploy-code.sh` after editing any file in `services/ids-api/src/`, `services/ids-api/static/`, or `services/forwarders/`.
 
@@ -275,10 +275,10 @@ curl -s -X POST http://localhost:30800/api/analyst/chat \
 | Script | Purpose |
 |---|---|
 | `scripts/start-everything.sh` | Full cluster deploy (namespaces → ConfigMaps → manifests → Falco) |
-| `scripts/deploy-code.sh` | Quick code deploy (ConfigMap update + pod restart) |
+| `scripts/deploy-code.sh` | Active code/config deploy (image rebuild/import + manifest apply + ConfigMap refresh + targeted restarts) |
 | `scripts/run-live-attacks.sh` | Live attack runner (real Falco/Suricata detections via traffic/runtime behaviors) |
 | `scripts/demo-day.sh` | Guided demo orchestration (checks + pipeline/demo flow) |
-| `docs/_archive/deprecated-scripts/*` | Historical/legacy attack helpers (archived, not current workflow) |
+| `docs/archive-legacy/deprecated-scripts/*` | Historical/legacy attack helpers (archived, not current workflow) |
 | `attack-simulator/ddos_simulator.py` | Multi-threaded DDoS flood tool |
 | `attack-simulator/data_exfiltration.py` | Data exfiltration simulator |
 | `attack-simulator/privilege_escalation.py` | Privilege escalation simulator |
@@ -289,7 +289,7 @@ curl -s -X POST http://localhost:30800/api/analyst/chat \
 
 - **Do not remove** intentional vulnerabilities in `smart-city-services/` — they are the detection targets
 - **Protected services** (`healthcare-api`, `ids-api`, `postgres`) are never auto-isolated
-- **All external access** uses `localhost` NodePorts (30800, 30300, 31106) — no IP dependency
+- **Preferred local access** uses `scripts/access-stack.sh` (`http://localhost:8000`, `:3000`, `:9090`)
 - **LLM response parsing** always has a fallback (severity 5, "Policy Violation") — never crashes on bad LLM output
-- **ConfigMap-based deploys** — no Docker builds, no container registry, edit source files and run `deploy-code.sh`
+- **Shared-image + ConfigMap deploys** — `deploy-code.sh` rebuilds/imports active images and refreshes mounted code/config surfaces
 - Update `docs/` when changing architecture, thresholds, or API contracts

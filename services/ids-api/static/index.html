@@ -179,6 +179,7 @@
                     <p style="font-size:13px;color:#606080;margin:0;">All security events processed by the IDS pipeline, scored by the LLM. Severity scale: 1–3 Low, 4–5 Medium, 6–7 High, 8–10 Critical.</p>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                    <input id="alertSearchInput" oninput="app.renderAlerts()" placeholder="Search rule, summary, detector, threat..." style="min-width:280px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;" />
                     <select id="alertSevFilter" onchange="app.renderAlerts()" style="background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:#fff;font-size:13px;">
                         <option value="all">All severities</option>
                         <option value="critical">Critical (8-10)</option>
@@ -308,9 +309,9 @@
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
             <div>
                 <h3 style="font-size:15px;font-weight:700;margin:0;"><i class="fas fa-table mr-2" style="color:#38bdf8;"></i>Provider Breakdown (today)</h3>
-                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Provider Name · Status · API Calls · Tokens · Estimated Cost (token-based)</p>
+                <p style="font-size:12px;color:#606080;margin:4px 0 0;">Provider Name · Status · Alert-analysis Calls · Tokens · Estimated Cost (token-based)</p>
             </div>
-            <div style="font-size:11px;color:#606080;">Source: DB-backed usage log</div>
+            <div style="font-size:11px;color:#606080;">Source: DB-backed usage log. Manual tests and strict evaluation reanalysis (`persist=false`) appear in diagnostics/artifacts, not in these call totals.</div>
         </div>
         <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px;">
@@ -318,7 +319,7 @@
                     <tr style="text-align:left;color:#a0a0b0;border-bottom:1px solid rgba(255,255,255,0.08);">
                         <th style="padding:10px 8px;">Provider</th>
                         <th style="padding:10px 8px;">Status</th>
-                        <th style="padding:10px 8px;">API Calls</th>
+                        <th style="padding:10px 8px;">Analysis Calls</th>
                         <th style="padding:10px 8px;">Tokens</th>
                         <th style="padding:10px 8px;">Est. Cost</th>
                     </tr>
@@ -390,6 +391,12 @@
             <button id="llmRunAllTestBtn" onclick="app.runLLMTestAll()" style="padding:8px 16px;background:rgba(56,189,248,0.16);border:1px solid rgba(56,189,248,0.4);color:#7dd3fc;border-radius:8px;font-size:12px;">
                 <i class="fas fa-layer-group mr-1"></i>Test All
             </button>
+        </div>
+        <div style="margin-top:10px;display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:12px;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                <input id="llmStrictProviderTest" type="checkbox" />
+                Strict provider test (disable fallback for diagnostics)
+            </label>
         </div>
         <div id="llmTestResult" style="margin-top:12px;display:none;">
             <div style="background:#0a0a0f;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;">
@@ -724,7 +731,7 @@
         <div style="position:sticky;top:0;background:rgba(19,19,31,0.98);padding:14px 18px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <div>
                 <div style="font-size:17px;font-weight:800;">Dashboard Help</div>
-                <div style="font-size:12px;color:#94a3b8;">How to read each panel and run validation end-to-end</div>
+                <div style="font-size:12px;color:#94a3b8;">Quick guide for the live dashboard. Use the full guide for the complete operator reference.</div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <a href="/ui/static/help.html" target="_blank" rel="noopener" style="padding:7px 12px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);color:#86efac;border-radius:8px;font-size:12px;text-decoration:none;">
@@ -736,34 +743,82 @@
             </div>
         </div>
         <div style="padding:16px 18px 18px;">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                <input id="helpSearchInput" oninput="app.filterHelpContent(this.value)" placeholder="Search help: degraded, circuit open, IoT, alerts, automation..." style="flex:1;min-width:280px;background:#13131f;border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 12px;color:#fff;font-size:13px;" />
+                <button onclick="app.clearHelpSearch()" style="padding:9px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:#cbd5e1;border-radius:8px;font-size:12px;">
+                    <i class="fas fa-eraser mr-1"></i>Clear
+                </button>
+                <div id="helpSearchCount" style="font-size:11px;color:#94a3b8;">Showing all help topics</div>
+            </div>
+
+            <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(0,0,0,0.2);margin-bottom:12px;">
+                <div style="font-weight:700;font-size:13px;color:#93c5fd;margin-bottom:8px;">Practical status rule</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;"><strong style="color:#4ade80;">Green</strong><br>Working now.</div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;"><strong style="color:#facc15;">Yellow / Degraded</strong><br>Usable or partially available, but not fully healthy.</div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;"><strong style="color:#fb923c;">Orange / Circuit open</strong><br>Intentionally blocked after repeated failures.</div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;"><strong style="color:#f87171;">Red</strong><br>Failing and needs remediation.</div>
+                </div>
+            </div>
+
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-bottom:12px;">
-                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
                     <div style="font-weight:700;font-size:13px;color:#a5f3fc;margin-bottom:6px;">Overview</div>
                     <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Live system posture: alert totals, IoT activity source metadata, pipeline throughput, detector/component health, and provider status.</div>
                 </div>
-                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
                     <div style="font-weight:700;font-size:13px;color:#facc15;margin-bottom:6px;">Alerts</div>
                     <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Grouped alert history with severity, detector, namespace/pod context, LLM outcome, and full prompt/response trace viewer.</div>
                 </div>
-                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
                     <div style="font-weight:700;font-size:13px;color:#4ade80;margin-bottom:6px;">IoT Mesh</div>
                     <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Current IoT workloads and fleet telemetry. Device counts are source-qualified; degraded telemetry is explicitly labeled.</div>
                 </div>
-                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
                     <div style="font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;">LLM Control</div>
                     <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Provider health, failover chain, estimated token-cost usage, routing strategy, probe/test controls, and runtime event log.</div>
                 </div>
-                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
                     <div style="font-weight:700;font-size:13px;color:#fda4af;margin-bottom:6px;">Automation</div>
                     <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Governance mode control (`manual`, `assisted`, `autonomous`) with pending queue, live counters, and action history. Full-autonomy profile is optional and explicit.</div>
                 </div>
-                <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
+                <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(255,255,255,0.02);">
                     <div style="font-weight:700;font-size:13px;color:#fca5a5;margin-bottom:6px;">K8s Cluster</div>
                     <div style="font-size:12px;color:#a0a0b0;line-height:1.55;">Cluster component availability and infrastructure context for services and detectors.</div>
                 </div>
             </div>
 
-            <div style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(0,0,0,0.2);margin-bottom:12px;">
+            <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(0,0,0,0.2);margin-bottom:12px;">
+                <div style="font-weight:700;font-size:13px;color:#93c5fd;margin-bottom:8px;">Status glossary</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;">
+                        <strong style="color:#4ade80;">Healthy / Operational</strong><br>
+                        Live analysis or component path is working now.
+                    </div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;">
+                        <strong style="color:#facc15;">Degraded / Cooldown</strong><br>
+                        Still available, but temporarily limited after recent provider failures or partial-health warnings.
+                    </div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;">
+                        <strong style="color:#fb923c;">Circuit open</strong><br>
+                        Circuit breaker blocked more traffic after repeated failures. Use diagnostics before retrying.
+                    </div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;">
+                        <strong style="color:#f87171;">Auth failed / Unhealthy</strong><br>
+                        Invalid credentials, provider errors, or component failures need remediation.
+                    </div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;">
+                        <strong style="color:#facc15;">Analysis unverified</strong><br>
+                        Configured, but no successful alert-analysis call has completed in this process yet.
+                    </div>
+                    <div style="font-size:12px;color:#cbd5e1;line-height:1.55;">
+                        <strong style="color:#facc15;">Registered device</strong><br>
+                        Logical inventory row only. This is not proof of active hardware without recent heartbeat or telemetry.
+                    </div>
+                </div>
+            </div>
+
+            <div class="help-searchable" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:12px;background:rgba(0,0,0,0.2);margin-bottom:12px;">
                 <div style="font-weight:700;font-size:13px;color:#93c5fd;margin-bottom:8px;">Recommended run sequence (terminal)</div>
                 <pre style="margin:0;font-size:11px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap;font-family:'JetBrains Mono',monospace;">curl -s -o /dev/null -w "HEALTH:%{http_code}\n" http://localhost:30800/health
 bash scripts/test-governance-modes.sh --api-url http://localhost:30800
@@ -772,8 +827,11 @@ E2E_ENABLE_FULL_AUTONOMY=1 bash scripts/e2e-verbose-test.sh --quick
 bash scripts/run-live-attacks.sh --duration 10 --show-alerts 3 --verbose</pre>
             </div>
 
-            <div style="font-size:12px;color:#94a3b8;line-height:1.55;">
+            <div class="help-searchable" style="font-size:12px;color:#94a3b8;line-height:1.55;">
                 Tip: In Alerts, click <strong>View Full LLM Trace</strong> to inspect exact prompts, parsed output, raw completion, and trace metadata.
+            </div>
+            <div id="helpSearchEmpty" style="display:none;margin-top:12px;padding:14px;border:1px dashed rgba(255,255,255,0.14);border-radius:10px;color:#94a3b8;font-size:12px;">
+                No help topics matched this search. Try terms like <code>degraded</code>, <code>circuit open</code>, <code>alerts</code>, <code>iot</code>, or <code>automation</code>.
             </div>
         </div>
     </div>
@@ -930,16 +988,44 @@ function isPlatformAlert(a) {
     return ns === 'monitoring' || ns === 'falco-system' || ns === 'kube-system';
 }
 
+function alertThreatType(a) {
+    const analysis = (a && typeof a.analysis === 'object' && a.analysis) ? a.analysis : {};
+    const f = alertFields(a);
+    return String(
+        a.threat_type ||
+        analysis.threat_type ||
+        f['threat.type'] ||
+        f['alert.signature'] ||
+        ''
+    ).toLowerCase();
+}
+
+function isValidationAlert(a) {
+    const rule = String(a?.rule || '').toLowerCase();
+    const summary = String(a?.summary || '').toLowerCase();
+    return rule.includes('governance mode validation') || summary.includes('governance mode validation');
+}
+
+function alertTimeBucket(a, bucketMinutes = 5) {
+    const raw = a?.timestamp || a?.time || '';
+    const ts = new Date(raw).getTime();
+    if (Number.isNaN(ts)) return 'unknown-time';
+    return String(Math.floor(ts / (Math.max(1, bucketMinutes) * 60 * 1000)));
+}
+
 function alertFingerprint(a) {
-    const ts = String(a.timestamp || '').slice(0, 19); // second-level grouping
+    // Group repeated detector bursts into a readable incident row instead of
+    // preserving per-second duplicates that hide less frequent sources.
     return [
-        ts,
+        alertTimeBucket(a, 5),
         a.source || '',
         a.rule || '',
         a.severity || '',
         alertNamespace(a),
+        alertPod(a),
         alertContainer(a),
-        a.summary || '',
+        alertSignatureId(a),
+        alertThreatType(a),
     ].join('|');
 }
 
@@ -949,34 +1035,160 @@ function collapseAlerts(rows) {
     for (const a of (rows || [])) {
         const key = alertFingerprint(a);
         if (!map.has(key)) {
-            const copy = { ...a, _repeat_count: 1 };
+            const copy = {
+                ...a,
+                _repeat_count: 1,
+                _first_seen: a.timestamp || a.time || '',
+                _last_seen: a.timestamp || a.time || '',
+            };
             map.set(key, copy);
             out.push(copy);
         } else {
-            map.get(key)._repeat_count += 1;
+            const existing = map.get(key);
+            existing._repeat_count += 1;
+            const nextTs = new Date(a.timestamp || a.time || 0).getTime();
+            const currentTs = new Date(existing.timestamp || existing.time || 0).getTime();
+            if (!Number.isNaN(nextTs) && (Number.isNaN(currentTs) || nextTs > currentTs)) {
+                existing.timestamp = a.timestamp;
+                existing.time = a.time;
+                existing.summary = a.summary || existing.summary;
+                existing.analysis = a.analysis || existing.analysis;
+                existing.analysis_present = a.analysis_present || existing.analysis_present;
+                existing.llm_engine = a.llm_engine || existing.llm_engine;
+                existing.raw_alert = a.raw_alert || existing.raw_alert;
+                existing.automated_actions = a.automated_actions || existing.automated_actions;
+                existing.trace_id = a.trace_id || existing.trace_id;
+                existing.id = a.id || existing.id;
+                existing.alert_id = a.alert_id || existing.alert_id;
+            }
+            existing._last_seen = a.timestamp || a.time || existing._last_seen;
         }
     }
-    return out;
+    return out.sort((a, b) => {
+        const aTs = new Date(a.timestamp || a.time || 0).getTime();
+        const bTs = new Date(b.timestamp || b.time || 0).getTime();
+        return (Number.isNaN(bTs) ? 0 : bTs) - (Number.isNaN(aTs) ? 0 : aTs);
+    });
 }
 
-function providerUiMeta(name, statusStr, creditInfo) {
-    const isConfigured = statusStr.includes('configured') && !statusStr.includes('not configured');
+function providerUiMeta(name, statusStr, creditInfo, diagInfo) {
+    const status = String(diagInfo?.status || '').toLowerCase();
+    const isConfigured = !!diagInfo?.configured || (statusStr.includes('configured') && !statusStr.includes('not configured'));
     const circuitMatch = statusStr.match(/circuit:\s*(\w+)/i);
-    const circuitState = (circuitMatch ? circuitMatch[1] : 'closed').toLowerCase();
+    const circuitState = String(diagInfo?.circuit_breaker_state || (circuitMatch ? circuitMatch[1] : 'closed')).toLowerCase();
     const creditStatus = String(creditInfo?.status || 'unknown').toLowerCase();
     const creditErr = String(creditInfo?.error_message || '').toLowerCase();
     const apiReachable = !!creditInfo?.api_reachable;
-    const hasCreditValue = creditInfo?.credits != null;
+    const hasCreditValue = creditInfo?.credits != null || creditInfo?.total_granted != null || creditInfo?.total_used != null;
+    const successfulAnalyses = Number(diagInfo?.successes || 0);
 
-    if (!isConfigured) return { label: 'Not configured', tone: 'muted' };
-    if (circuitState === 'open') return { label: 'Circuit open (reset/probe to retry)', tone: 'bad' };
-    if (creditErr.includes('invalid api key') || creditErr.includes('api key') || creditErr.includes('auth')) {
-        return { label: 'Key invalid / expired', tone: 'bad' };
+    const meta = {
+        label: 'Configured',
+        tone: 'warn',
+        analysisLabel: 'Configured',
+        analysisTone: 'warn',
+        billingLabel: 'Not checked',
+        billingTone: 'muted',
+        balanceLabel: 'Not exposed',
+        balanceTone: 'muted',
+        hint: '',
+    };
+
+    if (!isConfigured) {
+        meta.label = 'Not configured';
+        meta.tone = 'muted';
+        meta.analysisLabel = 'Not configured';
+        meta.analysisTone = 'muted';
+        meta.billingLabel = 'Not configured';
+        meta.billingTone = 'muted';
+        meta.hint = 'Provider is optional and currently disabled.';
+        return meta;
     }
-    if (creditStatus === 'ok' && hasCreditValue) return { label: 'Ready (credit verified)', tone: 'good' };
-    if (apiReachable && creditStatus === 'ok') return { label: 'Ready (API reachable)', tone: 'good' };
-    if (apiReachable) return { label: 'Connected (credit unknown)', tone: 'warn' };
-    return { label: 'Configured (not verified)', tone: 'warn' };
+
+    if (status === 'auth_failed' || creditErr.includes('invalid api key')) {
+        meta.label = 'Analysis auth failed';
+        meta.tone = 'bad';
+        meta.analysisLabel = 'Auth failed';
+        meta.analysisTone = 'bad';
+        meta.hint = 'Action: update API key and redeploy to restore this provider.';
+    } else if (status === 'unverified') {
+        meta.label = 'Analysis unverified';
+        meta.tone = 'warn';
+        meta.analysisLabel = 'Unverified (no successful call yet)';
+        meta.analysisTone = 'warn';
+        meta.hint = 'Configured, but no successful alert-analysis call has been recorded yet in this process.';
+    } else if (status === 'operational') {
+        if (successfulAnalyses > 0) {
+            meta.label = 'Analysis verified';
+            meta.tone = 'good';
+            meta.analysisLabel = 'Working';
+            meta.analysisTone = 'good';
+        } else {
+            meta.label = 'Analysis unverified';
+            meta.tone = 'warn';
+            meta.analysisLabel = 'Unverified (no successful call yet)';
+            meta.analysisTone = 'warn';
+        }
+    } else if (status === 'cooldown') {
+        meta.label = 'Analysis cooling down';
+        meta.tone = 'warn';
+        meta.analysisLabel = 'Cooldown';
+        meta.analysisTone = 'warn';
+        meta.hint = 'Temporary provider cooldown after a recent failure. It will retry automatically.';
+    } else if (status === 'recovering') {
+        meta.label = 'Analysis recovering';
+        meta.tone = 'warn';
+        meta.analysisLabel = 'Recovering';
+        meta.analysisTone = 'warn';
+    } else if (status === 'error') {
+        meta.label = 'Analysis error';
+        meta.tone = 'bad';
+        meta.analysisLabel = 'Error';
+        meta.analysisTone = 'bad';
+        meta.hint = 'Provider is configured but the last analysis path failed.';
+    }
+
+    if (circuitState === 'open') {
+        meta.label = 'Circuit open';
+        meta.tone = 'bad';
+        meta.analysisLabel = 'Circuit open';
+        meta.analysisTone = 'bad';
+        meta.hint = 'Circuit breaker is open after repeated failures. Reset or wait before retrying.';
+    }
+
+    if (creditStatus === 'ok' && apiReachable) {
+        meta.billingLabel = 'Reachable';
+        meta.billingTone = 'good';
+    } else if (creditStatus === 'error' && apiReachable) {
+        meta.billingLabel = 'Reachable, billing restricted';
+        meta.billingTone = 'warn';
+    } else if (creditStatus === 'error') {
+        meta.billingLabel = 'Health check failed';
+        meta.billingTone = 'bad';
+    } else if (apiReachable) {
+        meta.billingLabel = 'Reachable';
+        meta.billingTone = 'good';
+    }
+
+    if (hasCreditValue) {
+        meta.balanceLabel = 'Exposed';
+        meta.balanceTone = 'good';
+    } else if (apiReachable) {
+        meta.balanceLabel = 'Not exposed';
+        meta.balanceTone = 'muted';
+    }
+
+    if (!meta.hint && status === 'operational' && successfulAnalyses === 0 && creditStatus === 'error' && !apiReachable) {
+        meta.hint = 'No successful analysis call has been recorded in this process, and the provider health/billing path is currently failing. Do not treat this provider as proven operational until a strict test succeeds.';
+    } else if (!meta.hint && status === 'operational' && creditStatus === 'error' && apiReachable) {
+        meta.hint = 'Analysis works, but billing or credit metadata could not be verified with the configured account permissions.';
+    } else if (!meta.hint && status === 'operational' && apiReachable && !hasCreditValue) {
+        meta.hint = 'Analysis path is usable. This provider/account path does not expose a balance figure in the dashboard.';
+    } else if (!meta.hint && status === 'operational' && successfulAnalyses === 0) {
+        meta.hint = 'Configured, but no successful alert-analysis call has been recorded yet in this process.';
+    }
+
+    return meta;
 }
 
 function ruleHelpMeta(a) {
@@ -1126,10 +1338,11 @@ const api = {
             body: JSON.stringify({ provider, prompt }) 
         });
     },
-    testProviderByName(provider, prompt) {
-        return this._fetch(`/api/llm/test/${provider}`, { 
+    testProviderByName(provider, prompt, strict=false) {
+        const qs = new URLSearchParams({ strict: String(!!strict) }).toString();
+        return this._fetch(`/api/llm/test/${provider}?${qs}`, {
             method: 'POST', 
-            body: JSON.stringify({ prompt }) 
+            body: JSON.stringify({ prompt, strict: !!strict })
         });
     },
     forceProviderByName(provider) {
@@ -1147,7 +1360,7 @@ const api = {
     retryAllLLMProviders() {
         return this._fetch('/api/llm/retry-all', { method: 'POST' });
     },
-    getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||50}`); },
+    getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||120}`); },
     getIoT()      { return this._pub('/api/iot/devices'); },
     getPipeline() { return this._pub('/api/pipeline-overview'); },
     getDedupStats(){ return this._pub('/api/deduplicator-stats'); },
@@ -1257,21 +1470,21 @@ const render = {
             const iot      = metrics.iot_devices_active||0;
             const iotMeta  = metrics.iot_devices_active_meta||{};
             const dedupHitPct = (dedup?.hit_rate_percent ?? pipeline?.stages?.find?.(s => s.id === 'ingest')?.dedup_hit_rate_percent);
-            const fatigue = pipeline?.alert_fatigue || {};
-            const reductionPct = (fatigue?.reduction_percent ?? metrics?.alert_reduction_percentage);
             const costSaved = (dedup?.cost_saved_usd != null ? Number(dedup.cost_saved_usd) : null);
-            const dedupValue = (reductionPct != null && isFinite(Number(reductionPct)))
-                ? `${Number(reductionPct).toFixed(1)}%`
-                : (dedupHitPct != null && isFinite(Number(dedupHitPct)) ? `${Number(dedupHitPct).toFixed(1)}%` : '—');
-            const dedupSub = (costSaved != null)
-                ? `LLM cost saved ~$${costSaved.toFixed(2)} · hit-rate ${dedupHitPct != null ? Number(dedupHitPct).toFixed(1) + '%' : '—'}`
-                : (dedupHitPct != null ? `Dedup cache hit-rate ${Number(dedupHitPct).toFixed(1)}%` : 'Duplicate alerts suppressed before re-analysis');
+            const dedupTotal = Number(dedup?.total_alerts || 0);
+            const dedupHasData = dedupTotal > 0;
+            const dedupValue = dedupHasData && dedupHitPct != null && isFinite(Number(dedupHitPct))
+                ? `${Number(dedupHitPct).toFixed(1)}%`
+                : '—';
+            const dedupSub = dedupHasData
+                ? `Dedup cache hit-rate ${dedupHitPct != null ? Number(dedupHitPct).toFixed(1) + '%' : '—'} · est. LLM cost avoided ~$${Number(costSaved || 0).toFixed(2)}`
+                : 'No duplicate security alerts observed yet in this process';
             const rlStats = rateLimiter?.stats || {};
             const throttled = Number(rlStats.total_throttled || 0);
             const rlReceived = Number(rlStats.total_received || 0);
             const rlProcessed = Number(rlStats.total_processed || 0);
             const rlPct = Number(rlStats.throttle_rate_percent || 0);
-            const rlWindow = Number(rateLimiter?.config?.window_seconds || 60);
+            const rlSince = String(rlStats.stats_since || '').replace('T', ' ').slice(0, 19);
             const floodColor = throttled > 0 ? (rlPct >= 80 ? '#facc15' : '#4ade80') : '#94a3b8';
             const critPct  = total>0 ? Math.round(crit/total*100) : 0;
             const iotSub = (()=>{
@@ -1293,7 +1506,7 @@ const render = {
                 <div class="stat-card"><div class="stat-label">Critical Alerts</div><div class="stat-value" style="color:#f87171;">${crit}</div><div class="stat-sub">Severity 8–10 &nbsp;(${critPct}% of total)</div></div>
                 <div class="stat-card"><div class="stat-label">IoT Devices</div><div class="stat-value" style="color:${iotMeta.degraded ? '#facc15' : '#4ade80'};">${iot}</div><div class="stat-sub">${esc(iotSub)}</div></div>
                 <div class="stat-card"><div class="stat-label">Dedup + LLM Savings</div><div class="stat-value" style="color:#ffaa00;">${dedupValue}</div><div class="stat-sub">${esc(dedupSub)}</div></div>
-                <div class="stat-card"><div class="stat-label">Flood Suppression</div><div class="stat-value" style="color:${floodColor};">${throttled.toLocaleString()}</div><div class="stat-sub">${rlReceived>0 ? `${rlProcessed}/${rlReceived} alerts processed in ${rlWindow}s window · ${rlPct.toFixed(1)}% throttled` : 'No throttling in current window'}</div></div>
+                <div class="stat-card"><div class="stat-label">Flood Suppression</div><div class="stat-value" style="color:${floodColor};">${throttled.toLocaleString()}</div><div class="stat-sub">${rlReceived>0 ? `${rlProcessed}/${rlReceived} alerts processed since ${rlSince || 'startup'} · ${rlPct.toFixed(1)}% throttled` : 'No alert-rate throttling observed since startup/reset'}</div></div>
                 <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value" style="color:#a78bfa;">${uptime}</div><div class="stat-sub">IDS API process uptime</div></div>`;
         }
         const pe=$('pipelineOverview');
@@ -1320,13 +1533,16 @@ const render = {
         }
         const af=$('alertFeed');
         if (af && alerts?.alerts) {
-            const recent=collapseAlerts(alerts.alerts).slice(0,10);
+            const grouped = collapseAlerts(alerts.alerts);
+            const signal = grouped.filter(a => !isValidationAlert(a));
+            const recent=(signal.length ? signal : grouped).slice(0,10);
             af.innerHTML = recent.length===0
                 ? '<div style="color:#606080;font-size:13px;padding:8px 0;">No alerts yet. Generate real detections by running <strong>scripts/run-live-attacks.sh</strong>.</div>'
                 : recent.map(a=>{
                     const s=sevInfo(a.severity);
                     const ns=alertNamespace(a);
                     const guide = ruleHelpMeta(a);
+                    const pod = alertPod(a) || alertContainer(a) || 'unknown workload';
                     const repeat=a._repeat_count>1?`<span style="margin-left:6px;padding:1px 6px;border-radius:999px;background:rgba(250,204,21,0.14);color:#facc15;font-size:10px;font-weight:700;">x${a._repeat_count}</span>`:'';
                     const platform=isPlatformAlert(a)?`<span style="margin-left:6px;padding:1px 6px;border-radius:999px;background:rgba(148,163,184,0.12);color:#94a3b8;font-size:10px;">platform</span>`:'';
                     return `<div class="alert-row">
@@ -1335,14 +1551,15 @@ const render = {
                         <span style="padding:2px 7px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(a.source||'falco')}${ns?` · ${esc(ns)}`:''}</span>
                         <span style="flex:1;font-size:12px;color:#c0c0d0;">
                             ${esc(a.rule||'Unknown Rule')}${repeat}${platform}
+                            <div style="font-size:10px;color:#64748b;margin-top:2px;">${esc(pod)}</div>
                             ${guide?.short ? `<div style="font-size:10px;color:#94a3b8;margin-top:2px;">${esc(guide.short)}</div>` : ''}
                         </span>
                     </div>`;
                 }).join('');
         }
         this.health(health);
-        this.llmProviders(health, data.credits);
-        this.pills(health, data.gov, data.credits);
+        this.llmProviders(health, data.credits, data.llmDiag);
+        this.pills(health, data.gov, data.credits, data.llmDiag);
     },
     health(health) {
         const el=$('systemHealth'); if(!el) return;
@@ -1360,11 +1577,12 @@ const render = {
             row('Suricata', c.suricata, c.suricata==='enabled'?'Enabled':'Disabled', c.suricata==='enabled'?'ok':'err', 'Network traffic detection');
     },
     // Combined LLM Providers panel - merges health status and credits
-    llmProviders(health, credits) {
+    llmProviders(health, credits, llmDiag) {
         const el=$('llmProvidersPanel'); if(!el) return;
 
         const DISPLAY={'xai':'xAI Grok','openai':'OpenAI','anthropic':'Claude','gemini':'Gemini','kimi':'Kimi'};
         const prov=health?.components?.llm_providers||{};
+        const diagMap=llmDiag?.providers||{};
         const names=Object.keys(prov).sort();
 
         if (!names.length) {
@@ -1383,18 +1601,22 @@ const render = {
             const statusStr = String(prov[name] || '');
             const statusLower = statusStr.toLowerCase();
             const creditInfo = credits?.[name] || {};
+            const diagInfo = diagMap?.[name] || {};
             const displayName = DISPLAY[name] || name;
-            const meta = providerUiMeta(name, statusLower, creditInfo);
+            const meta = providerUiMeta(name, statusLower, creditInfo, diagInfo);
             const tone = toneMap[meta.tone] || toneMap.muted;
-            const errorText = String(creditInfo.error_message || '');
+            const errorText = String(diagInfo.reason || creditInfo.error_message || '');
 
             const details = [];
             if (statusLower.includes('not configured')) details.push('No API key configured');
             else if (statusLower.includes('configured')) details.push('API key configured');
 
+            if (diagInfo.model) details.push(`Model: ${diagInfo.model}`);
+            if (diagInfo.attempts != null) details.push(`Analysis attempts ${diagInfo.attempts} · successes ${diagInfo.successes || 0} · failures ${diagInfo.failures || 0}`);
+            if (diagInfo.last_latency_ms != null) details.push(`Last analysis latency ${Math.round(Number(diagInfo.last_latency_ms))}ms`);
             if (creditInfo.api_reachable) {
                 const ms = creditInfo.response_time_ms != null ? ` (${Math.round(Number(creditInfo.response_time_ms))}ms)` : '';
-                details.push(`Provider API reachable${ms}`);
+                details.push(`Billing/API endpoint reachable${ms}`);
             }
 
             if (creditInfo.credits != null) {
@@ -1404,24 +1626,11 @@ const render = {
                 const granted = creditInfo.total_granted != null ? Number(creditInfo.total_granted).toFixed(2) : '—';
                 details.push(`Credits used ${used} / granted ${granted}`);
             } else if (creditInfo.api_reachable) {
-                details.push('Credit balance not exposed by provider');
+                details.push('Balance endpoint not exposed or not permitted');
             }
 
             if (creditInfo.rate_limit_remaining != null) {
                 details.push(`Rate limit remaining: ${creditInfo.rate_limit_remaining}`);
-            }
-
-            let hint = '';
-            if (meta.label === 'Key invalid / expired') {
-                hint = 'Action: update API key to enable this provider.';
-            } else if (meta.label.includes('Circuit open')) {
-                hint = 'Action: circuit breaker is open after repeated failures; use Reset All Providers or wait, then probe again.';
-            } else if (meta.label === 'Connected (credit unknown)') {
-                hint = 'Usable now. This provider/API does not expose a balance endpoint in this dashboard.';
-            } else if (meta.label === 'Configured (not verified)') {
-                hint = 'Configured, but no successful health check has completed yet.';
-            } else if (meta.label === 'Not configured') {
-                hint = 'Provider is optional and currently disabled.';
             }
 
             return `
@@ -1431,9 +1640,14 @@ const render = {
                         <span style="font-size:13px;flex:1;font-weight:600;">${esc(displayName)}</span>
                         <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:${tone.bg};color:${tone.fg};font-weight:700;">${esc(meta.label)}</span>
                     </div>
+                    <div style="margin-left:18px;margin-top:4px;font-size:11px;color:#cbd5e1;line-height:1.55;">
+                        <div><strong>Analysis:</strong> <span style="color:${(toneMap[meta.analysisTone] || toneMap.muted).fg};">${esc(meta.analysisLabel)}</span></div>
+                        <div><strong>Billing endpoint:</strong> <span style="color:${(toneMap[meta.billingTone] || toneMap.muted).fg};">${esc(meta.billingLabel)}</span></div>
+                        <div><strong>Balance visibility:</strong> <span style="color:${(toneMap[meta.balanceTone] || toneMap.muted).fg};">${esc(meta.balanceLabel)}</span></div>
+                    </div>
                     ${details.length ? `<div style="margin-left:18px;margin-top:3px;font-size:11px;color:#a0a0b0;line-height:1.45;">${esc(details.join(' · '))}</div>` : ''}
                     ${errorText ? `<div style="margin-left:18px;margin-top:4px;font-size:11px;color:${meta.tone==='bad'?'#fda4af':'#facc15'};">${esc(errorText)}</div>` : ''}
-                    ${hint ? `<div style="margin-left:18px;margin-top:4px;font-size:11px;color:#94a3b8;">${esc(hint)}</div>` : ''}
+                    ${meta.hint ? `<div style="margin-left:18px;margin-top:4px;font-size:11px;color:#94a3b8;">${esc(meta.hint)}</div>` : ''}
                 </div>
             `;
         }).join('');
@@ -1441,18 +1655,18 @@ const render = {
         const summary = (() => {
             let ready = 0, usable = 0, issues = 0;
             for (const name of names) {
-                const meta = providerUiMeta(name, String(prov[name] || '').toLowerCase(), credits?.[name] || {});
+                const meta = providerUiMeta(name, String(prov[name] || '').toLowerCase(), credits?.[name] || {}, diagMap?.[name] || {});
                 if (meta.tone === 'good') ready++;
-                if (meta.tone === 'good' || meta.label === 'Connected (credit unknown)') usable++;
+                if (meta.analysisTone === 'good') usable++;
                 if (meta.tone === 'bad') issues++;
             }
-            return `Usable providers: ${usable}/${names.length} · Verified ready: ${ready} · Issues: ${issues}`;
+            return `Analysis-usable providers: ${usable}/${names.length} · Verified analysis path: ${ready} · Issues: ${issues}`;
         })();
 
         el.innerHTML = cards +
         `<div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1);">
             <div style="font-size:11px;color:#94a3b8;line-height:1.45;">${esc(summary)}</div>
-            <div style="font-size:11px;color:#606080;line-height:1.45;margin-top:4px;">Ready = usable and health-checked. Connected (credit unknown) = API responds, but balance is not available from provider API.</div>
+            <div style="font-size:11px;color:#606080;line-height:1.45;margin-top:4px;">Analysis = live alert-analysis path. Billing endpoint = provider credit/billing check path. Balance visibility = whether the provider/account exposes a usable balance value.</div>
         </div>
         <div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.08);cursor:pointer;" onclick="app.switchTab('llm-control')">
             <div style="font-size:11px;color:#606080;text-align:center;">
@@ -1460,7 +1674,7 @@ const render = {
             </div>
         </div>`;
     },
-    pills(health, gov, creditsData) {
+    pills(health, gov, creditsData, llmDiag) {
         // Kubernetes pill
         const cp=$('clusterPill'); 
         if(cp) {
@@ -1475,20 +1689,21 @@ const render = {
         if(lp && health) {
             const prov = health?.components?.llm_providers || {};
             const credits = creditsData || {};  // credits passed to render.llmProviders
+            const diagMap = llmDiag?.providers || {};
             const total = Object.keys(prov).length;
             let usable = 0;
             let verified = 0;
             Object.entries(prov).forEach(([name, status]) => {
-                const meta = providerUiMeta(name, String(status || '').toLowerCase(), credits[name] || {});
-                if (meta.tone === 'good') verified++;
-                if (meta.tone === 'good' || meta.label === 'Connected (credit unknown)') usable++;
+                const meta = providerUiMeta(name, String(status || '').toLowerCase(), credits[name] || {}, diagMap[name] || {});
+                if (meta.analysisTone === 'good') verified++;
+                if (meta.analysisTone === 'good') usable++;
             });
 
             const hasLLM = total > 0;
             const allOK = usable === total && total > 0;
             lp.className='pill '+(allOK?'pill-ok':(usable>0?'pill-warn':'pill-err'));
             lp.textContent=hasLLM?`● LLM ${usable}/${total}`:'● No LLM';
-            lp.title = hasLLM ? `${usable}/${total} usable, ${verified}/${total} verified-ready` : 'No LLM providers configured';
+            lp.title = hasLLM ? `${usable}/${total} analysis-usable, ${verified}/${total} verified analysis path` : 'No LLM providers configured';
         }
         
         // Automation/Governance pill
@@ -1792,7 +2007,7 @@ const render = {
             costEl.textContent = '$' + (isFinite(costToday) ? costToday.toFixed(2) : '0.00');
             costEl.style.color = (costToday > threshold) ? '#f87171' : '#4ade80';
         }
-        if (costSubEl) costSubEl.textContent = `${callsToday.toLocaleString()} calls today · estimated cost · threshold $${threshold.toFixed(2)}`;
+        if (costSubEl) costSubEl.textContent = `${callsToday.toLocaleString()} alert-analysis calls today · estimated cost · threshold $${threshold.toFixed(2)}`;
 
         // Weekly totals (last 7 days)
         const wTotals = usageWeek?.totals || {};
@@ -1803,7 +2018,7 @@ const render = {
         const costWeek = Number(wTotals.estimated_cost_usd || 0);
 
         if (costWeekEl) costWeekEl.textContent = '$' + (isFinite(costWeek) ? costWeek.toFixed(2) : '0.00');
-        if (costWeekSubEl) costWeekSubEl.textContent = `${callsWeek.toLocaleString()} calls · estimated cost · window: last 7 days`;
+        if (costWeekSubEl) costWeekSubEl.textContent = `${callsWeek.toLocaleString()} alert-analysis calls · estimated cost · window: last 7 days`;
         if (tokensWeekEl) tokensWeekEl.textContent = isFinite(tokensWeek) ? tokensWeek.toLocaleString() : '0';
         if (tokensWeekSubEl) tokensWeekSubEl.textContent = `prompt ${promptWeek.toLocaleString()} · completion ${completionWeek.toLocaleString()}`;
         if (callsWeekEl) callsWeekEl.textContent = isFinite(callsWeek) ? callsWeek.toLocaleString() : '0';
@@ -1820,13 +2035,14 @@ const render = {
             const statusPill = (raw) => {
                 const s = String(raw||'unknown').toLowerCase();
                 if (s === 'operational' || s === 'healthy') return { label: 'Healthy', c: '#4ade80', bg: 'rgba(34,197,94,0.12)', bd:'rgba(34,197,94,0.25)' };
+                if (s === 'unverified') return { label: 'Unverified', c: '#facc15', bg: 'rgba(250,204,21,0.12)', bd:'rgba(250,204,21,0.25)' };
                 if (s === 'degraded' || s === 'cooldown' || s === 'warning') return { label: 'Degraded', c: '#facc15', bg: 'rgba(250,204,21,0.12)', bd:'rgba(250,204,21,0.25)' };
                 if (s === 'not_configured') return { label: 'Not Configured', c: '#a0a0b0', bg: 'rgba(160,160,176,0.10)', bd:'rgba(160,160,176,0.18)' };
                 return { label: 'Unhealthy', c: '#f87171', bg: 'rgba(248,113,113,0.12)', bd:'rgba(248,113,113,0.25)' };
             };
 
             if (!providers.length) {
-                tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 8px;color:#606080;">No LLM calls logged today yet.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 8px;color:#606080;">No alert-analysis calls have been logged today yet. Manual provider probes and strict evaluation reanalysis (`persist=false`) are shown in diagnostics/artifacts, not in this DB-backed table.</td></tr>';
             } else {
                 tbody.innerHTML = providers
                     .slice()
@@ -1835,12 +2051,13 @@ const render = {
                         const name = String(p.provider||'unknown');
                         const diag = diagByName[name.toLowerCase()] || {};
                         const st = statusPill(diag.status);
+                        const diagAttempts = Number(diag.attempts || 0);
                         const pill = `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:${st.bg};border:1px solid ${st.bd};color:${st.c};font-weight:700;font-size:11px;">${esc(st.label)}</span>`;
                         return `
                             <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
                                 <td style="padding:10px 8px;color:#fff;font-weight:800;">${esc(name.toUpperCase())}</td>
                                 <td style="padding:10px 8px;">${pill}</td>
-                                <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;">${Number(p.calls||0).toLocaleString()}</td>
+                                <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;" title="DB-backed alert-analysis calls. Runtime probes and manual tests are counted separately.">${Number(p.calls||0).toLocaleString()}<div style="font-size:10px;color:#64748b;margin-top:2px;">diag ${diagAttempts.toLocaleString()}</div></td>
                                 <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;">${Number(p.tokens||0).toLocaleString()}</td>
                                 <td style="padding:10px 8px;color:#a0a0b0;font-family:monospace;">$${Number(p.estimated_cost_usd||0).toFixed(4)}</td>
                             </tr>
@@ -1910,7 +2127,7 @@ const render = {
             const card = this._createProviderCard(name, p);
             if (p.status === 'operational' || p.status === 'healthy') {
                 operational.push(card);
-            } else if (p.status === 'cooldown' || p.status === 'degraded') {
+            } else if (p.status === 'cooldown' || p.status === 'degraded' || p.status === 'unverified') {
                 degraded.push(card);
             } else {
                 failed.push(card);
@@ -1936,6 +2153,7 @@ const render = {
         const isOk = status === 'operational' || status === 'healthy';
         const isCooldown = status === 'cooldown';
         const isCircuitOpen = status === 'circuit_open';
+        const isUnverified = status === 'unverified';
         
         let statusIcon = 'fa-circle';
         let statusColor = '#606080';
@@ -1948,15 +2166,19 @@ const render = {
 
         const statusText =
             isOk ? 'Healthy' :
+            isUnverified ? 'Analysis unverified' :
             isCooldown ? `Cooldown${p?.cooldown_remaining_seconds ? ` (${p.cooldown_remaining_seconds}s)` : ''}` :
             isCircuitOpen ? 'Circuit open (retry/reset needed)' :
             status === 'not_configured' ? 'Not configured' :
             (p?.reason || status);
+        const attemptsMeta = Number(p?.attempts || 0) > 0
+            ? `${Number(p.attempts || 0).toLocaleString()} runtime attempts · ${Number(p.successes || 0).toLocaleString()} ok · ${Number(p.failures || 0).toLocaleString()} failed`
+            : 'No runtime analysis attempts yet in this process';
         
-        return `<div class="provider-card ${isOk ? 'operational' : (isCooldown || isCircuitOpen) ? 'degraded' : 'failed'}">
+        return `<div class="provider-card ${isOk ? 'operational' : (isCooldown || isCircuitOpen || isUnverified) ? 'degraded' : 'failed'}">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="provider-status-dot ${isOk ? 'operational' : (isCooldown || isCircuitOpen) ? 'degraded' : 'failed'}"></span>
+                    <span class="provider-status-dot ${isOk ? 'operational' : (isCooldown || isCircuitOpen || isUnverified) ? 'degraded' : 'failed'}"></span>
                     <strong style="font-size:14px;text-transform:uppercase;">${name}</strong>
                 </div>
                 <span style="font-size:11px;color:#606080;background:rgba(0,0,0,0.3);padding:2px 8px;border-radius:4px;">${p?.model || 'unknown'}</span>
@@ -1965,6 +2187,7 @@ const render = {
                 <i class="fas ${statusIcon}" style="color:${statusColor};margin-right:4px;"></i>${esc(statusText)}
             </div>
             ${p?.reason ? `<div style="font-size:11px;color:#606080;margin:-2px 0 8px 0;line-height:1.35;">${esc(String(p.reason).slice(0,180))}</div>` : ''}
+            <div style="font-size:10px;color:#64748b;margin:-2px 0 8px 0;line-height:1.35;">${esc(attemptsMeta)}</div>
             <div style="display:flex;gap:6px;">
                 <button onclick="app.testProviderKey('${name}')" style="padding:5px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:11px;">Test Key</button>
                 <button onclick="app.probeProvider('${name}')" style="padding:5px 10px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:6px;font-size:11px;">Probe</button>
@@ -1988,10 +2211,10 @@ const render = {
                 const attempts = Number(r.attempts ?? 0);
                 const hasDbOnlyHistory = calls > attempts;
                 const successRate = Number(r.success_rate || 0);
-                const successLabel = hasDbOnlyHistory ? 'N/A' : `${Math.round(successRate * 100)}%`;
+                const successLabel = hasDbOnlyHistory ? 'Hist' : `${Math.round(successRate * 100)}%`;
                 const successBg = hasDbOnlyHistory ? 'rgba(148,163,184,0.12)' : (successRate >= 0.9 ? 'rgba(34,197,94,0.15)' : 'rgba(250,204,21,0.15)');
                 const successColor = hasDbOnlyHistory ? '#94a3b8' : (successRate >= 0.9 ? '#4ade80' : '#facc15');
-                return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px;font-weight:600;">${r.provider?.toUpperCase() || '—'}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${calls.toLocaleString()}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${Number(r.tokens_total || 0).toLocaleString()}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">$${Number(r.total_estimated_cost_usd || 0).toFixed(3)}</td><td style="padding:10px;text-align:center;"><span title="${hasDbOnlyHistory ? 'Historical DB usage; runtime success counters reset after restart' : 'Runtime success rate'}" style="padding:2px 8px;border-radius:4px;font-size:11px;background:${successBg};color:${successColor};">${successLabel}</span></td></tr>`;
+                return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);"><td style="padding:10px;font-weight:600;">${r.provider?.toUpperCase() || '—'}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${calls.toLocaleString()}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">${Number(r.tokens_total || 0).toLocaleString()}</td><td style="padding:10px;text-align:right;color:#c0c0d0;">$${Number(r.total_estimated_cost_usd || 0).toFixed(3)}</td><td style="padding:10px;text-align:center;"><span title="${hasDbOnlyHistory ? 'Historical DB usage exists, but runtime success counters were reset after restart' : 'Runtime success rate'}" style="padding:2px 8px;border-radius:4px;font-size:11px;background:${successBg};color:${successColor};">${successLabel}</span></td></tr>`;
             }).join('') +
             '</tbody></table>';
     },
@@ -2030,16 +2253,45 @@ const render = {
         const el=$('alertsTable'); if(!el) return;
         if (!data?.alerts) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">Failed to load alerts.</div>'; return; }
         let rawRows=data.alerts;
+        const search = String($('alertSearchInput')?.value || '').trim().toLowerCase();
         if (sevFilter==='critical') rawRows=rawRows.filter(a=>a.severity>=8);
         else if (sevFilter==='high') rawRows=rawRows.filter(a=>a.severity>=6&&a.severity<8);
         else if (sevFilter==='medium') rawRows=rawRows.filter(a=>a.severity>=4&&a.severity<6);
         else if (sevFilter==='low') rawRows=rawRows.filter(a=>a.severity<4);
+        if (search) {
+            rawRows = rawRows.filter((a) => {
+                const analysis = (a && typeof a.analysis === 'object' && a.analysis) ? a.analysis : {};
+                const blob = [
+                    a.rule,
+                    a.source,
+                    a.summary,
+                    a.threat_type,
+                    alertNamespace(a),
+                    alertPod(a),
+                    alertContainer(a),
+                    analysis.threat_type,
+                    analysis.reasoning,
+                    analysis.summary,
+                ].filter(Boolean).join(' ').toLowerCase();
+                return blob.includes(search);
+            });
+        }
         const rows = collapseAlerts(rawRows);
-        if (!rows.length) { el.innerHTML='<div style="padding:40px;text-align:center;color:#606080;">No alerts match this filter.</div>'; return; }
+        if (!rows.length) { el.innerHTML=`<div style="padding:40px;text-align:center;color:#606080;">No alerts match this filter${search ? ` / search "${esc(search)}"` : ''}.</div>`; return; }
+        const detectorCounts = rawRows.reduce((acc, row) => {
+            const key = String(row?.source || 'unknown').toLowerCase();
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+        }, {});
+        const detectorSummary = Object.entries(detectorCounts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([name, count]) => `${String(name).toUpperCase()} ${Number(count).toLocaleString()}`)
+            .join(' · ');
         el.innerHTML=`
             <div style="margin-bottom:10px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06);border-radius:8px;background:rgba(255,255,255,0.02);font-size:12px;line-height:1.5;color:#a0a0b0;">
                 <strong style="color:#fff;">Readable Alert View</strong> — duplicate alerts are grouped and rows show <em>where</em> the alert came from (namespace/pod/container).
                 <span style="color:#94a3b8;">Rows tagged “Platform” come from monitoring/security infrastructure (Grafana, Prometheus, Falco, Suricata) rather than city service applications.</span>
+                <div style="margin-top:6px;color:#64748b;">Raw window: ${Number(rawRows.length).toLocaleString()} alerts · grouped rows: ${Number(rows.length).toLocaleString()} · detectors: ${esc(detectorSummary || 'none')}</div>
             </div>
             <div style="max-height:70vh;overflow-y:auto;">
                 <table style="width:100%;border-collapse:collapse;">
@@ -2067,6 +2319,8 @@ const render = {
                             const guide=ruleHelpMeta(a);
                             const bg = platform ? 'rgba(148,163,184,0.03)' : 'transparent';
                             const repeat = Number(a._repeat_count || 1);
+                            const firstSeen = a._first_seen || a.timestamp || a.time || '';
+                            const lastSeen = a._last_seen || a.timestamp || a.time || '';
                             const summary = String(a.summary || '');
                             const shortSummary = summary.length > 180 ? summary.substring(0,180) + '…' : summary;
                             const sourceLabel = `${a.source||'falco'}${ns && ns!=='—' ? ' · '+ns : ''}`;
@@ -2245,14 +2499,14 @@ const render = {
                                     ${platformNote ? `<div style="margin-top:6px;color:#94a3b8;font-size:11px;">${esc(platformNote)}</div>` : ''}
                                     ${llmTraceBlock}
                                 </td>
-                                <td style="padding:10px 14px;vertical-align:top;font-family:'JetBrains Mono',monospace;font-size:12px;color:${repeat>1?'#facc15':'#94a3b8'};">x${repeat}</td>
+                                <td style="padding:10px 14px;vertical-align:top;font-family:'JetBrains Mono',monospace;font-size:12px;color:${repeat>1?'#facc15':'#94a3b8'};">x${repeat}<div style="margin-top:4px;font-size:10px;color:#64748b;">${esc(fmtTime(firstSeen))} → ${esc(fmtTime(lastSeen))}</div></td>
                             </tr>`;
                         }).join('')}
                     </tbody>
                 </table>
             </div>
             <div style="padding:10px 14px;font-size:12px;color:#606080;border-top:1px solid rgba(255,255,255,0.05);">
-                Showing ${rows.length} grouped row${rows.length!==1?'s':''} from ${rawRows.length} raw alert${rawRows.length!==1?'s':''}.
+                Showing ${rows.length} grouped row${rows.length!==1?'s':''} from ${rawRows.length} raw alert${rawRows.length!==1?'s':''}. Recent Suricata rows can be crowded out when the latest window is dominated by Falco or governance traffic; the detector summary above shows the actual source mix in the loaded window.
             </div>`;
     },
     iot(data) {
@@ -2261,14 +2515,39 @@ const render = {
         if (statsEl) {
             const list=devices?.devices||[];
             const total=list.length;
-            const active=list.filter(d=>d.connected!==false&&(!(d.status||'').toLowerCase().includes('err'))).length;
+            const active=list.filter(d=>['healthy','online','running'].includes((d.status||'').toLowerCase())).length;
             const pct=total>0?Math.round(active/total*100):0;
-            statsEl.innerHTML=`<div class="stat-card"><div class="stat-label">Active Devices</div><div class="stat-value" style="color:#4ade80;">${active}</div><div class="stat-sub">Running in cluster</div></div><div class="stat-card"><div class="stat-label">Total Pods</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">IoT workloads deployed</div></div><div class="stat-card"><div class="stat-label">Protocol Emulators</div><div class="stat-value" style="color:#ffaa00;">5/5</div><div class="stat-sub">ONVIF, MQTT, FHIR, Modbus, DALI</div></div><div class="stat-card"><div class="stat-label">Fleet Health</div><div class="stat-value" style="color:${pct>=90?'#4ade80':pct>=50?'#ffaa00':'#f87171'};">${pct}%</div><div class="stat-sub">${active}/${total} pods running</div></div>`;
+            const logical = devices?.logical_total ?? list.filter(d => String(d.source||'').includes('logical_registry')).length;
+            const podBacked = devices?.pod_backed_total ?? list.filter(d => String(d.source||'').includes('pod')).length;
+            statsEl.innerHTML=`<div class="stat-card"><div class="stat-label">Live Devices</div><div class="stat-value" style="color:#4ade80;">${active}</div><div class="stat-sub">Currently online or pod-running</div></div><div class="stat-card"><div class="stat-label">Inventory Total</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">${esc(devices?.counting_mode||'device_inventory')}</div></div><div class="stat-card"><div class="stat-label">Logical / Pod-Backed</div><div class="stat-value" style="color:#ffaa00;">${logical}/${podBacked}</div><div class="stat-sub">Registered devices vs Kubernetes-backed rows</div></div><div class="stat-card"><div class="stat-label">Fleet Liveness</div><div class="stat-value" style="color:${pct>=90?'#4ade80':pct>=50?'#ffaa00':'#f87171'};">${pct}%</div><div class="stat-sub">${active}/${total} live in current view</div></div>`;
         }
         if (tableEl) {
             const list=devices?.devices||[];
             if (!list.length) { tableEl.innerHTML='<div style="padding:24px;text-align:center;color:#606080;">No IoT devices found.</div>'; return; }
-            tableEl.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.3);"><th style="padding:10px;text-align:left;">Device</th><th style="padding:10px;text-align:left;">Type</th><th style="padding:10px;text-align:left;">Status</th><th style="padding:10px;text-align:left;">Namespace</th><th style="padding:10px;text-align:left;">Pod IP</th></tr></thead><tbody>${list.map(d=>{const ok=d.connected!==false&&!(d.status||'').toLowerCase().includes('err');return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:10px;font-size:12px;font-family:'JetBrains Mono',monospace;">${esc(d.device||d.device_id||'—')}</td><td style="padding:10px;"><span style="padding:2px 8px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(d.device_type||'—')}</span></td><td style="padding:10px;font-size:12px;"><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${ok?'#00ff88':'#ff3366'};"></span>${esc(d.status||'healthy')}</span></td><td style="padding:10px;font-size:12px;color:#606080;">${esc(d.namespace||'smart-city')}</td><td style="padding:10px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#606080;">${esc(d.ip||d.pod_ip||'—')}</td></tr>`;}).join('')}</tbody></table>`;
+            const fmtLastSeen = (value) => {
+                if (!value) return 'unknown';
+                try {
+                    return new Date(value).toLocaleString();
+                } catch (_) {
+                    return String(value);
+                }
+            };
+            const statusMeta = (d) => {
+                const s = String(d.status || 'unknown').toLowerCase();
+                if (s === 'healthy' || s === 'online' || s === 'running') return { label: s === 'healthy' ? 'Pod Running' : 'Online', color: '#00ff88' };
+                if (s === 'recent') return { label: 'Recent', color: '#facc15' };
+                if (s === 'registered') return { label: 'Registered', color: '#94a3b8' };
+                if (s === 'stale') return { label: 'Stale', color: '#fb7185' };
+                return { label: s || 'Unknown', color: '#f87171' };
+            };
+            const sourceLabel = (src) => {
+                const s = String(src || 'unknown');
+                if (s === 'logical_registry') return 'Logical registry';
+                if (s === 'logical_registry+pod') return 'Registry + pod';
+                if (s === 'k8s_pod') return 'Kubernetes pod';
+                return s;
+            };
+            tableEl.innerHTML=`<table style="width:100%;border-collapse:collapse;"><thead><tr style="font-size:11px;color:#606080;text-transform:uppercase;background:rgba(0,0,0,0.3);"><th style="padding:10px;text-align:left;">Device</th><th style="padding:10px;text-align:left;">Type</th><th style="padding:10px;text-align:left;">Status</th><th style="padding:10px;text-align:left;">Source</th><th style="padding:10px;text-align:left;">Last Seen</th><th style="padding:10px;text-align:left;">Device / Pod IP</th></tr></thead><tbody>${list.map(d=>{const meta=statusMeta(d); const ip=d.ip||d.pod_ip||d.metadata?.ip||d.metadata?.device_ip||'—'; return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);"><td style="padding:10px;font-size:12px;font-family:'JetBrains Mono',monospace;">${esc(d.device||d.device_id||'—')}</td><td style="padding:10px;"><span style="padding:2px 8px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border-radius:4px;font-size:10px;">${esc(d.device_type||'—')}</span></td><td style="padding:10px;font-size:12px;"><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:${meta.color};"></span>${esc(meta.label)}</span></td><td style="padding:10px;font-size:12px;color:#94a3b8;">${esc(sourceLabel(d.source))}</td><td style="padding:10px;font-size:11px;color:#94a3b8;">${esc(fmtLastSeen(d.last_seen))}</td><td style="padding:10px;font-size:11px;font-family:'JetBrains Mono',monospace;color:#606080;">${esc(ip)}</td></tr>`;}).join('')}</tbody></table><div style="padding:10px 12px;font-size:12px;color:#606080;border-top:1px solid rgba(255,255,255,0.04);">Logical registry rows are not treated as live hardware unless they have a recent heartbeat. Pod-backed rows represent running Kubernetes workloads.</div>`;
         }
     },
     kubernetes(data) {
@@ -2328,14 +2607,46 @@ const app = {
         return !!(obj && typeof obj === 'object' && Number(obj.status_code || 0) === 401);
     },
 
+    filterHelpContent(query='') {
+        const modal = $('helpModal');
+        const countEl = $('helpSearchCount');
+        const emptyEl = $('helpSearchEmpty');
+        if (!modal) return;
+        const q = String(query || '').trim().toLowerCase();
+        const blocks = Array.from(modal.querySelectorAll('.help-searchable'));
+        let visible = 0;
+        blocks.forEach((el) => {
+            const hay = String(el.textContent || '').toLowerCase();
+            const match = !q || hay.includes(q);
+            el.style.display = match ? '' : 'none';
+            if (match) visible += 1;
+        });
+        if (countEl) {
+            countEl.textContent = q
+                ? `${visible} help topic${visible === 1 ? '' : 's'} match "${query}"`
+                : 'Showing all help topics';
+        }
+        if (emptyEl) emptyEl.style.display = visible ? 'none' : 'block';
+    },
+
+    clearHelpSearch() {
+        const input = $('helpSearchInput');
+        if (input) input.value = '';
+        this.filterHelpContent('');
+    },
+
     openHelp() {
         const el = $('helpModal');
         if (el) el.style.display = 'block';
+        this.clearHelpSearch();
+        const input = $('helpSearchInput');
+        if (input) setTimeout(() => input.focus(), 0);
     },
 
     closeHelp() {
         const el = $('helpModal');
         if (el) el.style.display = 'none';
+        this.clearHelpSearch();
     },
 
     cacheTrace(key, payload) {
@@ -2784,6 +3095,7 @@ const app = {
     async runLLMTest() {
         const provider = $('llmTestProvider')?.value || '';
         const prompt = $('llmTestPrompt')?.value || 'Test prompt';
+        const strict = !!($('llmStrictProviderTest')?.checked);
         const resultEl = $('llmTestResult');
         const statusEl = $('llmTestResultStatus');
         const metaEl = $('llmTestResultMeta');
@@ -2794,10 +3106,13 @@ const app = {
         if (contentEl) contentEl.textContent = 'Sending request to provider...';
         
         try {
-            const res = provider ? await api.testProviderByName(provider, prompt) : await api.testProvider(null, prompt);
+            const res = provider ? await api.testProviderByName(provider, prompt, strict) : await api.testProvider(null, prompt);
             if (res?.status === 'success') {
                 if (statusEl) statusEl.innerHTML = '<span style="color:#4ade80;"><i class="fas fa-check-circle mr-1"></i>Success</span>';
-                if (metaEl) metaEl.textContent = `${res.provider?.toUpperCase() || 'Unknown'} · ${res.latency_ms}ms · ${res.tokens || 0} tokens · $${Number(res.estimated_cost_usd || 0).toFixed(4)}`;
+                if (metaEl) {
+                    const strictText = provider && strict ? ` · strict:${res.strict_satisfied ? 'pass' : 'fail'}` : '';
+                    metaEl.textContent = `${res.provider?.toUpperCase() || 'Unknown'} · ${res.latency_ms}ms · ${res.tokens || 0} tokens · $${Number(res.estimated_cost_usd || 0).toFixed(4)}${strictText}`;
+                }
                 const analysisSummary = (res.analysis && typeof res.analysis === 'object')
                     ? [res.analysis.threat_type, (res.analysis.severity != null ? `severity ${res.analysis.severity}/10` : null), (res.analysis.confidence != null ? `confidence ${Math.round((res.analysis.confidence<=1?res.analysis.confidence*100:res.analysis.confidence))}%` : null)].filter(Boolean).join(' · ')
                     : '';
@@ -2837,7 +3152,8 @@ const app = {
     async testProviderKey(provider) {
         this.logLLMEvent(`Testing provider key: ${String(provider).toUpperCase()}`);
         this.setNotice(`Testing ${provider} API key...`, 'info');
-        const res = await api.testProviderByName(provider, 'Analyze: suspicious outbound connection');
+        const strict = !!($('llmStrictProviderTest')?.checked);
+        const res = await api.testProviderByName(provider, 'Analyze: suspicious outbound connection', strict);
         if (res?.status === 'success') {
             this.logLLMEvent(`${String(provider).toUpperCase()} test OK (${res.latency_ms}ms)`);
             this.setNotice(`${String(provider).toUpperCase()} test OK (${res.latency_ms}ms)`, 'info', 3000);
@@ -2851,7 +3167,8 @@ const app = {
     async probeProvider(provider) {
         this.logLLMEvent(`Probe provider: ${String(provider).toUpperCase()}`);
         this.setNotice(`Probing ${provider}...`, 'info');
-        const res = await api.testProviderByName(provider, 'LLM health probe event');
+        const strict = !!($('llmStrictProviderTest')?.checked);
+        const res = await api.testProviderByName(provider, 'LLM health probe event', strict);
         if (res?.status === 'success') {
             this.logLLMEvent(`${String(provider).toUpperCase()} probe OK (${res.latency_ms || '?'}ms)`);
             this.setNotice(`${String(provider).toUpperCase()} probe OK`, 'info', 2500);
@@ -2887,7 +3204,7 @@ const app = {
 
     async refreshAll() {
         let [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits,govPending,dedup,rateLimiter]=await Promise.all([
-            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(50),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits(),api.getGovPending(),api.getDedupStats(),api.getAlertRateLimiterStatus()
+            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(120),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits(),api.getGovPending(),api.getDedupStats(),api.getAlertRateLimiterStatus()
         ]);
         if (!gov) gov = { status: 'error', status_code: 503, detail: 'network' };
         if (!govPending) govPending = { status: 'error', status_code: 503, detail: 'network' };
@@ -2904,12 +3221,12 @@ const app = {
         }
         const crit=(alerts?.alerts||[]).filter(a=>a.severity>=8).length;
         const badge=$('alertBadge'); if(badge){badge.textContent=crit;badge.style.display=crit>0?'inline':'none';}
-        render.llmProviders(health, credits);
+        render.llmProviders(health, credits, llmDiag);
     },
 
     async refreshCredits() {
-        const [h, c] = await Promise.all([api.getHealth(), api.getCredits()]);
-        render.llmProviders(h, c);
+        const [h, c, d] = await Promise.all([api.getHealth(), api.getCredits(), api.getLLMDiag()]);
+        render.llmProviders(h, c, d);
     },
 
     _renderTab(tab) {

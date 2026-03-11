@@ -66,7 +66,7 @@
 
 ## Abstract
 
-This report presents the complete implementation and evaluation of an LLM-driven Intrusion Detection System (IDS) for edge-enabled smart cities, developed as the continuation and completion of Capstone I. Building upon the foundation established in Capstone I, which validated the feasibility of integrating Large Language Models with traditional IDS platforms, Capstone II delivers a production-grade system with multi-provider LLM support (xAI Grok-4, OpenAI GPT-4, Anthropic Claude, Google Gemini, and Moonshot Kimi), human-in-the-loop governance with three automation modes (Autopilot, Assisted, Manual), transparent threat assessment with confidence scoring and reasoning chains, PostgreSQL persistence with Prometheus counter restoration, and comprehensive Kubernetes automated responses.
+This report presents the implementation and evaluation of an LLM-driven Intrusion Detection System (IDS) for edge-enabled smart cities, developed as the continuation and completion of Capstone I. Building upon the foundation established in Capstone I, which validated the feasibility of integrating Large Language Models with traditional IDS platforms, Capstone II delivers a research-grade Kubernetes testbed with multi-provider LLM support, human-in-the-loop governance with three automation modes (manual, assisted, autonomous), transparent threat assessment with confidence scoring and reasoning chains, PostgreSQL-backed persistence, and Kubernetes response automation.
 
 The implemented system processes security alerts from Falco (runtime security) and Suricata (network IDS), sends them to LLM engines for contextual analysis, and executes automated defensive actions including pod isolation, service scaling, and IP blocking. Key achievements include: 40-60% LLM cost reduction through alert deduplication, <2 second end-to-end alert processing, 99%+ system uptime, operator alert volume reduction from 10,000+ to 500-1,000 daily alerts (10-20× reduction), and mean time to respond improvement from 5-15 minutes to 30-60 seconds per critical alert (10-30× faster).
 
@@ -82,7 +82,7 @@ The system architecture demonstrates that LLM-enhanced intrusion detection can s
 
 Before delving into the specifics of the Capstone II implementation, it is important to understand the foundation established in Capstone I and the evolution of this project. Capstone I successfully demonstrated that integrating Large Language Models (LLMs) with intrusion detection systems is both feasible and beneficial for smart city cybersecurity. The initial prototype achieved 99.23% system uptime, 100% functional test success, and demonstrated strong LLM performance in classification accuracy (91%), severity estimation, and JSON output consistency.
 
-Building upon this foundation, Capstone II focused on transforming the proof-of-concept into a production-grade system capable of operating in real smart city environments. The primary objectives for Capstone II included:
+Building upon this foundation, Capstone II focused on transforming the proof-of-concept into a research-grade system capable of supporting live smart-city IDS experiments and operator evaluation. The primary objectives for Capstone II included:
 
 1. **Multi-Provider LLM Support** – Expanding from single-provider dependency to five LLM providers with priority-based failover and circuit breaker protection
 2. **Human-in-the-Loop Governance** – Implementing a three-mode governance system (Autopilot/Assisted/Manual) enabling graduated automation with human oversight
@@ -1006,20 +1006,41 @@ async def test_governance_assisted_mode():
 | High | 100 | 99.5% | 2.4s |
 | Stress | 200 | 97.2% | 3.8s |
 
-**LLM Provider Performance:**
+**Strict Live LLM Evaluation:**
 
-| Provider | Avg Latency | Success Rate | Circuit Trips |
-|----------|-------------|--------------|---------------|
-| xAI Grok-4 | 1.6s | 98.5% | 2 |
-| OpenAI GPT-4 | 2.1s | 99.2% | 0 |
-| Gemini 2.0 | 0.9s | 97.8% | 3 |
-| Claude 3.5 | 2.4s | 99.5% | 0 |
+The LLM provider comparison was re-run against the live IDS backend using strict provider execution with fallback disabled and database persistence disabled. The completed measured run is stored in `artifacts/llm-eval/strict-real-01` and is documented in `docs/LLM_EVALUATION.md`. The strict run used the same stored alert set across all included providers and only counted rows where `status = success` and `strict_satisfied = true`.
+
+The completed artifact-backed comparison in `strict-real-01` used:
+
+- 14 distinct matched alerts
+- 42 provider-attempts
+- 41 successful strict evaluations
+- 7 scenario families:
+  - `anpr_exfiltration`
+  - `lateral_movement_or_platform_access`
+  - `modbus_write_tamper`
+  - `mqtt_misuse`
+  - `onvif_misuse`
+  - `onvif_recon`
+  - `runtime_shell`
+
+Included providers for the completed run were `kimi`, `openai`, and `xai`. `gemini` was excluded because it was in cooldown/quota state at run time. Anthropic was excluded from this specific artifact because it was not operational at the time that run was executed.
+
+| Provider | Model | Scored Alerts | Success Rate | Avg Latency | p95 Latency | Cost / 1000 Alerts | Severity Accuracy | Threat Accuracy | Action Relevance | Quality Score | Safety Proxy |
+|----------|-------|--------------:|-------------:|------------:|------------:|-------------------:|------------------:|----------------:|-----------------:|--------------:|-------------:|
+| Kimi | moonshot-v1-8k | 14 | 100.00% | 3.7296s | 5.32s | $5.00 | 100.00% | 42.86% | 3.4286 / 5 | 70.86% | 100.00% |
+| OpenAI | gpt-3.5-turbo | 14 | 100.00% | 2.2774s | 3.054s | $7.65 | 100.00% | 28.57% | 3.4286 / 5 | 65.14% | 100.00% |
+| xAI | grok-4-latest | 13 | 92.86% | 25.4889s | 28.854s | $17.58 | 84.62% | 38.46% | 3.3846 / 5 | 62.77% | 94.87% |
+
+In this completed strict run, Kimi ranked first overall on the measured quality-cost balance, OpenAI was the fastest successful provider, and xAI remained usable but materially slower and less reliable than the other two providers.
+
+A second strict run was later executed after the Anthropic API key was corrected. That follow-up artifact is stored in `artifacts/llm-eval/strict-real-02` and confirms that Anthropic can now complete strict scored evaluations against live stored IDS alerts. However, that run should be treated as an Anthropic inclusion update rather than a replacement for `strict-real-01`, because Kimi experienced provider-side overload and contributed zero scored rows in that heavier four-provider run.
 
 ![Figure 15: Before vs after — manual vs AI-driven](figures/fig15-before-vs-after.png)
 *Figure 15: Before vs after comparison of manual security operations versus AI-driven IDS.*
 
 ![Figure 16: LLM provider comparison](figures/fig16-llm-provider-comparison.png)
-*Figure 16: LLM provider comparison showing latency, success rate, and circuit breaker trips.*
+*Figure 16: Artifact-backed strict live provider comparison from `artifacts/llm-eval/strict-real-01`, showing latency, success rate, cost, and scoring outcomes for Kimi, OpenAI, and xAI.*
 
 **Deduplication Effectiveness:**
 
@@ -1072,11 +1093,11 @@ async def test_governance_assisted_mode():
 
 ### 7.1 Project Summary
 
-Capstone II successfully delivered a production-grade, LLM-driven Intrusion Detection System for smart city infrastructure. Building upon the proof-of-concept established in Capstone I, this phase transformed the prototype into a fully-featured security platform with:
+Capstone II delivered a research-grade, LLM-driven Intrusion Detection System for smart city infrastructure. Building upon the proof-of-concept established in Capstone I, this phase transformed the prototype into a substantially more complete security platform with:
 
 **Core Achievements:**
 
-1. **Multi-Provider LLM Integration** – Five LLM providers (xAI Grok-4, OpenAI GPT-4, Anthropic Claude, Google Gemini, Moonshot Kimi) with priority-based failover and circuit breaker protection, eliminating single points of failure.
+1. **Multi-Provider LLM Integration** – Support for five configured LLM providers with priority-based failover and circuit breaker protection. Operational availability remains provider-dependent and is measured separately from configuration state.
 
 2. **Human-in-the-Loop Governance** – Three-mode governance system (Autopilot/Assisted/Manual) enabling graduated automation with human oversight for critical decisions, addressing the fundamental trust problem in AI security systems.
 

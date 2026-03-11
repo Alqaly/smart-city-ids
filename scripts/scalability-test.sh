@@ -16,7 +16,7 @@ NAMESPACE="smart-city"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 RESULTS_DIR="${PROJECT_ROOT}/scalability-results"
 PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:31701}"
-IDS_API_URL="${IDS_API_URL:-http://localhost:30800}"
+IDS_API_URL="${IDS_API_URL:-}"
 WAIT_SECONDS=60
 SCALE_LEVELS_CSV="${SCALE_LEVELS:-10,100,500,1000}"
 RUN_ID="${RUN_ID:-scalability-$(date +%Y%m%d-%H%M%S)}"
@@ -50,7 +50,10 @@ if [[ "${PROMETHEUS_URL:-}" == "http://localhost:31701" ]]; then
     PROM_PORT=$(get_service_nodeport "prometheus" "monitoring" "31701")
     PROMETHEUS_URL="http://${NODE_IP}:${PROM_PORT}"
 fi
-if [[ "${IDS_API_URL:-}" == "http://localhost:30800" ]]; then
+if [[ -z "${IDS_API_URL:-}" ]]; then
+    IDS_API_URL="$(resolve_ids_api_url || true)"
+fi
+if [[ -z "${IDS_API_URL:-}" ]]; then
     IDS_PORT=$(get_service_nodeport "ids-api-service" "smart-city" "30800")
     IDS_API_URL="http://${NODE_IP}:${IDS_PORT}"
 fi

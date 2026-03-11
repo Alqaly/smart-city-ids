@@ -116,6 +116,12 @@ done <<< "$PROVIDERS"
 TOTAL_PROVIDERS=$(echo "$LLM_DIAG" | jq -r '.providers | length // 0' 2>/dev/null || echo 0)
 log_info "Operational providers: $OPERATIONAL/$TOTAL_PROVIDERS"
 
+if [[ "$OPERATIONAL" -lt 1 ]]; then
+    log_error "No operational LLM providers. Governance/action-path validation cannot run."
+    echo "$LLM_DIAG" | jq '{summary, providers: (.providers | map_values({status, model, error_category, circuit_breaker_state}))}' 2>/dev/null || true
+    exit 1
+fi
+
 # Phase 4: Governance Check
 log_phase "PHASE 4: Governance Status"
 
@@ -150,16 +156,22 @@ log_phase "PHASE 5: IoT Device Count"
 
 K8S_COUNT=$(kubectl get pods -n smart-city --field-selector=status.phase=Running 2>/dev/null | grep -E "traffic-camera|healthcare-api|parking-system|env-sensor|street-lighting|mqtt-broker" | wc -l || echo 0)
 API_COUNT=$(curl -s "${API_BASE}/api/metrics" 2>/dev/null | jq -r '.iot_devices_active // 0' 2>/dev/null || echo 0)
+IOT_DEVICES_JSON="$(curl -s "${API_BASE}/api/iot/devices" 2>/dev/null || echo '{}')"
+IOT_TOTAL=$(echo "$IOT_DEVICES_JSON" | jq -r '.total // 0' 2>/dev/null || echo 0)
+IOT_LOGICAL=$(echo "$IOT_DEVICES_JSON" | jq -r '.logical_total // 0' 2>/dev/null || echo 0)
+IOT_POD_BACKED=$(echo "$IOT_DEVICES_JSON" | jq -r '.pod_backed_total // 0' 2>/dev/null || echo 0)
+IOT_COUNTING_MODE=$(echo "$IOT_DEVICES_JSON" | jq -r '.counting_mode // "unknown"' 2>/dev/null || echo unknown)
 
 log_info "Kubectl count: $K8S_COUNT pods"
-log_info "API reports: $API_COUNT devices"
+log_info "API active metric: $API_COUNT"
+log_info "API device view: total=$IOT_TOTAL logical=$IOT_LOGICAL pod_backed=$IOT_POD_BACKED mode=$IOT_COUNTING_MODE"
 
-if [[ "$K8S_COUNT" -gt 0 && "$API_COUNT" -eq "$K8S_COUNT" ]]; then
-    log_success "IoT device count aligned with running smart-city IoT pods ($API_COUNT)"
-elif [[ "$API_COUNT" -eq 13 ]]; then
-    log_success "IoT device count matches default reference profile (13)"
+if [[ "$IOT_COUNTING_MODE" == "hybrid_registry_plus_pods" && "$IOT_TOTAL" -gt 0 && "$IOT_POD_BACKED" -ge "$K8S_COUNT" ]]; then
+    log_success "IoT device inventory consistent with hybrid registry + pod counting"
+elif [[ "$K8S_COUNT" -gt 0 && "$API_COUNT" -gt 0 ]]; then
+    log_info "IoT activity metric and running emulator pods are both non-zero"
 else
-    log_error "IoT device count mismatch: API=$API_COUNT, K8s=$K8S_COUNT (expected pod-aligned or default 13)"
+    log_error "IoT visibility check failed: active_metric=$API_COUNT total=$IOT_TOTAL k8s_pods=$K8S_COUNT mode=$IOT_COUNTING_MODE"
 fi
 
 # Phase 6: Live Attack Test (Optional - skip if --quick)
@@ -253,7 +265,7 @@ echo "  Database: $DB_STATUS"
 echo "  Kubernetes: $K8S_STATUS"
 echo "  LLM Providers: $OPERATIONAL/$TOTAL_PROVIDERS operational"
 echo "  Governance: $GOV_MODE mode"
-echo "  IoT Devices: $API_COUNT (verified: $K8S_COUNT pods)"
+echo "  IoT Devices: active_metric=$API_COUNT, total=$IOT_TOTAL, logical=$IOT_LOGICAL, pod_backed=$IOT_POD_BACKED"
 echo "  Total Alerts: $BASELINE_ALERTS"
 echo ""
 

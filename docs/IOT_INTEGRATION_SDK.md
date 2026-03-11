@@ -28,7 +28,7 @@ There are **three practical integration paths**:
 | **Alert (Cluster-Internal)** | `POST /api/alerts/internal` | Forwarder-only ingest to IDS pipeline | Falco/Suricata forwarders running *inside* the cluster |
 
 Important:
-- For a conference/public demo where **anyone can connect their own device**, the supported path is **Telemetry** (`/api/iot/sensor`).
+- For external devices that should connect directly to the IDS without cluster-internal credentials, use the **Telemetry** path (`/api/iot/sensor`).
 - For more realistic fleet counting (logical devices vs pods), use **Registry + Heartbeat** first, then send telemetry.
 - `/api/alerts/internal` requires the shared secret header `X-IDS-Internal-Token` and is intended for **in-cluster** forwarders (Falco/Suricata), not arbitrary external devices.
 
@@ -87,6 +87,12 @@ Heartbeat example:
 Why this matters:
 - This lets the dashboard/API count **logical devices** separately from Kubernetes pods.
 - It supports 100+ devices per emulator pod without faking counts by replica scaling.
+
+Important interpretation:
+- A successful `register` call creates an inventory record, not proof of a live device.
+- A device should only be treated as currently live when it has a recent heartbeat or active telemetry.
+- In the dashboard, logical registry rows may appear as `registered`, `recent`, `online`, or `stale`.
+- Pod-backed emulator rows are separate from logical registry rows and represent running Kubernetes workloads.
 
 ### 2.1 Telemetry Path — `/api/iot/sensor`
 
@@ -565,6 +571,7 @@ Then update the dashboard HTML in `services/ids-api/static/index.html` to add a 
 Note on counting:
 - `GET /api/iot/devices` now exposes a hybrid view with logical devices + pod-enriched devices.
 - Prefer **Registry + Heartbeat** for defensible fleet counts in exams/demos.
+- Use `last_seen`, `source`, and IP presence when proving that a listed device is actually active.
 
 ---
 

@@ -214,7 +214,7 @@ SYSTEM_INTERACTION_PROMPT = """You are a Cybersecurity Analyst with direct acces
    - Use for: Preventing false positive actions
 
 6. **set_governance_mode**(mode: str)
-   - Changes automation mode: "autopilot", "assisted", "manual"
+   - Changes automation mode: "autonomous", "assisted", "manual"
    - Use for: Adjusting response aggressiveness
 
 ## Function Call Format

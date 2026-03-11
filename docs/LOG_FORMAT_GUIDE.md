@@ -613,4 +613,4 @@ T+15.000s: Grafana dashboard updates
 
 ---
 
-**For Questions:** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or [DEMO_READINESS_REPORT.md](DEMO_READINESS_REPORT.md)
+**For Questions:** See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or [reference/DEMO_READINESS_REPORT.md](reference/DEMO_READINESS_REPORT.md)

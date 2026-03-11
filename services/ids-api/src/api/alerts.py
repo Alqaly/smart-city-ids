@@ -1185,7 +1185,7 @@ async def process_alert_internal(
 # ─── GET /api/alerts (paginated retrieval) ────────────────────────────────
 
 @router.get("/api/alerts")
-async def get_alerts(limit: int = 10, source: Optional[str] = None):
+async def get_alerts(limit: int = 10, source: Optional[str] = None, include_legacy: bool = False):
     """Retrieve persisted alert records with optional source filtering.
 
     Powers the dashboard’s alert history table.  Results are ordered by
@@ -1199,6 +1199,8 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None):
             dashboard typically requests 10–50 at a time.
         source: Optional filter by alert source (``"falco"``,
             ``"suricata"``, etc.).  When ``None``, all sources are returned.
+        include_legacy: When ``True``, include archived legacy rows with
+            missing provider metadata and severity ``0``. Default ``False``.
 
     Returns:
         dict: JSON object with keys ``total`` (total matching count),
@@ -1208,7 +1210,8 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None):
     """
     from api._state import db, alert_trace_id
 
-    alerts = db.get_alerts(limit=limit, source=source)
+    fetch_limit = limit if include_legacy else max(limit * 5, limit + 50)
+    alerts = db.get_alerts(limit=fetch_limit, source=source)
     missing_engine_ids = []
     for a in alerts:
         if a.get("id") and not a.get("llm_engine"):
@@ -1245,11 +1248,39 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None):
                 engine = analysis_models_by_alert.get(int(a["id"]))
             if engine:
                 a["llm_engine"] = engine
+    legacy_hidden = 0
+    if not include_legacy:
+        filtered_alerts = []
+        for a in alerts:
+            analysis = a.get("analysis") or {}
+            if isinstance(analysis, str):
+                try:
+                    analysis = json_mod.loads(analysis)
+                except Exception:
+                    analysis = {}
+            llm_engine = str(a.get("llm_engine") or "").strip().lower()
+            summary = str(a.get("summary") or analysis.get("summary") or "")
+            is_legacy = (
+                int(a.get("severity") or 0) == 0
+                and llm_engine in ("", "none")
+                and ("provider missing" in summary.lower() or "error: (404)" in summary.lower())
+            )
+            if is_legacy:
+                legacy_hidden += 1
+                continue
+            filtered_alerts.append(a)
+        alerts = filtered_alerts[:limit]
+    else:
+        alerts = alerts[:limit]
     total = db.get_alert_count(source=source)
+    if not include_legacy:
+        total = max(0, total - legacy_hidden)
     return {
         "total": total,
         "showing": len(alerts),
         "storage": db.get_stats()["storage_type"],
+        "include_legacy": include_legacy,
+        "legacy_hidden": legacy_hidden,
         "alerts": alerts,
     }
 
@@ -1257,7 +1288,13 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None):
 # ─── POST /api/alerts/{id}/reanalyze — re-send alert to a specific LLM ───
 
 @router.post("/api/alerts/{alert_id}/reanalyze")
-async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends(verify_token)):
+async def reanalyze_alert(
+    alert_id: int,
+    engine: Optional[str] = None,
+    strict: bool = False,
+    persist: bool = True,
+    _=Depends(verify_token),
+):
     """Re-analyze an existing alert using a specific (or default) LLM engine.
 
     Fetches the stored alert from the database, rebuilds the raw alert payload,
@@ -1272,6 +1309,8 @@ async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends
         engine:   Optional LLM engine name to use (e.g. "xai", "openai",
               "kimi").  If omitted, uses the default priority
                   order with failover.
+        strict:   When True, only the requested engine may answer.
+        persist:  When False, do not overwrite the stored alert analysis.
 
     Returns:
         dict with keys: alert_id, engine_used, latency_s, previous_severity,
@@ -1298,33 +1337,52 @@ async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends
     # 3. Run LLM analysis (with optional preferred engine)
     started = time.perf_counter()
     try:
+        result = await llm_manager.analyze(
+            alert_dict,
+            preferred_engine=engine,
+            allow_fallback=not strict,
+        )
+    except TypeError:
         result = await llm_manager.analyze(alert_dict, preferred_engine=engine)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM analysis failed: {str(e)}")
 
     llm_duration = time.perf_counter() - started
     engine_used = result.get("provider") or result.get("engine", "unknown")
+    strict_satisfied = (not strict) or (result.get("status") == "success" and str(engine_used).lower() == str(engine or "").lower())
 
     if result.get("status") != "success":
         raise HTTPException(
             status_code=502,
             detail=f"LLM returned error: {result.get('error', 'unknown')}"
         )
+    if strict and not strict_satisfied:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Strict reanalysis requested '{engine}', but analysis executed on "
+                f"'{engine_used}'. No fallback allowed."
+            ),
+        )
 
     analysis = result.get("analysis", {})
+    usage = result.get("usage") or {}
     new_severity = analysis.get("severity", 5)
     new_summary = analysis.get("summary", "")
     new_threat = analysis.get("threat_type", "Unknown")
     prev_severity = alert_record.get("severity", 0)
 
-    # 4. Update the DB with the new analysis
-    updated = db.update_alert_analysis(
-        alert_id, analysis, new_severity, new_summary, new_threat
-    )
+    # 4. Update the DB with the new analysis when this is an operator action.
+    updated = False
+    if persist:
+        updated = db.update_alert_analysis(
+            alert_id, analysis, new_severity, new_summary, new_threat
+        )
 
     logger.info(
         f"Re-analyzed alert {alert_id} with {engine_used}: "
-        f"severity {prev_severity} → {new_severity} ({llm_duration:.2f}s)"
+        f"severity {prev_severity} → {new_severity} ({llm_duration:.2f}s), "
+        f"strict={strict}, persist={persist}"
     )
 
     return {
@@ -1334,5 +1392,9 @@ async def reanalyze_alert(alert_id: int, engine: Optional[str] = None, _=Depends
         "previous_severity": prev_severity,
         "new_severity": new_severity,
         "analysis": analysis,
+        "usage": usage,
+        "strict_requested": strict,
+        "strict_satisfied": strict_satisfied,
+        "persisted": persist,
         "updated": updated,
     }

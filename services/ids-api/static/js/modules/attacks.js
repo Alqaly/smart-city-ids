@@ -2,14 +2,16 @@
  * attacks.js — Attack Simulation Engine Tab (v2)
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Comprehensive attack simulation with 67 scenarios + 5 multi-stage campaigns
- * across 8 MITRE ATT&CK categories — dynamically loaded from the backend
- * registry at GET /api/attacks/registry.
+ * Attack simulation catalog for operator workflows.
+ *
+ * Legacy backend registry endpoints (/api/attacks/*) were removed.
+ * This module now uses a local, explicit catalog aligned with the
+ * live cluster attack runner (scripts/run-live-attacks.sh).
  *
  * Architecture:
- *   1. On first load, fetches the full registry from GET /api/attacks/registry
+ *   1. On first load, materializes a local scenario catalog
  *   2. Renders category filters, scenario cards, campaign cards, and MITRE table
- *   3. Attack injection sends payloads to POST /api/alerts/internal
+ *   3. Scenario launch injects analyst-evaluation alerts to POST /api/alerts/internal
  *   4. Campaign execution chains multiple scenarios with stage progression
  *   5. IoT fleet scaling controls integrated with GET/POST /api/iot/scale
  *
@@ -22,7 +24,7 @@ import { api } from '../api.js';
 import { $, esc, sevBadge, severityToPriority } from '../utils.js';
 
 // ══════════════════════════════════════════════════════════════════════════
-// Registry cache — loaded from backend on first tab switch
+// Registry cache — loaded from local catalog on first tab switch
 // ══════════════════════════════════════════════════════════════════════════
 
 let _registry = null;
@@ -40,40 +42,151 @@ const CATEGORY_COLORS = {
 
 const ALL_PODS = ['traffic-camera', 'parking-system', 'healthcare-api', 'env-sensor', 'street-lighting'];
 
-/**
- * Fetch the full attack registry from the backend (67 scenarios + 5 campaigns).
- */
 async function loadRegistry() {
   if (_registry) return _registry;
-  if (_registryLoading) {
-    // Wait for in-flight request
-    await new Promise(r => { const iv = setInterval(() => { if (!_registryLoading) { clearInterval(iv); r(); } }, 50); });
-    return _registry;
-  }
+  if (_registryLoading) return _registry;
   _registryLoading = true;
-  try {
-    const data = await api.getAttackRegistry();
-    if (data && data.scenarios) {
-      _registry = data;
-      _registryLoading = false;
-      return _registry;
-    }
-  } catch (e) {
-    console.warn('[attacks] Registry fetch failed, using fallback:', e);
-  }
+  _registry = _getLiveRegistry();
   _registryLoading = false;
-  _registry = _getFallbackRegistry();
   return _registry;
 }
 
-/** Minimal fallback if backend registry isn't available yet. */
-function _getFallbackRegistry() {
+function _getLiveRegistry() {
+  const scenarios = {
+    N1: {
+      id: 'N1',
+      name: 'HTTP Stream Pressure',
+      description: 'High-rate stream requests against traffic camera endpoint with jittered burst windows.',
+      category: 'network',
+      target: 'traffic-camera',
+      source: 'suricata',
+      severity: 8,
+      mitre_id: 'T1498',
+      mitre_name: 'Network Denial of Service',
+      tactic: 'Impact',
+      kill_chain: 'actions_on_objectives',
+      rule: 'SMARTCITY HTTP flood',
+      volume: 'high',
+    },
+    A1: {
+      id: 'A1',
+      name: 'SQL Injection Payload Delivery',
+      description: 'Crafted SQLi strings delivered to healthcare API request bodies for IDS signature validation.',
+      category: 'application',
+      target: 'healthcare-api',
+      source: 'suricata',
+      severity: 7,
+      mitre_id: 'T1190',
+      mitre_name: 'Exploit Public-Facing Application',
+      tactic: 'Initial Access',
+      kill_chain: 'delivery',
+      rule: 'SMARTCITY SQLi',
+      volume: 'medium',
+    },
+    C1: {
+      id: 'C1',
+      name: 'Runtime Abuse: Shell + Sensitive File Read',
+      description: 'Container shell invocation and sensitive file reads to emulate post-compromise operator abuse.',
+      category: 'container',
+      target: 'healthcare-api',
+      source: 'falco',
+      severity: 8,
+      mitre_id: 'T1059',
+      mitre_name: 'Command and Scripting Interpreter',
+      tactic: 'Execution',
+      kill_chain: 'exploitation',
+      rule: 'Sensitive File Read',
+      volume: 'medium',
+    },
+    D1: {
+      id: 'D1',
+      name: 'Export-Style Collection Requests',
+      description: 'Suspicious export-style requests targeting parking/payment data interfaces.',
+      category: 'data',
+      target: 'parking-system',
+      source: 'suricata',
+      severity: 6,
+      mitre_id: 'T1537',
+      mitre_name: 'Transfer Data to Cloud Account',
+      tactic: 'Exfiltration',
+      kill_chain: 'actions_on_objectives',
+      rule: 'Suspicious Data Export',
+      volume: 'medium',
+    },
+    I1: {
+      id: 'I1',
+      name: 'MQTT Topic Traversal',
+      description: 'Wildcard MQTT subscriptions (# / smartcity/#) to enumerate and capture broad broker traffic.',
+      category: 'iot_protocol',
+      target: 'mqtt-broker',
+      source: 'suricata',
+      severity: 7,
+      mitre_id: 'T1083',
+      mitre_name: 'File and Directory Discovery',
+      tactic: 'Discovery',
+      kill_chain: 'reconnaissance',
+      rule: 'MQTT Topic Traversal',
+      volume: 'high',
+    },
+    I2: {
+      id: 'I2',
+      name: 'MQTT Unauthorized Publish',
+      description: 'Unauthorized publishes to control topics (lighting/parking/env) with retained and non-retained payloads.',
+      category: 'iot_protocol',
+      target: 'mqtt-broker',
+      source: 'suricata',
+      severity: 8,
+      mitre_id: 'T1565.002',
+      mitre_name: 'Transmitted Data Manipulation',
+      tactic: 'Impact',
+      kill_chain: 'actions_on_objectives',
+      rule: 'MQTT Unauthorized Publish',
+      volume: 'high',
+    },
+    I3: {
+      id: 'I3',
+      name: 'MQTT Client-ID Spoof Churn',
+      description: 'Rapid reconnect attempts reusing known client IDs to trigger session churn and broker instability.',
+      category: 'iot_protocol',
+      target: 'mqtt-broker',
+      source: 'suricata',
+      severity: 7,
+      mitre_id: 'T1550',
+      mitre_name: 'Use Alternate Authentication Material',
+      tactic: 'Defense Evasion',
+      kill_chain: 'exploitation',
+      rule: 'MQTT Client ID Spoofing',
+      volume: 'high',
+    },
+  };
+
+  const campaigns = {
+    M1: {
+      id: 'M1',
+      name: 'MQTT Abuse + Runtime Follow-On',
+      description: 'Topic traversal and unauthorized publish behavior followed by runtime abuse in workload containers.',
+      stage_count: 3,
+      duration_minutes: 2,
+      severity: 8,
+      techniques: ['Discovery', 'Impact', 'Execution'],
+      stages: ['I1', 'I2', 'C1'],
+      stage_names: ['MQTT topic traversal', 'MQTT unauthorized publish', 'Runtime shell + file read'],
+    },
+  };
+
   return {
-    scenarios: {},
-    campaigns: {},
-    categories: {},
-    total_scenarios: 0,
-    total_campaigns: 0,
+    scenarios,
+    campaigns,
+    categories: {
+      network: { name: 'Network' },
+      application: { name: 'Application' },
+      container: { name: 'Container' },
+      data: { name: 'Data' },
+      iot_protocol: { name: 'IoT Protocol' },
+      campaign: { name: 'Campaign' },
+    },
+    total_scenarios: Object.keys(scenarios).length,
+    total_campaigns: Object.keys(campaigns).length,
   };
 }
 

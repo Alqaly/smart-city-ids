@@ -1,6 +1,6 @@
 # Documentation Archive Index
 
-This index tracks historical, deprecated, or superseded documents under docs/_archive/. Use these as evidence, background, or legacy references. For current guidance, see docs/INDEX.md.
+This index tracks historical, deprecated, or superseded documents under `docs/archive-legacy/` and `docs/archive/`. Use these as evidence, background, or legacy references. For current guidance, see `docs/INDEX.md`.
 
 ## Top-Level Archive Documents
 
@@ -26,7 +26,7 @@ This index tracks historical, deprecated, or superseded documents under docs/_ar
 
 - LEGACY_TECHNICAL_DEEP_DIVE_SUMMARY.md - Consolidated deep-dive notes
 
-## Reports (docs/_archive/reports/)
+## Reports (`docs/archive-legacy/reports/`)
 
 - CAPSTONE_II_CHANGELOG.md - Detailed Capstone II change log
 - HEALTH_CHECK_REPORT.md - Early health verification
@@ -38,7 +38,7 @@ This index tracks historical, deprecated, or superseded documents under docs/_ar
 - HEALTH_CHECK_REPORT.md - Early health verification
 - LEGACY_TECHNICAL_REPORT_DRAFT.md - Technical report draft (mixed content)
 
-## Legacy Checklists (docs/_archive/)
+## Legacy Checklists (`docs/archive-legacy/`)
 
 - LEGACY_CHECKLISTS_SUMMARY.md - Consolidated checklist summary and replacements
 

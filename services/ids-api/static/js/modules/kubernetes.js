@@ -8,7 +8,7 @@
  * Note on static pod/service data:
  *   The pod and service tables are intentionally static (matching the
  *   deployed k8s-manifests).  A future enhancement could query the K8s
- *   API directly, but for this demo the hardcoded roster is correct and
+ *   API directly, but for this reference deployment the hardcoded roster is correct and
  *   avoids an extra API endpoint and RBAC grants.
  */
 

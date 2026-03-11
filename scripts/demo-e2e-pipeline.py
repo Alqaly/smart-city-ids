@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Smart City IDS - Verbose End-to-End Demo Script
-================================================
+Smart City IDS - Verbose End-to-End Evaluation Script
+=====================================================
 
-This script demonstrates the complete data flow:
+This script traces the complete data flow:
 IoT Device → Suricata/Falco → IDS API → LLM Analysis → Dashboard
 
 Usage:
@@ -346,8 +346,8 @@ class IDSDemo:
             return {}
     
     async def run_full_demo(self, duration: int = 60, skip_provider_tests: bool = False):
-        """Run the full demo."""
-        log_section("SMART CITY IDS - VERBOSE END-TO-END DEMO")
+        """Run the full end-to-end evaluation flow."""
+        log_section("SMART CITY IDS - VERBOSE END-TO-END EVALUATION")
         log_info("API URL", self.api_url)
         log_info("Duration", f"{duration}s")
         log_info("Start Time", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -390,19 +390,19 @@ class IDSDemo:
         await self.check_metrics()
         
         # Summary
-        log_section("DEMO COMPLETE")
+        log_section("EVALUATION COMPLETE")
         elapsed = time.time() - self.start_time
         log_info("Total Time", f"{elapsed:.1f}s")
         log_info("Next Steps", "Run live attacks: bash scripts/run-live-attacks.sh --duration 30")
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Smart City IDS Verbose Demo")
+    parser = argparse.ArgumentParser(description="Smart City IDS Verbose End-to-End Evaluation")
     parser.add_argument("--api-url", default="http://localhost:8000", help="IDS API URL")
     parser.add_argument("--token", default="", help="Auth token (if required)")
     parser.add_argument("--username", default="admin", help="Login username if --token is not provided")
     parser.add_argument("--password", default="admin", help="Login password if --token is not provided")
-    parser.add_argument("--duration", type=int, default=60, help="Demo duration")
+    parser.add_argument("--duration", type=int, default=60, help="Scenario run duration")
     parser.add_argument("--skip-provider-tests", action="store_true", help="Skip per-provider LLM test calls (faster, avoids quota/auth noise)")
     args = parser.parse_args()
     

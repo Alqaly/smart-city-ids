@@ -78,12 +78,51 @@ class RoutingStrategyPayload(BaseModel):
 
 class LLMQuickTestPayload(BaseModel):
     prompt: str = "Respond with: OK"
+    strict: bool = False
 
 
 def _deps():
     """Retrieve LLM manager, circuit breaker, and rate limiter from shared state."""
     from api._state import llm_manager, circuit_breaker, alert_rate_limiter
     return llm_manager, circuit_breaker, alert_rate_limiter
+
+
+def _provider_error_category(status: str, last_error: str | None, reason: str | None = None) -> str:
+    """Normalize provider failure/cooldown state into a compact taxonomy label."""
+    s = str(status or "").strip().lower()
+    msg = f"{last_error or ''} {reason or ''}".lower()
+
+    if s in {"operational", "healthy"}:
+        return "none"
+    if s in {"unverified"}:
+        return "unverified"
+    if s == "not_configured":
+        return "not_configured"
+    if s in {"circuit_open"}:
+        return "circuit_open"
+    if s in {"cooldown"}:
+        if "quota" in msg or "429" in msg or "rate limit" in msg or "credits" in msg:
+            return "quota_or_rate_limit_cooldown"
+        if "401" in msg or "403" in msg or "api key" in msg or "auth" in msg:
+            return "auth_cooldown"
+        if "timeout" in msg:
+            return "timeout_cooldown"
+        return "cooldown"
+    if "401" in msg or "403" in msg or "api key" in msg or "unauthorized" in msg or "authentication" in msg:
+        return "auth"
+    if "429" in msg or "quota" in msg or "rate limit" in msg or "credits" in msg:
+        return "quota_or_rate_limit"
+    if s in {"auth_failed"}:
+        return "auth"
+    if "timeout" in msg:
+        return "timeout"
+    if "connection" in msg or "connect" in msg or "network" in msg:
+        return "network"
+    if "500" in msg or "502" in msg or "503" in msg or "504" in msg or "server" in msg:
+        return "server"
+    if s in {"error", "recovering"}:
+        return s
+    return "unknown"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -97,8 +136,9 @@ async def _build_llm_diagnostics():
     ``GET /health`` endpoint (in ``api/metrics_routes.py``).
 
     For each known provider, it builds a diagnostic dict with:
-        - **status**: one of ``operational``, ``not_configured``, ``cooldown``,
-          ``error``, ``circuit_open``, ``recovering``.
+        - **status**: one of ``operational``, ``unverified``,
+          ``not_configured``, ``cooldown``, ``error``, ``circuit_open``,
+          ``recovering``.
         - **reason**: human-readable explanation (powered by
           ``classify_llm_error()`` for error messages).
         - **configured**: whether an API key is present.
@@ -115,7 +155,8 @@ async def _build_llm_diagnostics():
         3. All requests failed → ``error``.
         4. Circuit breaker open → ``circuit_open``.
         5. Circuit breaker half-open → ``recovering``.
-        6. Otherwise → ``operational``.
+        6. Configured but not yet proven by a successful call → ``unverified``.
+        7. Otherwise → ``operational``.
 
     Returns:
         Dict[str, dict] keyed by provider name.
@@ -144,8 +185,9 @@ async def _build_llm_diagnostics():
 
             # ── Determine diagnostic status (state machine) ──────────────
             if auth_failed:
-                diag_status = "auth_failed"
-                reason = auth_failed_reason or "Invalid API key"
+                reason = classify_llm_error(auth_failed_reason or last_error or "Invalid API key")
+                category = _provider_error_category("auth_failed", last_error, reason)
+                diag_status = "auth_failed" if category == "auth" else "error"
             elif not is_configured:
                 diag_status = "not_configured"
                 if not key_info:
@@ -168,13 +210,17 @@ async def _build_llm_diagnostics():
             elif cb_state == "half_open":
                 diag_status = "recovering"
                 reason = "Circuit breaker half-open — testing recovery"
+            elif attempts == 0 and successes_count == 0 and failures_count == 0:
+                diag_status = "unverified"
+                reason = "Configured, but no successful health check has completed yet"
             else:
                 diag_status = "operational"
-                reason = "Healthy" if successes_count > 0 else "Ready (no requests yet)"
+                reason = "Healthy"
 
             diags[prov_name] = {
                 "status": diag_status,
                 "reason": reason,
+                "error_category": _provider_error_category(diag_status, last_error, reason),
                 "configured": is_configured,
                 "key_format_valid": key_info.get("valid_format", True) if key_info else False,
                 "model": details.get("model", ""),
@@ -231,6 +277,8 @@ async def llm_diagnostics_endpoint():
     cb_states = {k: v.get("state", "unknown") for k, v in circuit_breaker.engine_stats.items()}
     summary = {
         "operational": sum(1 for d in diags.values() if d["status"] == "operational"),
+        "unverified": sum(1 for d in diags.values() if d["status"] == "unverified"),
+        "auth_failed": sum(1 for d in diags.values() if d["status"] == "auth_failed"),
         "error": sum(1 for d in diags.values() if d["status"] in ("error", "circuit_open")),
         "cooldown": sum(1 for d in diags.values() if d["status"] == "cooldown"),
         "not_configured": sum(1 for d in diags.values() if d["status"] == "not_configured"),
@@ -755,6 +803,7 @@ async def _build_provider_comparison_payload():
         "tokens": 0,
         "cost_usd": 0.0,
         "successes": 0,
+        "error_taxonomy_counts": {},
     }
 
     for name in names:
@@ -772,16 +821,19 @@ async def _build_provider_comparison_payload():
         completion_tokens = int(engine.get("completion_tokens_total", 0)) or int(usage.get("completion_tokens_total", 0))
         total_tokens = int(engine.get("tokens_total", prompt_tokens + completion_tokens)) or int(usage.get("tokens_total", 0))
         total_cost_usd = float(engine.get("total_estimated_cost_usd", 0.0)) or float(usage.get("total_estimated_cost_usd", 0.0))
+        error_category = _provider_error_category(diag.get("status"), diag.get("last_error"), diag.get("reason"))
 
         totals["calls"] += calls
         totals["tokens"] += total_tokens
         totals["cost_usd"] += total_cost_usd
         totals["successes"] += successes
+        totals["error_taxonomy_counts"][error_category] = int(totals["error_taxonomy_counts"].get(error_category, 0)) + 1
 
         rows.append({
             "provider": name,
             "configured": bool(diag.get("configured", False)),
             "status": diag.get("status", "unknown"),
+            "status_category": _provider_error_category(diag.get("status"), None, diag.get("reason")),
             "model": diag.get("model") or "",
             "calls": calls,
             "attempts": int(diag.get("attempts", 0)),
@@ -799,16 +851,20 @@ async def _build_provider_comparison_payload():
             "cooldown_remaining_seconds": int(diag.get("cooldown_remaining_seconds", 0) or 0),
             "circuit_breaker_state": diag.get("circuit_breaker_state", "unknown"),
             "last_error": diag.get("last_error"),
+            "last_error_category": error_category,
             "reason": diag.get("reason", ""),
         })
 
     totals["cost_usd"] = round(totals["cost_usd"], 6)
     totals["success_rate"] = round((totals["successes"] / totals["calls"]) if totals["calls"] else 0.0, 4)
     totals["operational"] = sum(1 for row in rows if row.get("status") == "operational")
+    totals["cost_values_are_estimated"] = True
+    totals["cost_estimation_method"] = "token_based_rate_per_1k_or_runtime_estimate"
 
     return {
         "summary": totals,
         "providers": rows,
+        "cost_values_are_estimated": True,
         "generated_at": int(time.time()),
     }
 
@@ -839,6 +895,7 @@ async def llm_provider_health_summary():
         "calls": summary.get("calls", 0),
         "tokens": summary.get("tokens", 0),
         "cost_usd": summary.get("cost_usd", 0.0),
+        "cost_values_are_estimated": True,
         "success_rate": summary.get("success_rate", 0.0),
         "fastest_provider": fastest.get("provider") if fastest else None,
         "fastest_avg_latency_s": fastest.get("avg_latency_s") if fastest else None,
@@ -864,6 +921,7 @@ async def llm_providers_matrix(probe: bool = False):
 async def llm_test_provider_by_name(
     provider: str,
     payload: LLMQuickTestPayload | None = None,
+    strict: bool = False,
     _=Depends(verify_token),
 ):
     """Interactive single-provider test endpoint for operator console."""
@@ -878,6 +936,7 @@ async def llm_test_provider_by_name(
         return {"status": "error", "message": f"Unknown provider: {provider}", "provider": provider}
 
     prompt = (payload.prompt if payload else None) or "Analyze: suspicious outbound connection"
+    strict_mode = bool(strict or ((payload.strict if payload else False)))
     test_alert = {
         "output": prompt,
         "rule": "operator-llm-test",
@@ -886,33 +945,33 @@ async def llm_test_provider_by_name(
         "output_fields": {"container.name": "ids-api", "interactive_test": "true"},
     }
     started = time.perf_counter()
-    result = await llm_manager.analyze(test_alert, preferred_engine=provider)
+    try:
+        result = await llm_manager.analyze(
+            test_alert,
+            preferred_engine=provider,
+            allow_fallback=not strict_mode,
+        )
+    except TypeError:
+        # Legacy adapters may not support allow_fallback.
+        result = await llm_manager.analyze(test_alert, preferred_engine=provider)
     latency_ms = int((time.perf_counter() - started) * 1000)
     analysis = result.get("analysis") or {}
     usage = result.get("usage") or {}
     total_tokens = int(usage.get("total_tokens") or (usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0) or 0))
+    actual_provider = result.get("provider") or result.get("engine") or provider
     estimated_cost = 0.0
     try:
         from api._state import _estimate_cost_from_tokens
-        estimated_cost = float(_estimate_cost_from_tokens(provider, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)))
+        estimated_cost = float(_estimate_cost_from_tokens(actual_provider, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)))
     except Exception:
         estimated_cost = 0.0
+    strict_satisfied = (not strict_mode) or (
+        result.get("status") == "success" and str(actual_provider).lower() == provider
+    )
 
-    # Manual provider tests are operator-driven recovery actions; reflect the
-    # outcome in the shared breaker so the dashboard status matches reality.
-    try:
-        if circuit_breaker and provider in getattr(circuit_breaker, "engine_stats", {}):
-            if result.get("status") == "success":
-                circuit_breaker.record_success(provider)
-            else:
-                circuit_breaker.record_failure(provider)
-            update_circuit_breaker_metrics()
-    except Exception:
-        pass
-
-    return {
+    response = {
         "status": result.get("status", "unknown"),
-        "provider": result.get("provider") or result.get("engine") or provider,
+        "provider": actual_provider,
         "latency_ms": latency_ms,
         "summary": analysis.get("summary"),
         "severity": analysis.get("severity"),
@@ -921,7 +980,36 @@ async def llm_test_provider_by_name(
         "estimated_cost_usd": round(estimated_cost, 6),
         "error": result.get("error"),
         "failed_engines": result.get("failed_engines", []),
+        "strict_requested": strict_mode,
+        "strict_satisfied": strict_satisfied,
     }
+    if strict_mode and not strict_satisfied and response["status"] == "success":
+        response["status"] = "error"
+        response["error"] = (
+            f"Strict provider test requested '{provider}', but analysis executed on "
+            f"'{actual_provider}'. No fallback allowed."
+        )
+
+    # Manual provider tests are operator-driven recovery actions; reflect the
+    # outcome in the shared breaker so the dashboard status matches reality.
+    try:
+        if response.get("status") == "success" and str(actual_provider).lower() == provider:
+            llm_manager.update_provider_state(
+                provider,
+                "operational",
+                "Manual diagnostic succeeded",
+                latency_ms=latency_ms,
+                success=True,
+            )
+        if circuit_breaker and provider in getattr(circuit_breaker, "engine_stats", {}):
+            if response.get("status") == "success" and str(actual_provider).lower() == provider:
+                circuit_breaker.record_success(provider)
+            else:
+                circuit_breaker.record_failure(provider)
+            update_circuit_breaker_metrics()
+    except Exception:
+        pass
+    return response
 
 
 # ══════════════════════════════════════════════════════════════════════════════

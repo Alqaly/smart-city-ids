@@ -1115,8 +1115,8 @@ def set_automation_mode_metric(mode: str):
     Parameters
     ----------
     mode : str
-        The currently active automation mode (one of ``"autopilot"``,
-        ``"assisted"``, ``"manual"``).
+        The currently active automation mode (one of ``"autonomous"``,
+        ``"assisted"``, ``"manual"``, ``"emergency"``).
     """
     # Lazy import to avoid circular dependency with the metrics module
     from infrastructure.metrics import PROM_AUTOMATION_MODE

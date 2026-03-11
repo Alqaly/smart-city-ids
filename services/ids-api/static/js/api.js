@@ -174,14 +174,6 @@ export const api = {
     return requestNoAuth(url, { method: 'POST' });
   },
 
-  // ── Chaos Mode ─────────────────────────────────────────────────────
-  startChaos:   (mode = 'quick') => requestNoAuth(`/api/demo/chaos?mode=${mode}`, { method: 'POST' }),
-  getChaosStatus: () => requestNoAuth('/api/demo/chaos/status'),
-
-  // ── Attack Registry & Runner ───────────────────────────────────
-  getAttackRegistry: () => requestNoAuth('/api/attacks/registry'),
-  runAttackScenario: (scenarioId, campaign = false) =>
-    requestNoAuth(`/api/attacks/run?scenario_id=${scenarioId}&campaign=${campaign}`, { method: 'POST' }),
 };
 
 /**

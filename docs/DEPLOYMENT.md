@@ -26,19 +26,19 @@ sudo bash scripts/start-everything.sh
 
 ### Kubernetes Namespaces & Services
 
-| Namespace | Service | Replicas | Purpose |
-|-----------|---------|----------|---------|
+| Namespace | Service | Typical Replicas | Purpose |
+|-----------|---------|------------------|---------|
 | **smart-city** | ids-api | 1 | Alert processing and LLM analysis |
 | **smart-city** | postgres | 1 | Alert storage and audit logs |
-| **smart-city** | mqtt-broker | 1 | IoT device message bus |
-| **smart-city** | traffic-camera | 2 | Vulnerable demo service |
-| **smart-city** | healthcare-api | 2 | Vulnerable demo service |
-| **smart-city** | parking-system | 2 | Vulnerable demo service |
-| **smart-city** | iot-device-* | 30+ | MQTT message generators |
+| **smart-city** | mqtt-broker | 1 | IoT message bus workload |
+| **smart-city** | traffic-camera | profile-dependent | IoT emulator workload |
+| **smart-city** | healthcare-api | profile-dependent | IoT emulator workload |
+| **smart-city** | parking-system | profile-dependent | IoT emulator workload |
+| **smart-city** | env-sensor / street-lighting / others | profile-dependent | IoT emulator workloads |
 | **monitoring** | prometheus | 1 | Metrics collection |
 | **monitoring** | grafana | 1 | Live dashboards |
 | **falco-system** | falco-forwarder | 1 | Runtime security alerts |
-| **suricata-system** | suricata-forwarder | 1 | Network security alerts |
+| **monitoring** | suricata-forwarder | 1 | Network security alerts |
 
 ### Storage
 
@@ -86,7 +86,7 @@ The `scripts/start-everything.sh` script executes 8 phases:
 - Timeout waiting for node → System may need reboot
 
 ### Phase 4: Kubernetes Manifests Deployment
-- Creates namespaces (smart-city, monitoring, falco-system, suricata-system)
+- Creates namespaces (smart-city, monitoring, falco-system)
 - Deploys RBAC and network policies
 - Deploys all services and applications
 
@@ -134,14 +134,13 @@ The `scripts/start-everything.sh` script executes 8 phases:
 [✓] Phase 8: Discovering service URLs
 Smart City IDS is ready!
 
-  Grafana (Live Dashboards): http://192.168.1.187:30300
-  Prometheus (Metrics):      http://192.168.1.187:31106
-  IDS API (Documentation):   http://192.168.1.187:30800/docs
+  Dashboard / API:           http://localhost:30800/ui
+  Grafana (NodePort):        http://<NODE_IP>:30300
+  Prometheus (NodePort):     http://<NODE_IP>:31106
 
-Smart City Services:
-  Traffic Camera:            http://192.168.1.187:30100
-  Healthcare API:            http://192.168.1.187:30101
-  Parking System:            http://192.168.1.187:30102
+Optional stable localhost access:
+  bash scripts/access-stack.sh start
+  Dashboard / API:           http://localhost:8000/ui
 ```
 
 ---
@@ -167,7 +166,6 @@ sudo kubectl get nodes
 kubectl create namespace smart-city
 kubectl create namespace monitoring
 kubectl create namespace falco-system
-kubectl create namespace suricata-system
 ```
 
 ### 3. Deploy Services
@@ -181,10 +179,10 @@ kubectl apply -f k8s-manifests/postgres-deployment.yaml
 kubectl apply -f k8s-manifests/mqtt-broker.yaml
 kubectl apply -f k8s-manifests/ids-api-FINAL.yaml
 kubectl apply -f k8s-manifests/services-no-build.yaml
+kubectl apply -f k8s-manifests/suricata-fixed.yaml
+kubectl apply -f k8s-manifests/falco-forwarder.yaml
 kubectl apply -f k8s-manifests/prometheus-deployment.yaml
 kubectl apply -f k8s-manifests/grafana-deployment.yaml
-kubectl apply -f k8s-manifests/falco-forwarder.yaml
-kubectl apply -f k8s-manifests/suricata-forwarder-deployment.yaml
 ```
 
 ### 4. Wait for Readiness
@@ -207,6 +205,57 @@ kubectl get deploy,svc -n smart-city | grep -E 'traffic-camera|healthcare-api|pa
 curl -s http://localhost:30800/api/iot/devices | jq .
 curl -s http://localhost:30800/api/iot/telemetry | jq .
 ```
+
+### 5.1 Canonical Emulator Deployment Pattern
+
+The preferred Kubernetes path for the IoT emulators is:
+
+- shared runtime image
+- per-service application code mounted from `ConfigMap`
+- rollout restart when emulator code changes
+
+This is the standard path for this repo because it keeps emulator iteration fast without requiring a new per-service image for ordinary application-code changes.
+
+Use:
+
+```bash
+sudo bash scripts/start-everything.sh
+bash scripts/deploy-code.sh
+```
+
+`deploy-code.sh` now applies the active runtime manifests and refreshes the known code/config surfaces in one pass:
+
+- `k8s-manifests/ids-api-FINAL.yaml`
+- `k8s-manifests/services-no-build.yaml`
+- `k8s-manifests/suricata-fixed.yaml`
+- `k8s-manifests/falco-forwarder.yaml`
+
+It also refreshes the emulator code ConfigMaps and restarts the relevant workloads so ordinary code + detector changes do not require a second manual `kubectl apply`.
+
+The initial bootstrap path (`scripts/start-everything.sh`) also builds and imports the shared emulator runtime image used by `services-no-build.yaml`.
+
+The active manifest set now includes `traffic-camera`, `healthcare-api`, `parking-system`, `env-sensor`, and `street-lighting` under the same shared-image + ConfigMap-mounted code pattern.
+
+### 6. Static UI Asset Mounts (Important)
+
+`ids-api` mounts static frontend assets from ConfigMaps in this deployment.  
+If backend/UI code changed but browser output looks stale, refresh all static ConfigMaps and restart `ids-api`:
+
+```bash
+bash scripts/deploy-code.sh
+kubectl -n smart-city get configmap ids-app-static ids-app-static-js ids-app-static-js-modules
+```
+
+### 7. Stable Local Access (Recommended)
+
+Avoid dependence on node IP/Wi-Fi changes by using managed localhost forwarding:
+
+```bash
+bash scripts/access-stack.sh start
+bash scripts/access-stack.sh status
+```
+
+This provides stable local endpoints (`localhost:8000`, `localhost:3000`, `localhost:9090`) even when the node IP changes. If `localhost:30800` is already reachable in your environment, direct NodePort access remains valid and no port-forward is required.
 
 ---
 
@@ -451,7 +500,7 @@ groups:
 sudo bash scripts/cleanup.sh
 
 # Or manually:
-kubectl delete namespace smart-city monitoring falco-system suricata-system
+kubectl delete namespace smart-city monitoring falco-system
 sudo k3s-uninstall.sh
 
 # Check removal

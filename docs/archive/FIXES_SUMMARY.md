@@ -2,9 +2,9 @@
 
 > Important: Some historical values in this file (provider status/counts, metrics totals, auth behavior) may no longer match the current deployment.
 > Use the current validated documents for tomorrow's demo:
-> - `docs/DEMO_DAY_RUNBOOK.md`
-> - `docs/DEMO_QA_CHECKLIST.md`
-> - `docs/DEMO_SCRIPT_VALIDATION_REPORT_2026-02-24.md`
+> - `docs/reference/DEMO_DAY_RUNBOOK.md`
+> - `docs/reference/DEMO_QA_CHECKLIST.md`
+> - `docs/reference/DEMO_SCRIPT_VALIDATION_REPORT_2026-02-24.md`
 
 ## Date: 2026-02-24
 

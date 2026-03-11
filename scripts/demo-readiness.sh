@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
-# Smart City IDS - Demo Readiness Check
-# One-command pre-demo validation for meeting/defense day.
+# Smart City IDS - Readiness Check
+# One-command validation for evaluation/presentation readiness.
 # Usage: bash scripts/demo-readiness.sh [--quick] [--help]
 # =============================================================================
 
@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
-init_script "$0" "Demo Readiness Check"
+init_script "$0" "Readiness Check"
 
 QUICK=0
 while [[ $# -gt 0 ]]; do
@@ -23,6 +23,11 @@ done
 
 ensure_commands kubectl curl jq
 ensure_kubeconfig
+
+API_BASE="${IDS_API_URL:-}"
+if [[ -z "$API_BASE" ]]; then
+    API_BASE="$(resolve_ids_api_url || true)"
+fi
 
 PASSED=0
 FAILED=0
@@ -296,8 +301,12 @@ except: print(0)
     fi
 
     log_section "7) BYO IoT Device Ingest (REST)"
-    IDS_PORT="$(get_service_nodeport ids-api-service smart-city 30800)"
-    BYO_JSON=$(curl -fsS -X POST "http://${NODE_IP}:${IDS_PORT}/api/iot/sensor" \
+    local_ingest_base="${API_BASE:-}"
+    if [[ -z "$local_ingest_base" ]]; then
+        IDS_PORT="$(get_service_nodeport ids-api-service smart-city 30800)"
+        local_ingest_base="http://${NODE_IP}:${IDS_PORT}"
+    fi
+    BYO_JSON=$(curl -fsS -X POST "${local_ingest_base}/api/iot/sensor" \
         -H "Content-Type: application/json" \
         -d '{"device_id":"readiness-check-device","device_type":"external","event_type":"heartbeat","value":{"status":"alive"}}' \
         2>/dev/null || true)
@@ -317,16 +326,16 @@ echo ""
 
 if [[ $FAILED -gt 0 ]]; then
     echo -e "\033[0;31m  ╔═══════════════════════════════╗\033[0m"
-    echo -e "\033[0;31m  ║   DEMO: NOT READY             ║\033[0m"
+    echo -e "\033[0;31m  ║   SYSTEM: NOT READY           ║\033[0m"
     echo -e "\033[0;31m  ╚═══════════════════════════════╝\033[0m"
     echo ""
     echo "Reasons: $FAILED check(s) failed. Review items above marked with [ERROR]."
     echo ""
-    die "Demo readiness check failed ($FAILED issue(s))"
+    die "Readiness check failed ($FAILED issue(s))"
 fi
 
 echo -e "\033[0;32m  ╔═══════════════════════════════╗\033[0m"
-echo -e "\033[0;32m  ║   DEMO: READY                 ║\033[0m"
+echo -e "\033[0;32m  ║   SYSTEM: READY               ║\033[0m"
 echo -e "\033[0;32m  ╚═══════════════════════════════╝\033[0m"
 echo ""
-log_info "All $PASSED checks passed. System is ready for demo."
+log_info "All $PASSED checks passed. System is ready for operation/evaluation."

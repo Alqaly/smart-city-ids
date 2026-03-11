@@ -280,7 +280,12 @@ class LLMManager:
             return "server"
         return "other"
     
-    async def analyze(self, alert: Dict[str, Any], preferred_engine: Optional[str] = None) -> Dict[str, Any]:
+    async def analyze(
+        self,
+        alert: Dict[str, Any],
+        preferred_engine: Optional[str] = None,
+        allow_fallback: bool = True,
+    ) -> Dict[str, Any]:
         """
         Analyze an alert using available provider(s).
         
@@ -288,6 +293,8 @@ class LLMManager:
         
         Args:
             alert: Security alert dict
+            preferred_engine: Provider to try first.
+            allow_fallback: When False, do not fail over to other providers.
             
         Returns:
             {
@@ -308,7 +315,10 @@ class LLMManager:
         if preferred_engine:
             preferred = [p for p in self.providers if p.NAME == preferred_engine]
             if preferred:
-                providers_order = preferred + [p for p in self.providers if p.NAME != preferred_engine]
+                if allow_fallback:
+                    providers_order = preferred + [p for p in self.providers if p.NAME != preferred_engine]
+                else:
+                    providers_order = preferred
 
         for provider in providers_order:
             async with self.state_lock:
@@ -452,7 +462,9 @@ class LLMManager:
                 valid_count += 1
                 logger.info(f"  - ✅ {provider_name}: OK")
             else:
-                logger.warning(f"  - ❌ {provider_name}: FAILED. Reason: {result.get('error', 'Unknown')}. Marking as auth_failed.")
+                logger.warning(
+                    f"  - ❌ {provider_name}: FAILED. Reason: {result.get('error', 'Unknown')}."
+                )
 
         logger.info(f"Startup validation complete: {valid_count} / {len(configured_providers)} providers are operational.")
 
@@ -462,22 +474,59 @@ class LLMManager:
         try:
             # Use a lightweight probe, not a full analysis
             result = await asyncio.wait_for(provider.probe(), timeout=10.0)
-            if result.get("status") != "success":
-                # This is where we mark the provider as failed on startup
+            if result.get("status") == "success":
+                self.update_provider_state(provider_name, "operational", "Ready (startup probe ok)")
+                return result
+
+            error = result.get("error", "Probe returned non-success status")
+            kind = self._classify_error(error)
+            if kind == "auth":
                 self.update_provider_state(
                     provider_name,
                     state="auth_failed",
-                    reason=f"Startup probe failed: {result.get('error', 'Probe returned non-success status')}",
-                    cooldown_seconds=None # No cooldown for auth failures
+                    reason=f"Startup probe auth failure: {error}",
+                    cooldown_seconds=None,
+                )
+            elif kind in ("rate_limit", "quota", "server"):
+                self.update_provider_state(
+                    provider_name,
+                    state="cooldown",
+                    reason=f"Startup probe temporary failure: {error}",
+                    cooldown_seconds=self.server_error_cooldown_seconds if kind == "server" else self.rate_limit_cooldown_seconds,
+                )
+            else:
+                # Do not permanently disable providers on ambiguous startup failures.
+                self.update_provider_state(
+                    provider_name,
+                    state="operational",
+                    reason=f"Startup probe inconclusive: {error}",
+                    cooldown_seconds=None,
                 )
             return result
         except Exception as e:
-            self.update_provider_state(
-                provider_name,
-                state="auth_failed",
-                reason=f"Startup probe exception: {str(e)}",
-                cooldown_seconds=None
-            )
+            error = str(e)
+            kind = self._classify_error(error)
+            if kind == "auth":
+                self.update_provider_state(
+                    provider_name,
+                    state="auth_failed",
+                    reason=f"Startup probe auth exception: {error}",
+                    cooldown_seconds=None,
+                )
+            elif kind in ("rate_limit", "quota", "server"):
+                self.update_provider_state(
+                    provider_name,
+                    state="cooldown",
+                    reason=f"Startup probe temporary exception: {error}",
+                    cooldown_seconds=self.server_error_cooldown_seconds if kind == "server" else self.rate_limit_cooldown_seconds,
+                )
+            else:
+                self.update_provider_state(
+                    provider_name,
+                    state="operational",
+                    reason=f"Startup probe inconclusive: {error}",
+                    cooldown_seconds=None,
+                )
             return {"status": "error", "error": str(e)}
 
 

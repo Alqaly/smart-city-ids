@@ -66,7 +66,7 @@ class Tool:
     parameters: List[ToolParameter]
     handler: Callable[..., Awaitable[Any]]
     requires_approval: bool = False
-    allowed_in_mode: List[str] = field(default_factory=lambda: ["autopilot", "assisted", "manual"])
+    allowed_in_mode: List[str] = field(default_factory=lambda: ["autonomous", "assisted", "manual"])
     
     def to_openai_schema(self) -> Dict[str, Any]:
         """Convert to OpenAI function schema"""
@@ -232,7 +232,7 @@ class ToolRegistry:
             ],
             handler=self._isolate_pod,
             requires_approval=True,
-            allowed_in_mode=["autopilot", "assisted"]
+            allowed_in_mode=["autonomous", "assisted"]
         ))
         
         self.register(Tool(
@@ -246,7 +246,7 @@ class ToolRegistry:
             ],
             handler=self._scale_service,
             requires_approval=False,
-            allowed_in_mode=["autopilot", "assisted", "manual"]
+            allowed_in_mode=["autonomous", "assisted", "manual"]
         ))
         
         self.register(Tool(
@@ -260,7 +260,7 @@ class ToolRegistry:
             ],
             handler=self._block_ip,
             requires_approval=True,
-            allowed_in_mode=["autopilot", "assisted"]
+            allowed_in_mode=["autonomous", "assisted"]
         ))
         
         self.register(Tool(
@@ -273,7 +273,7 @@ class ToolRegistry:
             ],
             handler=self._restart_service,
             requires_approval=True,
-            allowed_in_mode=["autopilot", "assisted"]
+            allowed_in_mode=["autonomous", "assisted"]
         ))
         
         # ==================== GOVERNANCE TOOLS ====================
@@ -309,10 +309,10 @@ class ToolRegistry:
             description="Change the automation governance mode",
             category=ToolCategory.GOVERNANCE,
             parameters=[
-                ToolParameter("mode", "string", "New governance mode", enum=["autopilot", "assisted", "manual"])
+                ToolParameter("mode", "string", "New governance mode", enum=["autonomous", "assisted", "manual", "emergency"])
             ],
             handler=self._set_governance_mode,
-            allowed_in_mode=["autopilot", "assisted", "manual"]
+            allowed_in_mode=["autonomous", "assisted", "manual", "emergency"]
         ))
     
     # ==================== TOOL HANDLERS ====================
@@ -511,12 +511,18 @@ class ToolRegistry:
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
-    async def _block_ip(self, ip_address: str, namespace: str = "smart-city", duration_minutes: int = 0) -> Dict[str, Any]:
+    async def _block_ip(
+        self,
+        ip_address: str,
+        namespace: str = "smart-city",
+        duration_minutes: int = 0,
+        target_workload: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Block an IP"""
         try:
             if K8sAutomation:
                 k8s = K8sAutomation()
-                await k8s.block_ip(ip_address, namespace)
+                await k8s.block_ip(ip_address, namespace, target_workload=target_workload)
                 return {
                     "status": "success",
                     "message": f"IP {ip_address} blocked",
@@ -601,19 +607,25 @@ async def execute_tool_call(name: str, arguments: Dict[str, Any], governance_mod
     Returns:
         Tool execution result
     """
+    normalized_mode = str(governance_mode or "assisted").strip().lower()
+    if normalized_mode in {"autopilot", "live"}:
+        normalized_mode = "autonomous"
+    elif normalized_mode in {"dry-run", "dry_run"}:
+        normalized_mode = "manual"
+
     tool = tool_registry.get(name)
     if not tool:
         return {"status": "error", "message": f"Unknown tool: {name}"}
     
     # Check if tool is allowed in current mode
-    if governance_mode not in tool.allowed_in_mode:
+    if normalized_mode not in tool.allowed_in_mode:
         return {
             "status": "blocked",
-            "message": f"Tool '{name}' not allowed in {governance_mode} mode"
+            "message": f"Tool '{name}' not allowed in {normalized_mode} mode"
         }
     
     # Check if approval is required
-    if tool.requires_approval and governance_mode == "assisted":
+    if tool.requires_approval and normalized_mode == "assisted":
         # Queue for approval
         try:
             if GovernanceController:
