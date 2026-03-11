@@ -1,256 +1,134 @@
-# How It Works — Smart City IDS
+# How It Works
 
-End-to-end walkthrough of the system, from detection to automated response.
+End-to-end explanation of the current Smart City IDS pipeline.
 
----
+## 1. Activity happens in the cluster
 
-## 1. The Smart City Environment
+The cluster runs IoT-style workloads such as:
+- traffic camera
+- healthcare API
+- parking system
+- environmental sensor
+- street lighting
+- MQTT broker
 
-The cluster runs intentionally vulnerable IoT services — emulating real smart-city infrastructure:
+These workloads generate normal traffic, protocol activity, and controlled attack behavior.
 
-| Service | What It Does | Vulnerabilities (by design) |
-|---|---|---|
-| **traffic-camera** | License plate recognition, camera feeds | Command injection, path traversal, no auth |
-| **healthcare-api** | Patient records, medical data | SQL injection, no input validation |
-| **parking-system** | Reservations, payments | Injection, weak session handling |
-| **mqtt-broker** | MQTT pub/sub for sensors | Unauthenticated, no TLS |
-| **env-sensor / street-lighting** | Environmental and lighting control workloads | Protocol abuse surface and state tamper paths |
+## 2. Detection engines observe that activity
 
-These services are deployed from `smart-city-services/` using the active shared-runtime-image + ConfigMap-mounted code pattern. The supported update path is `bash scripts/deploy-code.sh`.
+### Falco
+Falco detects runtime and syscall behavior such as:
+- shell spawns
+- sensitive file reads
+- suspicious tooling inside containers
 
----
+### Suricata
+Suricata detects network and protocol patterns such as:
+- MQTT misuse
+- Modbus-style tamper patterns
+- ONVIF enumeration or scraping
+- HTTP abuse and other network signatures
 
-## 2. Detection Layer
+## 3. Forwarders normalize the alerts
 
-Two independent detection engines monitor the cluster:
+Falco and Suricata do not write directly into the dashboard.
 
-### Falco (Runtime Detection)
-- Runs as a DaemonSet using eBPF probes
-- Detects syscall-level threats: shell spawns, sensitive file reads, privilege escalation
-- Outputs structured JSON alerts with `rule`, `output`, `output_fields`, `priority`
-- Configured via `k8s-manifests/falco-values.yaml`
+Instead:
+- Falco -> Falco forwarder -> ids-api
+- Suricata -> Suricata forwarder -> ids-api
 
-### Suricata (Network Detection)
-- Runs as a pod in the monitoring namespace
-- Analyzes network traffic with signature rules
-- Detects: port scans, DDoS patterns, DNS tunneling, known exploit signatures
-- Outputs EVE JSON logs parsed by the Suricata forwarder
+The forwarders reshape detector output into the IDS alert schema before sending it into the backend.
 
-Both detectors feed their alerts through **forwarders** — lightweight Python services that:
-1. Parse raw alert output into a normalized JSON shape
-2. Deduplicate repeated alerts (fingerprint-based, 60s window)
-3. Map priority strings to numeric severity (1–10)
-4. POST to `http://ids-api:8000/api/alerts/internal` (forwarders only, `X-IDS-Internal-Token` required)
+## 4. ids-api processes the alert
 
----
+When an alert arrives, the IDS backend applies:
+- intake validation
+- rate limiting
+- deduplication
+- analysis routing
 
-## 3. Alert Intake
+If the alert is a duplicate, the backend can reuse earlier analysis instead of calling an LLM again.
 
-When an alert arrives at `/api/alerts/internal`, the IDS API applies multiple protective layers before any LLM call:
+## 5. Analysis happens
 
+If the alert is not served from dedup/cache, the backend tries to analyze it.
+
+Possible analysis paths:
+- live LLM provider
+- cached result
+- deterministic/rule-based fallback path where applicable
+
+Provider behavior depends on live runtime state:
+- operational
+- unverified
+- cooldown
+- auth failed
+- other error states
+
+Check current state with:
+
+```bash
+curl -s http://localhost:30800/api/llm/diagnostics | jq .
 ```
-Incoming alert
-    │
-    ├─ Token bucket rate limiter (120/min refill, 30 burst)
-    │   └─ Exceeded → HTTP 429
-    │
-    ├─ Request queue semaphore (max 100 concurrent)
-    │   └─ Full → HTTP 503
-    │
-    ├─ Alert rate limiter (sliding window)
-    │   ├─ Per-rule: max 10 per 60s
-    │   ├─ Per-source: max 100 per 60s
-    │   └─ Global: max 500 per 60s
-    │       └─ Exceeded → stored in throttled_alerts table, HTTP 429
-    │
-    └─ Dedup cache (MD5 fingerprint, 60s TTL)
-        └─ Cache hit → return previous analysis immediately, skip LLM
+
+## 6. Governance decides whether action is allowed
+
+Governance modes:
+- `manual`
+- `assisted`
+- `autonomous`
+
+Meaning:
+- manual -> actions wait for approval
+- assisted -> policy-approved actions may run automatically, others wait
+- autonomous -> policy-approved actions run automatically
+
+Validate the real behavior with:
+
+```bash
+bash scripts/test-governance-modes.sh
 ```
 
-This stack prevents a flood of Falco alerts (common during active attacks) from overwhelming the LLM provider or running up API costs.
+## 7. Kubernetes actions may run
 
----
+Examples:
+- isolate a workload
+- create a scoped block-IP policy
+- alert the team
 
-## 4. LLM Analysis
+These actions are governed and audited. They are not executed blindly from the detector alone.
 
-If the alert passes all filters (not rate-limited, not a duplicate), it goes to the LLM manager.
+## 8. Everything is stored and displayed
 
-### Provider Selection
+Results are persisted in PostgreSQL and then exposed through:
+- `/api/alerts`
+- `/api/metrics`
+- `/api/iot/devices`
+- `/ui`
 
-The manager maintains a priority-ordered list of LLM engines. For each call:
+## 9. How to see it live
 
-1. Check if engine's **circuit breaker** is open → skip if so
-2. Check if engine is in **cooldown** (15min after auth/quota error) → skip if so
-3. Attempt API call with the alert context
+Fast readiness:
 
-If the call fails, the manager tries the next configured provider in priority order.
+```bash
+bash scripts/pre-demo-check.sh
+```
 
-### The Prompt
+Processed event stream:
 
-Each engine sends a system prompt that instructs the LLM to act as a cybersecurity analyst. The prompt includes:
+```bash
+bash scripts/live-pipeline-log.sh --attacks
+```
 
-- The alert rule name, output text, and raw output fields
-- Instructions to return **only** valid JSON
-- The exact response schema (severity, threat_type, summary, recommendations, automated_actions)
-- Constraint: severity 1–10, threat_type from a known set
+Raw component logs:
 
-### Response Parsing
+```bash
+SINCE=5m bash scripts/tail-pipeline-pods.sh
+```
 
-The engine attempts to extract JSON from the response:
-1. Look for ```json fences
-2. Look for raw `{...}` JSON
-3. Validate required fields (severity, summary, threat_type)
-4. If parsing fails entirely → return conservative fallback analysis (severity 5, "Policy Violation")
+## 10. Important boundaries
 
-### Provider Failure Handling
-
-When one or more providers are unavailable (cooldown, circuit breaker, auth/quota issues), the manager fails over to the next configured provider.
-
-- Per-provider circuit-breaker state is exposed via `/api/circuit-breaker/status`
-- Provider diagnostics are exposed via `/api/llm/diagnostics`
-- Startup requires at least one configured API key (`Config.validate()`), so keyless local-only startup is not enabled in this branch
-
----
-
-## 5. Automated Response
-
-After LLM analysis, the system decides what to do based on severity and governance mode:
-
-### Severity Thresholds
-
-| Severity | Action | Details |
-|---|---|---|
-| ≥ 8 (critical) | `isolate_pod` | Creates a deny-all NetworkPolicy for the pod's container |
-| ≥ 6 (high) | `scale_up` | Patches the deployment to 5 replicas (absorb load) |
-| < 6 | No automated action | Logged only |
-
-### Protected Services
-
-Some services are exempt from automated isolation to prevent self-disruption:
-- `healthcare-api` — critical patient data
-- `ids-api` — the IDS itself
-- `postgres` — persistence layer
-
-If a critical alert targets a protected service, the action is logged as `blocked_protected_service` instead of executed.
-
-### Kubernetes Operations
-
-`k8s_automation.py` uses the official Kubernetes Python client:
-
-- **isolate_pod**: Creates a `NetworkPolicy` named `isolate-{pod-name}` with empty ingress/egress rules
-- **scale_up**: Patches the deployment's replica count via the Apps V1 API
-- **block_ip**: Creates a `NetworkPolicy` with a CIDR-based ingress deny rule
-- **cordon_node**: Patches the node spec to set `unschedulable: True`
-- **restart_service**: Deletes pods matching the deployment label (rolling restart)
-
----
-
-## 6. Governance (Human-in-the-Loop)
-
-The governance controller mediates between automated analysis and K8s actions:
-
-### Modes
-
-| Mode | Behavior |
-|---|---|
-| **Autonomous** | Policy-approved actions execute automatically according to governance rules |
-| **Assisted** | Actions auto-execute if severity < 8; severity ≥ 8 queued for approval |
-| **Manual** | All actions queued for operator approval |
-
-### Approval Workflow
-
-1. Action is proposed (isolate_pod, scale_up, etc.)
-2. Governance controller evaluates: can it auto-execute?
-   - If yes → execute immediately, log to audit
-   - If no → add to pending queue with 5-minute expiry
-3. Operator sees pending actions in the dashboard
-4. Operator approves (executes + logs) or rejects (logs reason)
-5. Expired actions are cleaned up automatically
-
-### Audit Trail
-
-Every governance decision is recorded in the `audit_logs` table:
-- Action type, target, severity, mode at time of decision
-- Who approved/rejected, when, with what comment
-- Execution result (success/failure)
-
----
-
-## 7. Persistence
-
-### PostgreSQL (Primary)
-
-8 tables store the full operational history:
-- `alerts` — every processed alert with full LLM analysis (JSONB)
-- `analysis_results` — LLM model used, analysis time, confidence
-- `automation_actions` — K8s actions taken, status, governance mode
-- `audit_logs` — governance decisions and operator actions
-- `iot_devices` — device registry (auto-populated from sensor data)
-- `iot_events` — telemetry history
-- `system_logs` — application logs
-- `throttled_alerts` — rate-limited alerts (for visibility)
-
-### Memory Fallback
-
-If PostgreSQL is unreachable, the system can fall back to in-memory storage:
-- Same API, same data model
-- Data is lost on pod restart
-- `/health` exposes storage/database component status so operators can detect degraded persistence
-- The service now auto-retries PostgreSQL and can recover back from fallback without restarting `ids-api`
-
-### Prometheus Counter Restoration
-
-On startup, the database restores Prometheus counters from persisted data so metrics survive pod restarts. This prevents counter resets from appearing as drops in Grafana dashboards.
-
----
-
-## 8. Operator Dashboard
-
-A single-page HTML application served at `/ui` (NodePort 30800):
-
-| Tab | Data Source | What It Shows |
-|---|---|---|
-| **Overview** | `/health`, `/api/metrics` | System status, alert counts, LLM engine health |
-| **Incidents** | `/api/operator/incidents` | Alert feed with severity, evidence, actions |
-| **Governance** | `/api/governance/*` | Mode control, pending approvals, audit history |
-| **LLM Engines** | `/api/llm/status`, `/health` | Provider status, circuit breakers, cooldowns |
-| **Kubernetes** | `/api/production-status` | Pod status, network policies, automation actions |
-| **IoT Devices** | `/api/iot/devices`, `/api/iot/events` | Device registry, telemetry, security events |
-| **Attack Simulation** | Client-side | One-click attack buttons + CLI script reference |
-
-The dashboard auto-refreshes data every 30 seconds. Unauthenticated tabs (`/health`, `/api/metrics`) load immediately; authenticated tabs prompt for login.
-
----
-
-## 9. Attack Simulation
-
-### Dashboard Buttons
-
-Synthetic attack injection was removed. Generate detections using LIVE attacks (real traffic) so Falco/Suricata produce real alerts.
-
-### CLI Pipeline Script
-
-The recommended live attack runner is `scripts/run-live-attacks.sh` (real traffic/runtime behaviors against the running cluster). Legacy synthetic attack scripts are archived/disabled.
-
-Representative scenarios include:
-
-1. Shell spawn in IoT/service pods (Falco runtime)
-2. Sensitive file read (`/etc/passwd`, `/etc/shadow`) in containers (Falco runtime)
-3. SQL injection payloads against HTTP services (Suricata network)
-4. HTTP flood / burst traffic (Suricata network)
-5. Lateral/service probing behavior and outbound connections (Falco + Suricata depending path)
-8. DNS exfiltration
-9. Lateral movement
-10. SQL injection probe
-11. Cryptominer detection
-12. MQTT message poisoning
-
-Each scenario: executes the attack (or simulates it) → sends alert to IDS API → LLM analyzes → automated response applied. Run with `--quick` for a 5-scenario subset or `--scenario N` for a single test.
-
-### External Attack Tools
-
-`attack-simulator/` contains standalone Python scripts:
-- `ddos_simulator.py` — multi-threaded HTTP flood
-- `data_exfiltration.py` — simulated data theft
-- `privilege_escalation.py` — container escape simulation
-- `phase4-smart-city-attacks.py` — compound attack scenarios
+- Not every alert is a full real exploit chain.
+- Some protocol detections validate recognizable malicious behavior rather than full backend compromise.
+- Logical IoT registry rows are not proof of live hardware.
+- LLM availability is a live operational condition, not a fixed architectural guarantee.

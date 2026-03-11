@@ -1,127 +1,112 @@
 # Security Model
 
-This document describes the current security and attack-model assumptions for the Smart City IDS research testbed.
+Security model for the current Smart City IDS research testbed.
 
-## 1. Scope
+## Scope
 
-The system is designed to evaluate:
-- runtime and network detection behavior
-- LLM-supported alert analysis
-- governance-controlled response automation
-- protocol-aware IoT attack scenarios in a Kubernetes testbed
+The project is designed to evaluate:
+- runtime and network detections
+- LLM-assisted alert interpretation
+- governance-controlled automated response
+- protocol-aware IoT attack scenarios in Kubernetes
 
-It is not designed to:
-- attack real third-party systems
-- emulate undisclosed exploits
-- claim complete production hardening
+It is not designed to claim:
+- full production hardening
+- complete physical-device realism
+- complete real-world exploit-chain coverage for every scenario
 
-## 2. Threat model
+## Threat model
 
-### Adversary behaviors in scope
-- suspicious shell execution in containers
-- credential/file access attempts
-- protocol abuse against exposed smart-city services
-- network flooding and repeated request pressure
-- outbound connection patterns associated with exfiltration or command-and-control
+### In scope
+- suspicious shell execution
+- sensitive file access
+- protocol misuse
+- network flooding or repeated request pressure
+- outbound behavior linked to exfiltration or command-and-control
 - unauthorized control operations against IoT-facing services
 
-### Adversary behaviors out of scope
+### Out of scope
 - real zero-day weaponization
-- physical hardware compromise chains
-- full ICS/OT protocol fidelity for every service in the project
+- physical compromise chains for all devices
+- full native ICS/OT fidelity across every service
 
-## 3. Detection model
+## Detection model
 
 ### Falco
-Falco covers runtime/syscall behaviors such as:
+Covers runtime/container behavior such as:
 - shell spawns
 - sensitive file reads
-- downloader/package-manager execution
-- suspicious tooling inside containers
+- suspicious command execution
 
 ### Suricata
-Suricata covers network/protocol patterns such as:
-- SQLi-like payload delivery
-- HTTP flood behavior
-- MQTT parking control abuse
-- Modbus write tamper
-- ONVIF enumeration and scraping patterns
-- ANPR scraping
+Covers network and protocol patterns such as:
+- MQTT misuse
+- Modbus-style tamper patterns
+- ONVIF misuse and enumeration
+- HTTP and other network signatures
 
-## 4. Reality boundary
+## Reality boundary
 
 ### Real execution
-The following are executed for real in the cluster:
+Executed for real in the cluster:
 - HTTP requests to live services
 - MQTT traffic to the live broker
-- state-changing protocol operations against emulator services
-- `kubectl exec` runtime actions that trigger Falco telemetry
-- IDS ingestion, LLM analysis, governance, and Kubernetes response logic
+- state-changing actions against emulator services
+- runtime actions that trigger Falco telemetry
+- IDS ingestion, analysis, governance, and Kubernetes response logic
 
 ### Signature-driven validation
-Some detections still validate recognizable malicious patterns rather than full backend exploitation. Examples include:
-- SQLi string delivery without proving a real database compromise
-- protocol misuse detection without a full long-lived adversary campaign
+Some detections validate recognizable malicious patterns rather than full backend compromise. That is acceptable in this testbed if stated explicitly.
 
-This is an accepted research-testbed approach if the limitation is stated explicitly.
+## Automation safety
 
-## 5. Automation safety model
-
-The system uses governance modes:
+Governance modes:
 - `manual`
 - `assisted`
 - `autonomous`
 
 Safety controls include:
+- action approval paths
 - protected services
-- approval queue in manual paths
-- separable force-execution profile for full autonomy testing
-- action audit traces
+- audit traces
+- separable force-autonomy testing profile
 
-## 6. IoT realism model
+## IoT realism model
 
-The emulator fleet is best described as:
+The IoT layer is best described as:
 - protocol-faithful software emulation with state models
 
-It is not accurate to describe the whole fleet as:
-- purely physical-device emulation
-- fully native industrial protocol deployment across all services
+It is not accurate to describe the full fleet as:
+- a fully physical deployment
+- a fully native industrial protocol deployment for every service
 
-Current stronger realism areas:
-- parking MQTT gateway behavior
-- environmental sensor Modbus-style state tamper
-- environmental sensor native OPC UA endpoint
-- traffic camera ONVIF-like device/media/PTZ behavior
-- street-lighting stateful control behavior
+## Verification sources
 
-## 7. Verification sources
+Use live evidence, not assumptions:
 
-Runtime behavior should be verified from the live system, not assumed from documentation alone.
-
-Use:
-- `bash scripts/pre-demo-check.sh`
-- `bash scripts/test-governance-modes.sh`
-- `bash scripts/e2e-verbose-test.sh --quick`
-- `bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 8 --verbose`
+```bash
+bash scripts/pre-demo-check.sh
+bash scripts/test-governance-modes.sh
+bash scripts/e2e-verbose-test.sh --quick
+bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 8 --verbose
+```
 
 And inspect:
 - `/api/alerts`
-
-Governance and action-path validation depend on real LLM analysis. If all providers are unavailable, these checks cannot demonstrate mode gating.
 - `/api/governance/status`
 - `/api/llm/diagnostics`
-- `/api/iot/telemetry`
+- `/api/iot/devices`
 
-## 8. Claims that are safe to make
+## Safe claims
 
-- The system demonstrates end-to-end alert analysis and response control in a live Kubernetes testbed.
-- The system mixes real detector telemetry with bounded signature-driven attack validation.
+- The system demonstrates end-to-end alert analysis and governed response in a live Kubernetes testbed.
+- The system mixes real detector telemetry with bounded signature-driven validation.
 - The system supports protocol-aware emulation for selected smart-city workloads.
 - The system includes explicit governance controls for automated actions.
 
-## 9. Claims to avoid
+## Claims to avoid
 
 - “Production ready” without qualification
-- “All attacks are fully real exploit chains”
+- “All attacks are full real exploit chains”
 - “All emulators are equivalent to physical hardware”
 - “All providers are operational” without current diagnostics
