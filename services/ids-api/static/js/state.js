@@ -33,7 +33,7 @@ export const ALL_PROVIDERS = [
   { id: 'xai',       name: 'xAI Grok-4',       model: 'grok-4-latest',               icon: 'X', color: '#00d4ff' },
   { id: 'anthropic', name: 'Anthropic Claude',  model: 'claude-sonnet-4-20250514',    icon: 'A', color: '#d97706' },
   { id: 'openai',    name: 'OpenAI GPT-4',      model: 'gpt-4o',                       icon: 'O', color: '#22c55e' },
-  { id: 'gemini',    name: 'Google Gemini',      model: 'gemini-2.5-flash',            icon: 'G', color: '#8b5cf6' },
+  { id: 'gemini',    name: 'Google Gemini',      model: 'gemini-2.5-flash-lite',       icon: 'G', color: '#8b5cf6' },
   { id: 'kimi',      name: 'Moonshot Kimi',      model: 'moonshot-v1-128k',            icon: 'K', color: '#f97316' },
 ];
 

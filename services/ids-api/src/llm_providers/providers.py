@@ -195,7 +195,7 @@ class GeminiProvider(BaseProvider):
     """Google Gemini models"""
     NAME = "gemini"
     ENV_KEY = "GEMINI_API_KEY"
-    DEFAULT_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-2.5-flash-lite"
     DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:

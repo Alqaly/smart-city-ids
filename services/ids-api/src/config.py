@@ -36,7 +36,7 @@ class Config:
     XAI_MODEL: str = os.getenv("XAI_MODEL", "grok-4-latest")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
     ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
     KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshot-v1-128k")
     
     # LLM provider failover chain (cloud providers only)

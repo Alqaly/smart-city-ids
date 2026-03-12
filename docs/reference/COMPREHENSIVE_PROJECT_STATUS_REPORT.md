@@ -270,7 +270,7 @@ The dashboard is served at `/ui` (static HTML/JS/CSS via FastAPI StaticFiles mou
 | xAI (Grok) | grok-4-latest | Configured | Unverified | Closed |
 | Anthropic (Claude) | claude-sonnet-4-20250514 | Configured | Unverified | Closed |
 | OpenAI (GPT-4) | gpt-4o | Configured | Unverified | Closed |
-| Google (Gemini) | gemini-2.5-flash | Configured | Unverified | Closed |
+| Google (Gemini) | gemini-2.5-flash-lite | Configured | Unverified | Closed |
 | Moonshot (Kimi) | moonshot-v1-128k | Configured | **Verified Working** | Closed |
 
 ### 6.2 LLM Architecture

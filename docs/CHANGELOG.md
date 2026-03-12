@@ -2105,7 +2105,7 @@ These additions should be used during the Capstone defense to explain modelling 
 - **LLM provider diagnostics**: normalized provider failure reasons into readable categories (invalid key, quota/rate limit, timeout, circuit open) instead of surfacing raw startup probe blobs as the primary status text.
 - **Manual diagnostic recovery**: successful per-provider manual tests now update the provider runtime health state so the dashboard reflects real recovery instead of showing stale startup-failure status.
 - **Usage semantics clarified**: provider usage cards/table now label DB-backed values as **alert-analysis calls**. Manual probes remain visible in diagnostics/runtime attempt counters but do not inflate the pipeline usage totals.
-- **Model defaults refreshed**: aligned `.env`, `.env.example`, provider registry defaults, and docs to current default models (`gpt-4o`, `gemini-2.5-flash`, `claude-sonnet-4-20250514`, `moonshot-v1-128k`).
+- **Model defaults refreshed**: aligned `.env`, `.env.example`, provider registry defaults, and docs to current default models (`gpt-4o`, `gemini-2.5-flash-lite`, `claude-sonnet-4-20250514`, `moonshot-v1-128k`).
 - **Deploy script truthfulness**: `scripts/deploy-code.sh` now loads local `.env` before printing provider key status, so deploy output matches the repo-local configuration operators expect to apply.
 - **LLM config workflow clarified**: canonical path remains `.env` -> `scripts/apply-llm-env-to-k8s-secret.sh` -> `scripts/deploy-code.sh`.
 - **Overview metric wording**: removed misleading “current window” phrasing from flood suppression and suppressed fake 100% dedup displays when no real duplicate-capable alerts have been processed yet.

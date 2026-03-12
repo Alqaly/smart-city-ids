@@ -78,7 +78,7 @@ class LLMConfig:
     xai_model: str = "grok-4-latest"
     anthropic_model: str = "claude-sonnet-4-20250514"
     openai_model: str = "gpt-4o"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash-lite"
     kimi_model: str = "moonshot-v1-128k"
     
     # Engine priority (first available with healthy circuit breaker wins)
@@ -110,7 +110,7 @@ class LLMConfig:
             xai_model=os.getenv("XAI_MODEL", "grok-4-latest"),
             anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
             kimi_model=os.getenv("KIMI_MODEL", "moonshot-v1-128k"),
             priority=priority,
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
