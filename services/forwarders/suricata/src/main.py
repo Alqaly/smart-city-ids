@@ -34,6 +34,7 @@ IDS API Alert format (expected by /api/alerts):
 
 import json
 import logging
+import os
 import socket
 import sys
 from datetime import datetime
@@ -267,6 +268,7 @@ def convert_eve_to_alert(eve_json: Dict[str, Any]) -> Optional[IDSAlert]:
         # Build output_fields (must be Dict[str, str])
         output_fields = {
             "container.name": "suricata",
+            "k8s.ns.name": os.environ.get("POD_NAMESPACE", "monitoring"),
             "alert.signature": signature,
             "alert.signature_id": str(signature_id),
             "alert.category": category,

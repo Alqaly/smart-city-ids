@@ -953,12 +953,12 @@ function alertFields(a) {
 
 function alertNamespace(a) {
     const f = alertFields(a);
-    return f['k8s.ns.name'] || f['k8s_ns_name'] || a.namespace || '';
+    return a.namespace || a.k8s_ns || a.k8s_namespace || f['k8s.ns.name'] || f['k8s_ns_name'] || '';
 }
 
 function alertPod(a) {
     const f = alertFields(a);
-    return f['k8s.pod.name'] || f['k8s_pod_name'] || '';
+    return a.pod_name || a.k8s_pod || f['k8s.pod.name'] || f['k8s_pod_name'] || '';
 }
 
 function alertProc(a) {

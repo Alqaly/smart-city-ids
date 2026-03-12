@@ -380,6 +380,7 @@ post_internal_alert_for_mode() {
           rule:$rule,
           time:$ts,
           output_fields:{
+            "k8s.ns.name":"smart-city",
             "container.name":"traffic-camera",
             "device.id":"traffic-camera-001",
             "proc.cmdline":$proc_cmd,

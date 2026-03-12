@@ -799,12 +799,32 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
         except Exception:
             pass
 
+    # Extract Kubernetes location metadata from output_fields so the
+    # dashboard can display namespace/pod/container without digging into
+    # raw_alert.  Suricata alerts lack k8s fields (network-level detector);
+    # fallback to "monitoring" where the Suricata pod actually runs.
+    alert_namespace = (
+        alert.output_fields.get("k8s.ns.name")
+        or alert.output_fields.get("k8s_ns_name")
+        or ""
+    )
+    alert_pod = (
+        alert.output_fields.get("k8s.pod.name")
+        or alert.output_fields.get("k8s_pod_name")
+        or ""
+    )
+    if not alert_namespace and source == "suricata":
+        alert_namespace = "monitoring"
+
     alert_record = {
         "timestamp": alert.time,
         "source": source,
         "rule": alert.rule,
         "priority": alert.priority,
         "container_name": container_name,
+        "namespace": alert_namespace,
+        "pod_name": alert_pod,
+        "output_fields": dict(alert.output_fields) if alert.output_fields else {},
         "severity": severity,
         "summary": analysis.get("summary", ""),
         "threat_type": analysis.get("threat_type", ""),
@@ -1248,6 +1268,35 @@ async def get_alerts(limit: int = 10, source: Optional[str] = None, include_lega
                 engine = analysis_models_by_alert.get(int(a["id"]))
             if engine:
                 a["llm_engine"] = engine
+        # Backfill namespace/pod/output_fields from raw_alert for the
+        # dashboard "Where" column.  These keys aren't DB columns, so
+        # they're absent when fetched from Postgres.
+        raw = a.get("raw_alert") or {}
+        if isinstance(raw, str):
+            try:
+                raw = json_mod.loads(raw)
+            except Exception:
+                raw = {}
+        of = raw.get("output_fields") or {}
+        if not a.get("output_fields"):
+            a["output_fields"] = of
+        src = str(a.get("source") or "").lower()
+        if not a.get("namespace"):
+            ns_from_fields = of.get("k8s.ns.name") or of.get("k8s_ns_name") or ""
+            if not ns_from_fields:
+                ctr = str(of.get("container.name") or a.get("container_name") or "")
+                if src == "suricata":
+                    ns_from_fields = "monitoring"
+                elif any(ctr.startswith(svc) for svc in (
+                    "traffic-camera", "healthcare-api", "parking-api",
+                    "env-sensor", "ids-api", "iot-simulator",
+                )) or str(a.get("rule") or "").startswith("Governance Mode Validation"):
+                    ns_from_fields = "smart-city"
+            a["namespace"] = ns_from_fields
+        if not a.get("pod_name"):
+            a["pod_name"] = of.get("k8s.pod.name") or of.get("k8s_pod_name") or ""
+        if not a.get("container_name"):
+            a["container_name"] = of.get("container.name") or ""
     legacy_hidden = 0
     if not include_legacy:
         filtered_alerts = []

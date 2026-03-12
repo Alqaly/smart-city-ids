@@ -154,6 +154,7 @@ async def main():
             "output": "Suspicious outbound connection from healthcare-api container to external IP 192.168.1.100 on port 4444 (possible C2 beacon)",
             "time": datetime.now().isoformat(),
             "output_fields": {
+                "k8s.ns.name": "smart-city",
                 "container.name": "healthcare-api-7d9f4b8c5-x2v9p",
                 "container.id": "abc123def456",
                 "proc.name": "python3",

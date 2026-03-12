@@ -332,6 +332,7 @@ data:
             output = f"Suricata Network Alert: {signature} ({src_ip}:{src_port} → {dest_ip}:{dest_port}/{proto}) [SigID: {signature_id}, Category: {category}]"
             output_fields = {
                 "container.name": "suricata",
+                "k8s.ns.name": os.environ.get("POD_NAMESPACE", "monitoring"),
                 "alert.signature": signature,
                 "alert.signature_id": str(signature_id),
                 "src_ip": src_ip,
