@@ -90,7 +90,7 @@ This project intentionally mixes **real cluster activity** with **detector-signa
 
 ```bash
 # Script name retained for compatibility
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 curl -s http://localhost:30800/health | jq '{status,storage_type,components}'
 ```
 

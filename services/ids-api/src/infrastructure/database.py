@@ -76,6 +76,10 @@ class AsyncDatabase:
         """Insert a record of an automated K8s action taken."""
         return await asyncio.to_thread(self._db.add_automation_action, action)
 
+    async def get_automation_action_counts(self) -> dict:
+        """Return lifetime counts of automation actions grouped by status."""
+        return await asyncio.to_thread(self._db.get_automation_action_counts)
+
     async def add_audit_log(self, log: dict) -> Optional[int]:
         """Insert a governance audit log entry."""
         return await asyncio.to_thread(self._db.add_audit_log, log)

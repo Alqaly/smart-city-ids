@@ -9,8 +9,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/script-utils.sh"
 
-ACTION="${1:-start}"
 QUIET="${QUIET:-0}"
+ACTION=""
+for _arg in "$@"; do
+    case "$_arg" in
+        --quiet) QUIET=1 ;;
+        --help|-h) ;;
+        *) ACTION="$_arg" ;;
+    esac
+done
+ACTION="${ACTION:-start}"
 STATE_DIR="/tmp/smart-city-ids-access"
 
 IDS_PID_FILE="${STATE_DIR}/pf-ids-api.pid"
@@ -117,11 +125,8 @@ Options:
 EOF
 }
 
-for arg in "$@"; do
-    case "$arg" in
-        --quiet) QUIET=1 ;;
-        --help|-h) print_usage; exit 0 ;;
-    esac
+for _a in "$@"; do
+    case "$_a" in --help|-h) print_usage; exit 0 ;; esac
 done
 
 case "$ACTION" in
@@ -129,7 +134,6 @@ case "$ACTION" in
     stop) stop_all ;;
     status) status_all ;;
     restart) stop_all true; start_all ;;
-    --quiet) start_all ;;
     *) print_usage; exit 1 ;;
 esac
 

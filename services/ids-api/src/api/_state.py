@@ -22,9 +22,9 @@ bookkeeping, etc.).  Keeping these here rather than in the routers
 eliminates code duplication and keeps the router modules focused on
 HTTP-layer concerns.
 
-Architectural note (academic context):
-    This module is a key element of the *separation-of-concerns* design
-    described in the capstone report.  The dependency graph is strictly:
+Architectural note:
+    This module is a key element of the *separation-of-concerns* design.
+    The dependency graph is strictly:
 
         main.py  ──writes──►  _state  ◄──reads──  routers/*
 
@@ -145,7 +145,7 @@ metrics_dict: Dict[str, Any] = {
 }
 
 # ``alert_fatigue_stats`` — tracks how effectively the pipeline reduces
-# operator workload (a key metric in the capstone evaluation).
+# operator workload.
 # The flow is:  raw → deduplicated → LLM-triaged → auto-handled | human-review.
 alert_fatigue_stats: Dict[str, int] = {
     "raw_total": 0,                    # Total raw alerts received before any filtering

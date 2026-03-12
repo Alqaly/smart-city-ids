@@ -204,8 +204,6 @@ class BaseProvider(ABC):
                 "llm_trace": {
                     "provider": self.NAME,
                     "model": self.model,
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
                     "raw_response_text": response_text,
                     "usage": usage,
                     "latency_ms": latency_ms,

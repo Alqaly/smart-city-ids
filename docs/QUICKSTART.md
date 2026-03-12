@@ -33,8 +33,8 @@ Use this after code changes. It is the normal update path for a running local cl
 ## 4. Verify readiness
 
 ```bash
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 ```
 
 Expected result:
@@ -61,7 +61,7 @@ Stable forwarded endpoints:
 - Grafana: `http://localhost:3000`
 - Prometheus: `http://localhost:9090`
 
-## 6. Run a live demonstration
+## 6. Run a live exercise
 
 Terminal 1:
 
@@ -80,7 +80,7 @@ SINCE=5m bash scripts/tail-pipeline-pods.sh
 ```bash
 bash scripts/llm-manager.sh check
 bash scripts/test-governance-modes.sh
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh
 ```
 
 These deeper checks require at least one operational LLM provider.

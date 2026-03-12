@@ -21,7 +21,7 @@ Usage:
     python3 motion_sensor.py --ids-url http://<KALI_IP>:30800
     
     # Get Kali IP by running on Kali:
-    ./scripts/check-setup.sh
+    hostname -I
 """
 
 import argparse

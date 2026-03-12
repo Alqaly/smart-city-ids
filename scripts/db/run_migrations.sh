@@ -5,6 +5,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MIGRATIONS_DIR="$PROJECT_ROOT/infrastructure/database/migrations"
 
+case "${1:-}" in
+  --help|-h)
+    cat <<'EOF'
+Usage: scripts/db/run_migrations.sh
+
+Apply SQL migrations from infrastructure/database/migrations/ to the
+Smart City IDS PostgreSQL database.
+
+Connection priority:
+  1. DATABASE_URL env var (or derived from DB_HOST/DB_PORT/etc.)
+  2. In-cluster PostgreSQL via kubectl exec
+
+Environment:
+  DATABASE_URL   Full postgres:// connection string
+  DB_HOST        (default: localhost)
+  DB_PORT        (default: 5432)
+  POSTGRES_USER  (default: postgres)
+  POSTGRES_PASSWORD (default: idspassword)
+  POSTGRES_DB    (default: smartcity_ids)
+EOF
+    exit 0
+    ;;
+esac
+
 # Load project env if present.
 if [[ -f "$PROJECT_ROOT/.env" ]]; then
   set -a
@@ -49,7 +73,7 @@ fi
 apply_migrations_local() {
   for f in "${migration_files[@]}"; do
     echo "Applying migration (local DB): $f"
-    psql -d "$DB_URI" -v ON_ERROR_STOP=1 -f "$f" || { echo "❌ Migration failed: $f"; return 1; }
+    { echo "SET client_min_messages TO warning;"; cat "$f"; } | psql -d "$DB_URI" -v ON_ERROR_STOP=1 || { echo "❌ Migration failed: $f"; return 1; }
   done
 }
 
@@ -73,7 +97,7 @@ apply_migrations_k8s() {
   echo "ℹ️  Falling back to in-cluster PostgreSQL: namespace=${k8s_ns}, user=${k8s_user}, db=${k8s_db}"
   for f in "${migration_files[@]}"; do
     echo "Applying migration (k8s postgres): $f"
-    kubectl exec -i -n "$k8s_ns" deploy/postgres -- psql -U "$k8s_user" -d "$k8s_db" -v ON_ERROR_STOP=1 < "$f" \
+    { echo "SET client_min_messages TO warning;"; cat "$f"; } | kubectl exec -i -n "$k8s_ns" deploy/postgres -- psql -U "$k8s_user" -d "$k8s_db" -v ON_ERROR_STOP=1 \
       || { echo "❌ Migration failed: $f"; return 1; }
   done
 }

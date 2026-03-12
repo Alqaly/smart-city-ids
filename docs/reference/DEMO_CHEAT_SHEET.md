@@ -16,7 +16,7 @@
 kubectl get nodes
 
 # 2. Run readiness check
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh --quick
 
 # 3. Verify key endpoints
 curl -s http://localhost:30800/health | jq .status

@@ -117,6 +117,35 @@ data:
     # --- Data Exfiltration ---
     alert http any any -> !$HOME_NET any (msg:"SMARTCITY Large outbound HTTP POST (data exfil?)"; flow:from_server,established; dsize:>65535; classtype:policy-violation; sid:9000110; rev:1;)
 
+    # --- MQTT Advanced Abuse ---
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT wildcard subscription abuse"; flow:to_server,established; content:"|82|"; depth:1; content:"#"; classtype:attempted-recon; sid:9000130; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT traffic control topic abuse"; flow:to_server,established; content:"smartcity/traffic/control"; nocase; classtype:attempted-admin; sid:9000131; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT lighting control topic abuse"; flow:to_server,established; content:"smartcity/lighting/control"; nocase; classtype:attempted-admin; sid:9000132; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT environment sensor tamper"; flow:to_server,established; content:"smartcity/environment/"; nocase; content:"/command"; nocase; classtype:attempted-admin; sid:9000133; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT healthcare data topic access"; flow:to_server,established; content:"smartcity/healthcare/"; nocase; content:"patient"; nocase; classtype:policy-violation; sid:9000134; rev:1;)
+    alert tcp any any -> any 1883 (msg:"SMARTCITY MQTT high-rate publish flood"; flow:to_server,established; content:"|30|"; depth:1; threshold:type threshold, track by_src, count 200, seconds 10; classtype:attempted-dos; sid:9000135; rev:1;)
+
+    # --- Healthcare API Specific ---
+    alert http any any -> any any (msg:"SMARTCITY FHIR Patient record bulk access"; flow:to_server,established; http.uri; content:"/fhir/Patient"; nocase; detection_filter:track by_src, count 10, seconds 10; classtype:policy-violation; sid:9000140; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY FHIR resource deletion attempt"; flow:to_server,established; http.method; content:"DELETE"; http.uri; content:"/fhir/"; nocase; classtype:attempted-admin; sid:9000141; rev:1;)
+
+    # --- Smart City Service-Specific ---
+    alert http any any -> any any (msg:"SMARTCITY Traffic camera config tampering"; flow:to_server,established; http.uri; content:"/api/traffic/config"; nocase; http.method; content:"PUT"; classtype:attempted-admin; sid:9000150; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Parking system rate override"; flow:to_server,established; http.uri; content:"/api/parking/rates"; nocase; content:"override"; http_client_body; nocase; classtype:attempted-admin; sid:9000151; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Environment sensor calibration tamper"; flow:to_server,established; http.uri; content:"/api/env/calibrate"; nocase; classtype:attempted-admin; sid:9000152; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Street lighting emergency override"; flow:to_server,established; http.uri; content:"/api/lighting/emergency"; nocase; classtype:attempted-admin; sid:9000153; rev:1;)
+
+    # --- JWT / Token Attacks ---
+    alert http any any -> any any (msg:"SMARTCITY JWT none algorithm bypass attempt"; flow:to_server,established; content:"eyJhbGciOiJub25lIi"; http_header; nocase; classtype:attempted-admin; sid:9000160; rev:1;)
+    alert http any any -> any any (msg:"SMARTCITY Suspicious auth header manipulation"; flow:to_server,established; content:"Authorization"; http_header; content:"admin"; http_header; nocase; detection_filter:track by_src, count 5, seconds 30; classtype:attempted-admin; sid:9000161; rev:1;)
+
+    # --- Server-Side Template Injection ---
+    alert http any any -> any any (msg:"SMARTCITY SSTI Jinja2 template probe"; flow:to_server,established; content:"{{"; http_client_body; content:"}}"; http_client_body; classtype:web-application-attack; sid:9000170; rev:1;)
+
+    # --- Lateral Movement Indicators ---
+    alert tcp any any -> $HOME_NET 22 (msg:"SMARTCITY Internal SSH lateral movement"; flow:to_server,established; detection_filter:track by_src, count 3, seconds 60; classtype:attempted-admin; sid:9000180; rev:1;)
+    alert tcp any any -> $HOME_NET any (msg:"SMARTCITY Internal network port scan"; flow:to_server; flags:S,12; threshold:type threshold, track by_src, count 50, seconds 10; classtype:attempted-recon; sid:9000181; rev:1;)
+
 ---
 # Suricata Deployment
 apiVersion: apps/v1

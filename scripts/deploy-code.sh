@@ -200,36 +200,33 @@ echo ""
 # Validate source
 [[ -f "services/ids-api/src/main.py" ]] || { err "Missing main.py"; exit 1; }
 
-log "Building Docker image..."
 if ! command -v docker &>/dev/null; then
     err "Docker not found"
     exit 1
 fi
 
-log "Building shared emulator runtime image..."
-docker build -t smart-city-ids/smart-city-service:latest -f docker/smart-city-service/Dockerfile . 2>&1 | tail -5 || {
-    err "Shared emulator image build failed"
+log "Building smart-city-service image..."
+if ! docker build -q -t smart-city-ids/smart-city-service:latest -f docker/smart-city-service/Dockerfile . >/dev/null 2>&1; then
+    err "smart-city-service image build failed"
     exit 1
-}
+fi
+log "smart-city-service image built"
 
-log "Shared emulator image built successfully"
-
-log "Importing shared emulator image to k3s..."
-docker save smart-city-ids/smart-city-service:latest -o /tmp/smart-city-service.tar
-sudo k3s ctr images import /tmp/smart-city-service.tar
-rm -f /tmp/smart-city-service.tar
-
-docker build -t ids-api:latest -f docker/ids-api/Dockerfile . 2>&1 | tail -5 || {
-    err "Docker build failed"
+log "Building ids-api image..."
+if ! docker build -q -t ids-api:latest -f docker/ids-api/Dockerfile . >/dev/null 2>&1; then
+    err "ids-api image build failed"
     exit 1
-}
+fi
+log "ids-api image built"
 
-log "Image built successfully"
-
-log "Importing to k3s..."
-docker save ids-api:latest -o /tmp/ids-api.tar
-sudo k3s ctr images import /tmp/ids-api.tar
-rm -f /tmp/ids-api.tar
+log "Importing images to k3s..."
+for img in smart-city-ids/smart-city-service:latest ids-api:latest; do
+    local_tar="/tmp/$(echo "$img" | tr '/: ' '_').tar"
+    docker save "$img" -o "$local_tar" 2>/dev/null
+    sudo k3s ctr images import "$local_tar" >/dev/null 2>&1
+    rm -f "$local_tar"
+done
+log "Images imported to k3s"
 
 # If the live deployment overlays /app/static via ConfigMaps, the UI will NOT
 # come from the container image. Refresh mounted static assets so /ui reflects

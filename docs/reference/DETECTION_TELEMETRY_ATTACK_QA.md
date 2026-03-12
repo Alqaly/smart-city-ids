@@ -73,7 +73,7 @@ alert tcp any any -> $MQTT_BROKER 1883 (
   - management HTTP can remain partially reachable while mission function fails.
 
 ### Q7. Reverse shell `/dev/tcp/10.0.0.99/4444` in Falco logs vs `/bin/bash -c`
-- Current project reality: reverse shell command appears explicitly in demo payloads (`scripts/demo-e2e-pipeline.py`).
+- Current project reality: reverse shell command appears explicitly in demo payloads (`scripts/e2e-pipeline.py`).
 - Falco `execve` view:
   - direct: `proc.cmdline` contains `bash -i >& /dev/tcp/...`;
   - wrapped: `proc.name=/bin/bash`, args include `-c`, payload string holds `/dev/tcp/...`.

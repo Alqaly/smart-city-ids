@@ -1,41 +1,17 @@
-# Documentation Guide
+# Documentation
 
-Do not treat every file in `docs/` as equally important.
+See [INDEX.md](INDEX.md) for the full documentation map and recommended reading order.
 
-Start here:
+Quick links:
+- **Run the project**: [QUICKSTART.md](QUICKSTART.md) → [DEPLOYMENT.md](DEPLOYMENT.md) → [OPERATIONS.md](OPERATIONS.md)
+- **Understand the system**: [ARCHITECTURE.md](ARCHITECTURE.md) → [HOW_IT_WORKS.md](HOW_IT_WORKS.md) → [API_REFERENCE.md](API_REFERENCE.md)
+- **LLM configuration**: [LLM_CONFIGURATION.md](LLM_CONFIGURATION.md)
+- **Troubleshooting**: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
-1. [../README.md](../README.md)
-2. [INDEX.md](INDEX.md)
-3. [QUICKSTART.md](QUICKSTART.md)
+## Directory layout
 
-## Short navigation
-
-- Want to run the project:
-  - [QUICKSTART.md](QUICKSTART.md)
-  - [DEPLOYMENT.md](DEPLOYMENT.md)
-  - [OPERATIONS.md](OPERATIONS.md)
-- Want to understand the system:
-  - [ARCHITECTURE.md](ARCHITECTURE.md)
-  - [HOW_IT_WORKS.md](HOW_IT_WORKS.md)
-  - [API_REFERENCE.md](API_REFERENCE.md)
-- Want LLM details:
-  - [LLM_CONFIGURATION.md](LLM_CONFIGURATION.md)
-  - [LLM_CONTROL_AND_TROUBLESHOOTING.md](LLM_CONTROL_AND_TROUBLESHOOTING.md)
-  - [LLM_EVALUATION.md](LLM_EVALUATION.md)
-- Want IoT details:
-  - [IOT_INTEGRATION_SDK.md](IOT_INTEGRATION_SDK.md)
-  - [IOT_EMULATION_REPORT.md](IOT_EMULATION_REPORT.md)
-- Want troubleshooting:
-  - [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-  - [VALIDATION_CHECKLIST.md](VALIDATION_CHECKLIST.md)
-
-## Directory meaning
-
-- top-level `docs/`:
-  current runtime and operational docs
-- `docs/reference/`:
-  supporting material for reviewers, reports, metrics, and snapshots
-- `docs/archive/` and `docs/archive-legacy/`:
-  historical material only
-
-Use [INDEX.md](INDEX.md) for the full map.
+| Path | Content |
+|------|---------|
+| `docs/` | Current operational docs |
+| `docs/reference/` | Academic support material (not operational truth) |
+| `docs/SCENARIOS/` | Attack scenario specifications |

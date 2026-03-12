@@ -111,7 +111,7 @@ Results are persisted in PostgreSQL and then exposed through:
 Fast readiness:
 
 ```bash
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 Processed event stream:

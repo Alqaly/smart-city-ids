@@ -172,11 +172,11 @@ Recommended usage:
 - In demo mode, `ids-api` is pinned to 1 replica to keep in-memory dedup/throttle state consistent (important for clean suppression behavior).
 
 ## 27) What smoke tests / E2E tests do you run before demo or deploy?
-- `bash scripts/pre-demo-check.sh` (login, UI/API reachability, auth)
+- `bash scripts/readiness-check.sh` (login, UI/API reachability, auth)
 - `bash scripts/run-live-attacks.sh --duration ...` (end-to-end detector -> IDS -> dashboard path)
-- `bash scripts/demo-readiness.sh --quick`
+- `bash scripts/readiness-check.sh --quick`
 - `bash scripts/e2e-verbose-test.sh --quick`
-- `python scripts/demo-e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
+- `python scripts/e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
 
 ## 28) How do you debug issues like “LLM usage panel shows 0 but calls are happening”?
 - Check API endpoints directly first:

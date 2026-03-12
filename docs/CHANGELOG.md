@@ -97,7 +97,7 @@ Completed a live-stack hardening pass for governance mode validation, automation
     - `http://localhost:3000` (Grafana)
     - `http://localhost:9090` (Prometheus)
 
-- **`scripts/start-everything.sh` + `scripts/pre-demo-check.sh`**
+- **`scripts/start-everything.sh` + `scripts/readiness-check.sh`**
   - Startup now uses managed local access helper instead of ad-hoc single forward.
   - Readiness check now auto-attempts managed localhost access when API URL cannot be detected.
   - Reduced false-negative readiness failures when NodePort is not reachable on localhost.
@@ -377,7 +377,7 @@ dashboard. New v3 attack pipeline replaces the legacy 13-scenario bash script.
 
 ### Script improvements
 
-- **`scripts/demo-day.sh`**: Updated to use v3 pipeline with phase-based profiles (minimal→phase 1, standard→phase 2, full→phase 3).
+- **`scripts/eval-day.sh`**: Updated to use v3 pipeline with phase-based profiles (minimal→phase 1, standard→phase 2, full→phase 3).
 - **`scripts/scale-iot.sh`**: Added `notify_dashboard()` to notify the web dashboard after kubectl scale operations.
 - **`scripts/README.md`**: Added full v3 pipeline documentation with all CLI options and campaign descriptions.
 

@@ -8,7 +8,7 @@ Related prep docs:
 - `docs/ARCHITECTURE.md` — full technical architecture reference
 
 ## Pre-Demo (Required)
-- [ ] `bash scripts/pre-demo-check.sh` returns `DEMO STATUS: READY`
+- [ ] `bash scripts/readiness-check.sh` returns `DEMO STATUS: READY`
 - [ ] Dashboard opens: `http://localhost:30800/ui`
 - [ ] Login works: `admin / admin`
 - [ ] Alerts tab loads
@@ -24,12 +24,12 @@ Related prep docs:
 - [ ] Dashboard shows new alerts after attack run
 
 ## Optional Technical Validation (If Time)
-- [ ] `bash scripts/demo-readiness.sh --quick`
+- [ ] `bash scripts/readiness-check.sh --quick`
 - [ ] `bash scripts/e2e-verbose-test.sh --quick`
-- [ ] `python scripts/demo-e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
+- [ ] `python scripts/e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
 
 ## Acceptable Warnings (Do Not Block Demo)
-- Prometheus/Grafana NodePort unreachable in `demo-readiness.sh --quick`
+- Prometheus/Grafana NodePort unreachable in `readiness-check.sh --quick`
 - Prometheus scrape warnings in quick mode
 - LLM provider quota/auth warnings for non-primary providers (if primary path still works)
 
@@ -43,5 +43,5 @@ Related prep docs:
 
 ## One-Line Fallback Plan (if UI glitches)
 - Run `bash scripts/run-live-attacks.sh --duration 10 --show-alerts 3`
-- Show `python scripts/demo-e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
+- Show `python scripts/e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
 - Explain end-to-end flow from terminal outputs and metrics

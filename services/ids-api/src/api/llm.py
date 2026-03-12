@@ -1013,7 +1013,7 @@ async def llm_test_provider_by_name(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LLM Provider Combat — supervisor demo: all providers race the same threat
+# LLM Provider Combat — all providers race the same threat
 # ══════════════════════════════════════════════════════════════════════════════
 
 class CombatPayload(BaseModel):
@@ -1028,7 +1028,7 @@ async def llm_provider_combat(payload: CombatPayload | None = None):
     """Run the same threat scenario through ALL configured providers simultaneously.
 
     Returns a ranked comparison showing which provider is fastest, most accurate,
-    and most cost-efficient — ideal for live supervisor demo / provider selection.
+    and most cost-efficient — useful for provider comparison and selection.
 
     No auth required so the dashboard can call it without a token.
     """

@@ -98,6 +98,59 @@ Important:
 - this counts real alert-analysis calls
 - manual provider tests and probes do not increment these totals
 
+---
+
+## Troubleshooting
+
+### Recovery when providers are down
+
+If providers are latched `auth_failed` after a bad startup probe or stale credentials:
+
+```bash
+curl -s -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  http://localhost:30800/api/llm/retry-all | jq .
+```
+
+Full recovery runbook:
+1. Fix credentials/credits at provider side (API keys, billing/quota).
+2. Update `.env` and sync K8s secret: `bash scripts/apply-llm-env-to-k8s-secret.sh`
+3. Restart ids-api: `bash scripts/deploy-code.sh`
+4. Reset provider state: `POST /api/llm/retry-all`
+5. Probe a provider from LLM Control to verify runtime health.
+
+### Status meanings
+
+| Status | Meaning |
+|--------|---------|
+| `configured` | Key present but not yet proven usable |
+| `unverified` | Configured but no successful live call in current process |
+| `operational` | Working and available for routing |
+| `cooldown` | Recent non-retryable error (401/403/429); timer-based recovery |
+| `auth_failed` | Explicit auth failure; needs credential fix + retry-all |
+| `not_configured` | Missing API key in environment |
+
+### Fallback chain behavior
+
+- Default chain comes from `LLM_PRIORITY` plus runtime updates.
+- Alert execution tries providers in order, skipping cooldown/unavailable entries.
+- Runtime chain can be changed from LLM Control (`Apply Priority`) or API.
+
+### Provider card semantics
+
+Provider cards separate three checks:
+- **Analysis**: whether the provider can process IDS analysis calls
+- **Billing endpoint**: whether the dashboard can reach the billing/credit path
+- **Balance visibility**: whether a usable balance number is exposed
+
+A provider can be operational for analysis while showing restricted billing or hidden balance.
+
+### Cost formula
+
+Token-based estimate: `estimated_cost = (prompt_tokens + completion_tokens) / 1000 * provider_rate_per_1k`
+
+Token counts prefer provider-reported usage; fallback estimator is used only when actual counts are missing.
+
 ## Common problems
 
 ### 401

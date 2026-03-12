@@ -44,11 +44,11 @@ It is not accurately described as:
 The following have been run against the live deployment during recent validation passes:
 
 ```bash
-bash scripts/check-setup.sh
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 bash scripts/test-governance-modes.sh
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh
 bash scripts/run-live-attacks.sh --mode protocol --duration 10 --show-alerts 12 --verbose
 ```
 
@@ -105,7 +105,7 @@ bash scripts/apply-llm-env-to-k8s-secret.sh .env
 sudo bash scripts/start-everything.sh
 bash scripts/deploy-code.sh
 bash scripts/access-stack.sh start
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 ## 9. Evidence sources
@@ -114,7 +114,7 @@ Use these for technical review:
 - `docs/API_REFERENCE.md`
 - `docs/ATTACK_SIMULATION_GUIDE.md`
 - `docs/reference/LLM_EVALUATION_CANONICAL.md`
-- `docs/IOT_EMULATION_REPORT.md`
+- `docs/reference/IOT_EMULATION_REPORT.md`
 - live API:
   - `/health`
   - `/api/alerts`

@@ -36,7 +36,7 @@ security = HTTPBearer()
 
 # ── Credentials ───────────────────────────────────────────────────────────
 # Demo-grade accounts used by the dashboard and scripts.
-# Keep these stable for capstone demos so UI logins don't break.
+# Keep these stable so UI logins don't break.
 
 def _load_users() -> dict[str, str]:
     """Return the allowed demo login credential pairs."""
@@ -82,7 +82,7 @@ def create_jwt_token(username: str) -> str:
         }
         return jwt.encode(payload, Config.SECRET_KEY, algorithm="HS256")
     except Exception:
-        # Fallback: base64(username:timestamp) — insecure, demo only.
+        # Fallback: base64(username:timestamp) — insecure, not for production.
         import base64
         return base64.b64encode(
             f"{username}:{int(datetime.now(tz=timezone.utc).timestamp())}".encode()

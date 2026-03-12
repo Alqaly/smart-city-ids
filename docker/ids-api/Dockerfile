@@ -24,10 +24,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source code (all packages)
 COPY services/ids-api/src/ ./
 
-# Copy attack simulator registry (used by /api/attacks/registry endpoint)
-COPY attack-simulator/scenario_registry.py ./attack-simulator/scenario_registry.py
-COPY attack-simulator/attack_runner.py ./attack-simulator/attack_runner.py
-
 # Copy static frontend (HTML, CSS, JS modules)
 COPY services/ids-api/static/ ./static/
 

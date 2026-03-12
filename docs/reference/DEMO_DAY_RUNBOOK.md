@@ -11,7 +11,7 @@ Show a real Smart City IDS detecting attacks, analyzing alerts, and updating the
 
 ## 3-Minute Preflight (run before the examiner arrives)
 ```bash
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 Expected result:
@@ -57,7 +57,7 @@ What to say while it runs:
 
 ### 5. Optional: Python verbose walkthrough (technical examiner)
 ```bash
-python scripts/demo-e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests
+python scripts/e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests
 ```
 
 What it demonstrates:
@@ -76,7 +76,7 @@ bash scripts/deploy-code.sh
 
 ### Quick readiness re-check
 ```bash
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 ### If cluster issue

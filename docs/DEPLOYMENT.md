@@ -2,6 +2,20 @@
 
 This document describes the current supported local deployment path for the Smart City IDS.
 
+## Prerequisites
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 2 cores | 4 cores |
+| RAM | 4 GB | 8 GB |
+| Disk | 20 GB | 50 GB |
+| Network | Internet access | Internet + static IP |
+
+**Software**: Linux (tested on Kali/Ubuntu), K3s, curl, jq, git, sudo access.
+
+**LLM keys**: At least one of `XAI_API_KEY` or `OPENAI_API_KEY` in `.env`.
+See [LLM_CONFIGURATION.md](LLM_CONFIGURATION.md) for full provider list.
+
 ## Recommended path
 
 Use these commands in order:
@@ -10,7 +24,7 @@ Use these commands in order:
 bash scripts/apply-llm-env-to-k8s-secret.sh .env
 sudo bash scripts/start-everything.sh
 bash scripts/deploy-code.sh
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 This is the supported deployment path for the current repository.
@@ -110,8 +124,8 @@ Forwarded endpoints:
 Run:
 
 ```bash
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 ```
 
 If you changed governance or LLM configuration:
@@ -119,7 +133,7 @@ If you changed governance or LLM configuration:
 ```bash
 bash scripts/llm-manager.sh check
 bash scripts/test-governance-modes.sh
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh
 ```
 
 ## Manual deployment
@@ -129,7 +143,7 @@ Manual `kubectl apply` is possible, but it is no longer the recommended daily pa
 If you use manual deployment, apply the active manifests listed above and then run:
 
 ```bash
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 ## Important boundaries
@@ -137,3 +151,19 @@ bash scripts/pre-demo-check.sh
 - This repo currently uses a single PostgreSQL deployment, not PostgreSQL HA.
 - The current live attack path is CLI-driven through `scripts/run-live-attacks.sh`.
 - Historical manifests and old attack registry flows should not be treated as the active deployment path.
+
+## Environment variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `XAI_API_KEY` | Yes* | - | xAI Grok API key |
+| `OPENAI_API_KEY` | Yes* | - | OpenAI API key |
+| `KUBECONFIG` | No | /etc/rancher/k3s/k3s.yaml | Kubernetes config |
+| `K8S_NAMESPACE` | No | smart-city | Target namespace |
+| `POSTGRES_USER` | No | idsuser | Database user |
+| `POSTGRES_PASSWORD` | No | idspassword | Database password |
+| `IDS_USER_ADMIN` | No | admin | Dashboard admin username |
+| `IDS_PASS_ADMIN` | No | admin | Dashboard admin password |
+| `SECRET_KEY` | No | auto-generated | JWT signing key |
+
+*At least one LLM API key is required.

@@ -13,7 +13,7 @@ Scope validated:
 - `docs/reference/DEMO_QA_CHECKLIST.md`
 
 Method:
-- Live script execution (`pre-demo-check`, `demo-readiness`, `e2e-verbose-test`, `demo-e2e-pipeline`, `run-live-attacks`)
+- Live script execution (`readiness-check`, `readiness-check`, `e2e-verbose-test`, `e2e-pipeline`, `run-live-attacks`)
 - Direct API calls to `http://localhost:30800`
 - Kubernetes resource checks (`kubectl`)
 - Config/manifests inspection (`rg`)
@@ -42,7 +42,7 @@ Method:
 - Alert flood suppression/rate limiter endpoint returns real values (`/api/rate-limiter/status`)
 - Suricata rule `SMARTCITY HTTP flood` (`sid:9000003`) exists in config
 - Falco forwarder namespace allowlist includes `smart-city`, `monitoring`, `falco-system`
-- End-to-end alert processing works (`demo-e2e-pipeline.py` produced a processed alert with analysis/action)
+- End-to-end alert processing works (`e2e-pipeline.py` produced a processed alert with analysis/action)
 
 ## Runtime Caveats (PASS architecture, FAIL current provider health)
 
@@ -72,11 +72,11 @@ Method:
 
 ## Commands Run (evidence)
 
-- `bash scripts/pre-demo-check.sh`
+- `bash scripts/readiness-check.sh`
 - `bash scripts/run-live-attacks.sh --duration 5 --show-alerts 3`
-- `bash scripts/demo-readiness.sh --quick`
+- `bash scripts/readiness-check.sh --quick`
 - `bash scripts/e2e-verbose-test.sh --quick`
-- `python scripts/demo-e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
+- `python scripts/e2e-pipeline.py --api-url http://localhost:30800 --duration 5 --skip-provider-tests`
 - `curl -s http://localhost:30800/health`
 - `curl -s http://localhost:30800/api/deduplicator-stats`
 - `curl -s http://localhost:30800/api/rate-limiter/status`

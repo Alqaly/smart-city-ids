@@ -85,9 +85,9 @@ It is not accurate to describe the full fleet as:
 Use live evidence, not assumptions:
 
 ```bash
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 bash scripts/test-governance-modes.sh
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh
 bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 8 --verbose
 ```
 

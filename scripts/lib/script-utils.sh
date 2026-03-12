@@ -509,9 +509,6 @@ print_help() {
     echo ""
     echo -e "${BOLD}OPTIONS:${NC}"
     echo "  --help            Show this help message"
-    echo "  --debug           Enable debug logging"
-    echo "  --dry-run         Show what would be done without doing it"
-    echo "  --verbose         Enable verbose output"
     echo ""
 }
 

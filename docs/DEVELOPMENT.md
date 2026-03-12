@@ -23,8 +23,6 @@ services/forwarders/        Falco and Suricata alert forwarders
 smart-city-services/        Intentionally vulnerable IoT apps (Flask)
 k8s-manifests/              All Kubernetes manifests
 scripts/                    Deployment, attack, and utility scripts
-attack-simulator/           Standalone attack tools (Python)
-attack-simulations/         Shell-based attack scripts
 tests/                      Test suite (pytest)
 docs/                       Technical documentation
 config/                     Prometheus ServiceMonitor + sidecar configs
@@ -277,11 +275,7 @@ curl -s -X POST http://localhost:30800/api/analyst/chat \
 | `scripts/start-everything.sh` | Full cluster deploy (namespaces → ConfigMaps → manifests → Falco) |
 | `scripts/deploy-code.sh` | Active code/config deploy (image rebuild/import + manifest apply + ConfigMap refresh + targeted restarts) |
 | `scripts/run-live-attacks.sh` | Live attack runner (real Falco/Suricata detections via traffic/runtime behaviors) |
-| `scripts/demo-day.sh` | Guided demo orchestration (checks + pipeline/demo flow) |
-| `docs/archive-legacy/deprecated-scripts/*` | Historical/legacy attack helpers (archived, not current workflow) |
-| `attack-simulator/ddos_simulator.py` | Multi-threaded DDoS flood tool |
-| `attack-simulator/data_exfiltration.py` | Data exfiltration simulator |
-| `attack-simulator/privilege_escalation.py` | Privilege escalation simulator |
+| `scripts/eval-day.sh` | Guided evaluation orchestration (checks + pipeline flow) |
 
 ---
 

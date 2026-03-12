@@ -263,7 +263,14 @@ class CircuitBreaker:
         # Per-engine state dict: { "xai": {"failures": 0, "successes": 0, "state": "closed"}, … }
         tracked = engines or ["xai", "anthropic", "openai", "gemini", "kimi"]
         self.engine_stats: Dict[str, Dict] = {
-            e: {"failures": 0, "successes": 0, "state": "closed"} for e in tracked
+            e: {
+                "failures": 0,
+                "successes": 0,
+                "state": "closed",
+                "last_failure_time": 0.0,
+                "half_open_calls": 0,
+            }
+            for e in tracked
         }
 
     def can_execute(self, engine: str) -> tuple:
@@ -278,19 +285,31 @@ class CircuitBreaker:
         Returns:
             (allowed: bool, reason: str)
         """
-        stats = self.engine_stats.get(engine, {"failures": 0, "state": "closed"})
+        stats = self.engine_stats.get(
+            engine,
+            {
+                "failures": 0,
+                "successes": 0,
+                "state": "closed",
+                "last_failure_time": 0.0,
+                "half_open_calls": 0,
+            },
+        )
         if stats["state"] == "open":
             # Check if recovery timeout has elapsed → transition to half-open.
-            if time.time() - self.last_failure_time > self.recovery_timeout:
+            last_failure_time = float(stats.get("last_failure_time") or 0.0)
+            if time.time() - last_failure_time > self.recovery_timeout:
                 stats["state"] = "half_open"
-                self.half_open_calls = 0
+                stats["half_open_calls"] = 0
+                self.engine_stats[engine] = stats
                 logger.info(f"Circuit breaker for {engine}: OPEN → HALF_OPEN")
             else:
                 return False, f"Circuit OPEN for {engine} (cooling down)"
         if stats["state"] == "half_open":
-            if self.half_open_calls >= self.half_open_max_calls:
+            if int(stats.get("half_open_calls") or 0) >= self.half_open_max_calls:
                 return False, f"Circuit HALF_OPEN max calls reached for {engine}"
-            self.half_open_calls += 1
+            stats["half_open_calls"] = int(stats.get("half_open_calls") or 0) + 1
+            self.engine_stats[engine] = stats
         return True, "OK"
 
     def record_success(self, engine: str):
@@ -300,13 +319,23 @@ class CircuitBreaker:
             engine: LLM engine name.
         """
         stats = self.engine_stats.get(
-            engine, {"failures": 0, "successes": 0, "state": "closed"}
+            engine,
+            {
+                "failures": 0,
+                "successes": 0,
+                "state": "closed",
+                "last_failure_time": 0.0,
+                "half_open_calls": 0,
+            },
         )
         stats["successes"] += 1
         stats["failures"] = 0  # Reset consecutive failure count.
-        if stats["state"] == "half_open":
-            stats["state"] = "closed"  # Probe succeeded → close circuit.
-            logger.info(f"Circuit breaker for {engine}: HALF_OPEN → CLOSED")
+        stats["last_failure_time"] = 0.0
+        stats["half_open_calls"] = 0
+        if stats["state"] in {"half_open", "open"}:
+            previous_state = stats["state"]
+            stats["state"] = "closed"  # Recovery succeeded → close circuit.
+            logger.info(f"Circuit breaker for {engine}: {previous_state.upper()} → CLOSED")
         self.engine_stats[engine] = stats
 
     def record_failure(self, engine: str):
@@ -316,11 +345,20 @@ class CircuitBreaker:
             engine: LLM engine name.
         """
         stats = self.engine_stats.get(
-            engine, {"failures": 0, "successes": 0, "state": "closed"}
+            engine,
+            {
+                "failures": 0,
+                "successes": 0,
+                "state": "closed",
+                "last_failure_time": 0.0,
+                "half_open_calls": 0,
+            },
         )
         stats["failures"] += 1
-        self.last_failure_time = time.time()
-        if stats["failures"] >= self.failure_threshold:
+        stats["last_failure_time"] = time.time()
+        stats["half_open_calls"] = 0
+        self.last_failure_time = stats["last_failure_time"]
+        if stats["state"] == "half_open" or stats["failures"] >= self.failure_threshold:
             stats["state"] = "open"  # Trip the circuit breaker.
             logger.warning(
                 f"Circuit breaker for {engine}: → OPEN (failures={stats['failures']})"
@@ -357,7 +395,13 @@ class CircuitBreaker:
         for eng in engines:
             if eng not in self.engine_stats:
                 continue
-            self.engine_stats[eng] = {"failures": 0, "successes": 0, "state": "closed"}
+            self.engine_stats[eng] = {
+                "failures": 0,
+                "successes": 0,
+                "state": "closed",
+                "last_failure_time": 0.0,
+                "half_open_calls": 0,
+            }
             reset_engines.append(eng)
 
         # Reset shared timers/counters used by OPEN/HALF_OPEN transitions.

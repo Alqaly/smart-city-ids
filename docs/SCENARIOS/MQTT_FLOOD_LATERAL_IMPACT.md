@@ -58,7 +58,7 @@ Expected observables:
 
 Useful commands:
 ```bash
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 curl -s http://localhost:30800/health | jq
 curl -s http://localhost:30800/api/iot/telemetry | jq '.services | keys'
 ```

@@ -872,7 +872,7 @@ async def _process_alert_core(alert: Alert, endpoint: str, started: float, d: di
                 logger.warning(f"ThreatResponse creation failed for alert {alert_id}: {tr_exc}")
 
     # Add governance action steps to the alert trace so /api/audit/trace/alert-<id>
-    # shows decision evidence (pending, executed, blocked) for examiner review.
+    # shows decision evidence (pending, executed, blocked) for audit review.
     for action in action_records:
         d["audit"](
             "GOVERNANCE_ACTION",

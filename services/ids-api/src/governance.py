@@ -1,6 +1,6 @@
 """
 Human-in-the-Loop Governance System
-Capstone II Integration Plan - TASK 4
+Governance Module — Autopilot / Assisted / Manual modes
 
 Implements three automation modes:
 - AUTONOMOUS: High-confidence actions auto-execute

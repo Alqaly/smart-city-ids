@@ -445,7 +445,7 @@ verify_deployment() {
     log_info "Quick Commands:"
     echo "  - View pods:     kubectl get pods -n smart-city"
     echo "  - View logs:     kubectl logs -n smart-city -l app=ids-api -f"
-    echo "  - Run attack:    python attack-simulator/ddos_simulator.py http://${NODE_IP}:30800 5 10"
+    echo "  - Run attack:    bash scripts/run-live-attacks.sh --duration 30"
     echo ""
     log_info "Dashboard: Open http://${NODE_IP}:30300 and import dashboard from:"
     echo "  infrastructure/monitoring/grafana-dashboards/"

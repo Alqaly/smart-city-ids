@@ -87,6 +87,8 @@ customRules:
         open_read and container and
         (fd.name contains "/.env" or fd.name contains "/etc/secret" or
          fd.name endswith ".key" or fd.name endswith ".pem") and
+        not fd.name contains "cacert.pem" and
+        not fd.name contains "/usr/lib" and
         not proc.name in (falco_binaries)
       output: >
         Sensitive file opened for reading
@@ -156,3 +158,131 @@ customRules:
         user=%user.name)
       priority: ERROR
       tags: [smart-city, database, lateral-movement, T1210]
+
+    - rule: Smart City - Container Escape Attempt
+      desc: Process attempted to access host namespaces or mount host filesystem
+      condition: >
+        spawned_process and container and
+        (proc.cmdline contains "nsenter" or
+         proc.cmdline contains "chroot" or
+         proc.cmdline contains "/proc/1/root" or
+         proc.cmdline contains "mount /host")
+      output: >
+        Container escape attempt detected
+        (proc=%proc.name cmdline=%proc.cmdline container=%container.name
+        user=%user.name image=%container.image.repository)
+      priority: CRITICAL
+      tags: [smart-city, container-escape, T1611]
+
+    - rule: Smart City - Kubernetes API Access from Container
+      desc: Container process contacted the Kubernetes API server
+      condition: >
+        outbound and container and
+        fd.rip = "10.43.0.1" and
+        not container.name in (ids-api, falco, falco-forwarder) and
+        not proc.pname in (falcoctl)
+      output: >
+        K8s API server contacted from container
+        (container=%container.name proc=%proc.name dest=%fd.rip:%fd.rport
+        user=%user.name cmdline=%proc.cmdline)
+      priority: ERROR
+      tags: [smart-city, k8s-api, T1552]
+
+    - rule: Smart City - Reverse Shell Detected
+      desc: Network connection spawned from a shell process (reverse shell indicator)
+      condition: >
+        outbound and container and
+        proc.name in (bash, sh, dash, zsh, csh) and
+        fd.l4proto = tcp
+      output: >
+        Possible reverse shell connection from container
+        (proc=%proc.name parent=%proc.pname cmdline=%proc.cmdline
+        container=%container.name dest=%fd.rip:%fd.rport user=%user.name)
+      priority: CRITICAL
+      tags: [smart-city, reverse-shell, T1059]
+
+    - rule: Smart City - Kubernetes Secret Mount Read
+      desc: Process read a file from a Kubernetes secret mount path
+      condition: >
+        open_read and container and
+        fd.name startswith "/var/run/secrets/kubernetes.io" and
+        not proc.name in (falco_binaries) and
+        not container.name in (ids-api, prometheus, metrics-server,
+         k8s-metacollector, forwarder, falco-forwarder,
+         local-path-provisioner, coredns, traefik, svclb-traefik)
+      output: >
+        K8s secret mount read detected
+        (file=%fd.name proc=%proc.name container=%container.name
+        user=%user.name cmdline=%proc.cmdline)
+      priority: ERROR
+      tags: [smart-city, secret-theft, T1552]
+
+    - rule: Smart City - Dynamic Code Execution in Container
+      desc: Python or Node eval/exec used inside container (possible code injection)
+      condition: >
+        spawned_process and container and
+        (proc.cmdline contains "python" and
+         (proc.cmdline contains " -c " or proc.cmdline contains "exec(" or
+          proc.cmdline contains "eval(")) and
+        not container.name in (ids-api)
+      output: >
+        Dynamic code execution in container
+        (proc=%proc.name cmdline=%proc.cmdline container=%container.name
+        user=%user.name image=%container.image.repository)
+      priority: ERROR
+      tags: [smart-city, code-execution, T1059]
+
+    - rule: Smart City - Log File Tampering
+      desc: Write to system log files from unexpected process
+      condition: >
+        open_write and container and
+        (fd.name startswith "/var/log" or fd.name contains "syslog" or
+         fd.name contains ".log") and
+        not proc.name in (python, python3, node, uvicorn, gunicorn, tee, logger)
+      output: >
+        Possible log tampering detected
+        (file=%fd.name proc=%proc.name container=%container.name
+        user=%user.name cmdline=%proc.cmdline)
+      priority: WARNING
+      tags: [smart-city, defense-evasion, T1070]
+
+    - rule: Smart City - Binary Download in IoT Container
+      desc: Download tool used in an IoT service container
+      condition: >
+        spawned_process and container and
+        proc.name in (curl, wget, fetch) and
+        (container.name contains "iot" or container.name contains "sensor" or
+         container.name contains "parking" or container.name contains "traffic" or
+         container.name contains "lighting" or container.name contains "healthcare")
+      output: >
+        Binary download detected in IoT/service container
+        (proc=%proc.name cmdline=%proc.cmdline container=%container.name
+        user=%user.name image=%container.image.repository)
+      priority: ERROR
+      tags: [smart-city, ingress-tool-transfer, T1105]
+
+    - rule: Smart City - Cron or At Job Created in Container
+      desc: Scheduled task persistence mechanism detected in container
+      condition: >
+        spawned_process and container and
+        (proc.name in (crontab, at, atd) or
+         (proc.name in (bash, sh) and proc.cmdline contains "cron"))
+      output: >
+        Cron/at job creation in container (persistence mechanism)
+        (proc=%proc.name cmdline=%proc.cmdline container=%container.name
+        user=%user.name)
+      priority: ERROR
+      tags: [smart-city, persistence, T1053]
+
+    - rule: Smart City - Network Reconnaissance Tool
+      desc: Network scanning or discovery tool executed in container
+      condition: >
+        spawned_process and container and
+        proc.name in (nmap, masscan, nc, ncat, netcat, socat, dig, nslookup, host) and
+        not container.name in (suricata)
+      output: >
+        Network recon tool executed in container
+        (proc=%proc.name cmdline=%proc.cmdline container=%container.name
+        user=%user.name image=%container.image.repository)
+      priority: ERROR
+      tags: [smart-city, reconnaissance, T1046]

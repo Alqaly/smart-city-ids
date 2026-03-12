@@ -588,20 +588,28 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
         <div class="glass-panel rounded-xl p-6">
-            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Execution Policy Matrix</h3>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-                <div id="govMatrixManual" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);">
-                    <div style="font-size:12px;font-weight:700;color:#fecaca;">Manual</div>
-                    <div style="font-size:11px;color:#a0a0b0;margin-top:3px;">All response actions require explicit analyst approval.</div>
+            <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Response Pipeline</h3>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:rgba(0,240,255,0.04);border:1px solid rgba(0,240,255,0.15);">
+                    <span style="font-size:16px;">🔍</span>
+                    <div><div style="font-size:12px;font-weight:700;color:#7dd3fc;">Detection</div><div style="font-size:10px;color:#a0a0b0;">Falco (runtime) + Suricata (network)</div></div>
+                    <span style="margin-left:auto;font-size:14px;color:#606080;">→</span>
                 </div>
-                <div id="govMatrixAssisted" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);">
-                    <div style="font-size:12px;font-weight:700;color:#fde68a;">Assisted</div>
-                    <div style="font-size:11px;color:#a0a0b0;margin-top:3px;">Mixed model: selected actions queue for one-click approval based on policy/confidence.</div>
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:rgba(124,92,252,0.04);border:1px solid rgba(124,92,252,0.15);">
+                    <span style="font-size:16px;">🧠</span>
+                    <div><div style="font-size:12px;font-weight:700;color:#a78bfa;">LLM Analysis</div><div style="font-size:10px;color:#a0a0b0;">Multi-provider AI threat classification</div></div>
+                    <span style="margin-left:auto;font-size:14px;color:#606080;">→</span>
                 </div>
-                <div id="govMatrixAutonomous" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px;background:rgba(255,255,255,0.02);">
-                    <div style="font-size:12px;font-weight:700;color:#86efac;">Autonomous</div>
-                    <div style="font-size:11px;color:#a0a0b0;margin-top:3px;">Policy-approved actions execute automatically when thresholds are met.</div>
+                <div id="govMatrixManual" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);">
+                    <span style="font-size:16px;">⚖️</span>
+                    <div><div style="font-size:12px;font-weight:700;color:#fde68a;">Governance Gate</div><div style="font-size:10px;color:#a0a0b0;">Human-in-the-loop approval checkpoint</div></div>
+                    <span style="margin-left:auto;font-size:14px;color:#606080;">→</span>
                 </div>
+                <div id="govMatrixAssisted" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;background:rgba(0,255,136,0.04);border:1px solid rgba(0,255,136,0.15);">
+                    <span style="font-size:16px;">⚡</span>
+                    <div><div style="font-size:12px;font-weight:700;color:#86efac;">K8s Response</div><div style="font-size:10px;color:#a0a0b0;">Pod isolation, service scaling, IP blocking</div></div>
+                </div>
+                <div id="govMatrixAutonomous" style="display:none;"></div>
             </div>
         </div>
 
@@ -712,16 +720,17 @@
     </main>
 </div>
 
-<!-- LIVE PIPELINE FEED -->
-<div id="liveFeedCard" class="glass-panel rounded-xl" style="margin:0 24px 24px;border:1px solid rgba(0,240,255,0.3);display:none;">
-    <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.07);">
+<!-- LIVE PIPELINE FEED — compact collapsible bottom bar -->
+<div id="liveFeedCard" class="glass-panel" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:100;border-top:1px solid rgba(0,240,255,0.3);border-radius:0;background:rgba(10,10,15,0.97);backdrop-filter:blur(8px);transition:max-height 0.3s ease;">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;cursor:pointer;" onclick="window.toggleLiveFeedBody()">
         <span id="liveFeedDot" style="width:8px;height:8px;border-radius:50%;background:#eab308;flex-shrink:0;"></span>
-        <strong style="font-size:13px;">Live Pipeline Feed</strong>
-        <span id="liveFeedStatus" style="font-size:12px;color:#a0a0b0;">Connecting…</span>
+        <strong style="font-size:12px;">Live Feed</strong>
+        <span id="liveFeedStatus" style="font-size:11px;color:#a0a0b0;">Connecting…</span>
         <span id="liveFeedCount" style="margin-left:auto;font-size:11px;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);padding:2px 8px;border-radius:4px;color:var(--accent-cyan);">0 events</span>
+        <button id="liveFeedCollapseBtn" style="padding:2px 8px;background:none;border:1px solid rgba(255,255,255,0.15);color:#94a3b8;border-radius:4px;font-size:11px;cursor:pointer;">▼</button>
     </div>
-    <div style="padding:12px;">
-        <pre id="liveFeedLog" style="font-size:11.5px;color:#a0a0b0;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;background:#0a0a0f;padding:12px;border-radius:8px;margin:0;">Connecting to live event stream…</pre>
+    <div id="liveFeedBody" style="display:none;padding:0 12px 10px;">
+        <pre id="liveFeedLog" style="font-size:11px;color:#a0a0b0;max-height:160px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;background:#0a0a0f;padding:10px;border-radius:6px;margin:0;">Waiting for new alerts…</pre>
     </div>
 </div>
 
@@ -860,26 +869,15 @@ bash scripts/run-live-attacks.sh --duration 10 --show-alerts 3 --verbose</pre>
         <div style="padding:14px 16px;">
             <div id="traceModalSummary" style="margin-bottom:12px;"></div>
             <div style="display:grid;grid-template-columns:1fr;gap:12px;">
-                <div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">System Prompt</div>
-                        <button onclick="app.copyCurrentTraceSection('system_prompt')" style="padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);color:#cbd5e1;border-radius:6px;font-size:11px;">Copy</button>
-                    </div>
-                    <pre id="traceModalSystem" style="margin:0;white-space:pre-wrap;max-height:220px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
-                </div>
-                <div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                        <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">User Prompt</div>
-                        <button onclick="app.copyCurrentTraceSection('user_prompt')" style="padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);color:#cbd5e1;border-radius:6px;font-size:11px;">Copy</button>
-                    </div>
-                    <pre id="traceModalUser" style="margin:0;white-space:pre-wrap;max-height:240px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
-                </div>
+                <!-- System Prompt and User Prompt hidden for public demo -->
+                <pre id="traceModalSystem" style="display:none;"></pre>
+                <pre id="traceModalUser" style="display:none;"></pre>
                 <div>
                     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                         <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;">Raw LLM Response</div>
                         <button onclick="app.copyCurrentTraceSection('raw_response_text')" style="padding:4px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.14);color:#cbd5e1;border-radius:6px;font-size:11px;">Copy</button>
                     </div>
-                    <pre id="traceModalRaw" style="margin:0;white-space:pre-wrap;max-height:260px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
+                    <pre id="traceModalRaw" style="margin:0;white-space:pre-wrap;max-height:400px;overflow:auto;padding:10px;border-radius:8px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:11px;font-family:'JetBrains Mono',monospace;"></pre>
                 </div>
             </div>
         </div>
@@ -1112,11 +1110,11 @@ function providerUiMeta(name, statusStr, creditInfo, diagInfo) {
         meta.analysisTone = 'bad';
         meta.hint = 'Action: update API key and redeploy to restore this provider.';
     } else if (status === 'unverified') {
-        meta.label = 'Analysis unverified';
-        meta.tone = 'warn';
-        meta.analysisLabel = 'Unverified (no successful call yet)';
-        meta.analysisTone = 'warn';
-        meta.hint = 'Configured, but no successful alert-analysis call has been recorded yet in this process.';
+        meta.label = 'Configured (awaiting first analysis)';
+        meta.tone = 'good';
+        meta.analysisLabel = 'Ready';
+        meta.analysisTone = 'good';
+        meta.hint = 'Configured and available. Will be verified after the first alert analysis.';
     } else if (status === 'operational') {
         if (successfulAnalyses > 0) {
             meta.label = 'Analysis verified';
@@ -1124,10 +1122,10 @@ function providerUiMeta(name, statusStr, creditInfo, diagInfo) {
             meta.analysisLabel = 'Working';
             meta.analysisTone = 'good';
         } else {
-            meta.label = 'Analysis unverified';
-            meta.tone = 'warn';
-            meta.analysisLabel = 'Unverified (no successful call yet)';
-            meta.analysisTone = 'warn';
+            meta.label = 'Operational (awaiting first analysis)';
+            meta.tone = 'good';
+            meta.analysisLabel = 'Operational';
+            meta.analysisTone = 'good';
         }
     } else if (status === 'cooldown') {
         meta.label = 'Analysis cooling down';
@@ -1360,15 +1358,15 @@ const api = {
     retryAllLLMProviders() {
         return this._fetch('/api/llm/retry-all', { method: 'POST' });
     },
-    getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||120}`); },
+    getAlerts(n)  { return this._pub(`/api/alerts?limit=${n||500}`); },
     getIoT()      { return this._pub('/api/iot/devices'); },
     getPipeline() { return this._pub('/api/pipeline-overview'); },
     getDedupStats(){ return this._pub('/api/deduplicator-stats'); },
     getAlertRateLimiterStatus(){ return this._pub('/api/rate-limiter/status'); },
     getGov()      { return this._fetch('/api/governance/status'); },
     getGovPending(){ return this._fetch('/api/governance/pending'); },
-    getGovHistory(limit=25){
-        const qs = new URLSearchParams({ limit: String(limit||25) }).toString();
+    getGovHistory(limit=100){
+        const qs = new URLSearchParams({ limit: String(limit||100) }).toString();
         return this._fetch(`/api/governance/history?${qs}`);
     },
     setGovMode(mode){
@@ -1453,9 +1451,19 @@ const liveFeed = {
         if (log.textContent.startsWith('Connecting')) log.textContent='';
         log.textContent=line+log.textContent;
         const card=$('liveFeedCard');
-        if(card){ card.style.borderColor=info.color; setTimeout(()=>card.style.borderColor='rgba(0,240,255,0.3)',2000); }
+        if(card){ card.style.borderTopColor=info.color; setTimeout(()=>card.style.borderTopColor='rgba(0,240,255,0.3)',2000); }
     },
     disconnect() { if(this.sse){this.sse.close();this.sse=null;} }
+};
+
+// Live feed body toggle (compact bottom bar)
+window.toggleLiveFeedBody = function() {
+    const body = $('liveFeedBody');
+    const btn = $('liveFeedCollapseBtn');
+    if (!body) return;
+    const open = body.style.display === 'none';
+    body.style.display = open ? 'block' : 'none';
+    if (btn) btn.textContent = open ? '▲' : '▼';
 };
 
 // ── Renderers ──────────────────────────────────────────────────────────
@@ -1493,13 +1501,13 @@ const render = {
                 const k8s = Number(iotMeta.k8s_count || 0);
                 const db = Number(iotMeta.db_count || 0);
                 const mem = Number(iotMeta.mem_count || 0);
-                if (degraded) return 'Device-count telemetry degraded (K8s/DB/registry unavailable)';
+                if (degraded) return 'Device-count telemetry degraded';
                 const srcLabel = {
-                    k8s_pods: 'K8s pod inventory',
-                    device_registry_db: 'device registry (DB)',
-                    device_registry_memory: 'device registry (memory)'
-                }[src] || 'mixed sources';
-                return `${srcLabel} · k8s:${k8s} db:${db} mem:${mem}`;
+                    k8s_pods: 'Active pods in cluster',
+                    device_registry_db: 'Registered in database',
+                    device_registry_memory: 'Registered in memory'
+                }[src] || 'Active service instances';
+                return srcLabel;
             })();
             el.innerHTML = `
                 <div class="stat-card"><div class="stat-label">Total Alerts</div><div class="stat-value" style="color:var(--accent-cyan);">${total}</div><div class="stat-sub">Ingested via Falco / Suricata</div></div>
@@ -1775,16 +1783,14 @@ const render = {
         const setModeRow = (id, active, tone='cyan') => {
             const el = $(id);
             if (!el) return;
-            const map = {
-                red:   ['rgba(255,51,102,0.30)', 'rgba(255,51,102,0.10)'],
-                amber: ['rgba(250,204,21,0.30)', 'rgba(250,204,21,0.10)'],
-                green: ['rgba(0,255,136,0.30)', 'rgba(0,255,136,0.10)'],
-                cyan:  ['rgba(0,240,255,0.25)', 'rgba(0,240,255,0.08)']
-            };
-            const [bd, bg] = map[tone] || map.cyan;
-            el.style.borderColor = active ? bd : 'rgba(255,255,255,0.08)';
-            el.style.background = active ? bg : 'rgba(255,255,255,0.02)';
-            el.style.boxShadow = active ? '0 0 0 2px rgba(0,240,255,0.14)' : 'none';
+            // Response Pipeline items use flex layout — just adjust border glow
+            if (active) {
+                el.style.borderColor = 'rgba(0,240,255,0.45)';
+                el.style.boxShadow = '0 0 0 2px rgba(0,240,255,0.14)';
+            } else {
+                el.style.borderColor = 'rgba(255,255,255,0.08)';
+                el.style.boxShadow = 'none';
+            }
         };
 
         const setStatsUnavailable = () => {
@@ -1929,31 +1935,33 @@ const render = {
         }
 
         const historyRows = Array.isArray(historyObj.history) ? historyObj.history : [];
-        if (historyBadge) historyBadge.textContent = historyHasError ? 'unavailable' : `${historyRows.length} rows`;
+        const histTotal = historyObj.total || historyRows.length;
+        if (historyBadge) historyBadge.textContent = historyHasError ? 'unavailable' : `${historyRows.length} of ${histTotal}`;
         if (historyList) {
             if (historyHasError) {
                 historyList.innerHTML = '<div style="color:#fda4af;font-size:13px;padding:12px;background:rgba(127,29,29,0.2);border-radius:8px;"><i class="fas fa-exclamation-triangle" style="margin-right:8px;"></i>Action history unavailable, retry in a few seconds.</div>';
             } else if (!historyRows.length) {
-                historyList.innerHTML = '<div style="color:#606080;font-size:13px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;"><i class="fas fa-clock" style="color:#94a3b8;margin-right:8px;"></i>No governance decisions recorded yet in this runtime window.</div>';
+                historyList.innerHTML = '<div style="color:#606080;font-size:13px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px;"><i class="fas fa-clock" style="color:#94a3b8;margin-right:8px;"></i>No governance decisions recorded yet. Generate some alerts to see automated actions here.</div>';
             } else {
                 historyList.innerHTML = historyRows
                     .slice(0, 30)
                     .map((row) => {
-                        const sev = sevInfo(row.severity || 0);
-                        const ts = row.created_at_iso || row.approved_at || row.created_at || '—';
+                        const ts = row.timestamp || row.created_at_iso || row.created_at || '—';
                         const actionType = row.action_type || 'unknown_action';
                         const target = row.target || '—';
                         const statusTxt = row.status || 'unknown';
-                        const actor = row.approved_by || 'system';
+                        const actor = row.operator || row.approved_by || 'system';
+                        const mode = row.mode || '';
+                        const actionColor = statusTxt === 'auto_executed' ? '#00ff88' : statusTxt === 'rejected' ? '#ff3366' : statusTxt === 'approved' ? '#00f0ff' : '#a0a0b0';
                         return `
                             <div style="border:1px solid rgba(255,255,255,0.06);border-radius:10px;padding:10px;margin-bottom:8px;background:rgba(0,0,0,0.18);">
                                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                                    <span class="sev-badge ${sev.cls}">${sev.short}&nbsp;${row.severity || 0}</span>
-                                    <span style="font-size:12px;color:#fff;font-weight:700;">${esc(actionType)}</span>
-                                    <span style="font-size:12px;color:#a0a0b0;">→ ${esc(target)}</span>
+                                    <span style="font-size:11px;padding:2px 8px;border-radius:4px;background:rgba(184,41,221,0.15);color:#b829dd;font-weight:700;">${esc(actionType)}</span>
+                                    <span style="font-size:12px;color:#fff;font-weight:600;">→ ${esc(target)}</span>
+                                    ${mode ? '<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:rgba(0,240,255,0.1);color:#00f0ff;">' + esc(mode) + '</span>' : ''}
                                     <span style="margin-left:auto;font-size:11px;color:#94a3b8;font-family:monospace;">${esc(ts)}</span>
                                 </div>
-                                <div style="margin-top:6px;font-size:11px;color:#a0a0b0;">status: <strong style="color:#cbd5e1;">${esc(statusTxt)}</strong> · actor: <strong style="color:#cbd5e1;">${esc(actor)}</strong></div>
+                                <div style="margin-top:6px;font-size:11px;color:#a0a0b0;">status: <strong style="color:${actionColor};">${esc(statusTxt)}</strong> · actor: <strong style="color:#cbd5e1;">${esc(actor)}</strong></div>
                             </div>
                         `;
                     })
@@ -2341,8 +2349,6 @@ const render = {
                             }
                             let llmTraceBlock = '';
                             if (traceObj) {
-                                const promptSys = String(traceObj.system_prompt || '');
-                                const promptUsr = String(traceObj.user_prompt || '');
                                 const rawResp = String(traceObj.raw_response_text || '');
                                 const traceMeta = `${String(traceObj.provider || llmEngine || 'unknown').toUpperCase()} · ${esc(String(traceObj.model || 'unknown'))} · ${Number(traceObj.latency_ms || 0)}ms`;
                                 const parsedSeverity = a.severity != null ? String(a.severity) : (analysisObj.severity != null ? String(analysisObj.severity) : '—');
@@ -2369,8 +2375,6 @@ const render = {
                                             provider: String(traceObj.provider || llmEngine || 'unknown'),
                                             model: String(traceObj.model || 'unknown'),
                                             latency_ms: Number(traceObj.latency_ms || 0),
-                                            system_prompt: promptSys,
-                                            user_prompt: promptUsr,
                                             raw_response_text: rawResp
                                         },
                                         parsed_output: {
@@ -2402,10 +2406,6 @@ const render = {
                                                     <i class="fas fa-copy mr-1"></i>Copy JSON
                                                 </button>
                                             </div>
-                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">System Prompt</div>
-                                            <pre style="white-space:pre-wrap;max-height:180px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0 0 8px 0;">${esc(promptSys)}</pre>
-                                            <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">User Prompt</div>
-                                            <pre style="white-space:pre-wrap;max-height:220px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0 0 8px 0;">${esc(promptUsr)}</pre>
                                             <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Raw LLM Response</div>
                                             <pre style="white-space:pre-wrap;max-height:240px;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.25);color:#cbd5e1;font-size:10px;margin:0;">${esc(rawResp)}</pre>
                                         </div>
@@ -2435,8 +2435,6 @@ const render = {
                                             provider: String(llmEngine || 'unknown'),
                                             model: 'n/a',
                                             latency_ms: 0,
-                                            system_prompt: '[Not stored on this alert row]',
-                                            user_prompt: '[Not stored on this alert row]',
                                             raw_response_text: '[Click "Open Fullscreen" to load audit timeline steps for this trace ID.]'
                                         },
                                         parsed_output: {
@@ -2718,8 +2716,6 @@ const app = {
                     audit_step_count: Number(audit?.step_count || steps.length),
                     trace: {
                         ...(trace.trace || {}),
-                        system_prompt: '[Not stored on this alert row]',
-                        user_prompt: '[Not stored on this alert row]',
                         raw_response_text: JSON.stringify(steps, null, 2),
                     },
                 };
@@ -2768,8 +2764,6 @@ const app = {
                 </div>
             `;
         }
-        if (sys) sys.textContent = String(t.system_prompt || '');
-        if (usr) usr.textContent = String(t.user_prompt || '');
         if (raw) raw.textContent = String(t.raw_response_text || '');
         if (m) m.style.display = 'block';
     },
@@ -2786,9 +2780,7 @@ const app = {
         }
         const t = this.currentTrace.trace || {};
         let value = '';
-        if (section === 'system_prompt') value = String(t.system_prompt || '');
-        else if (section === 'user_prompt') value = String(t.user_prompt || '');
-        else if (section === 'raw_response_text') value = String(t.raw_response_text || '');
+        if (section === 'raw_response_text') value = String(t.raw_response_text || '');
         else value = '';
         this.copyText(value, `${section.replaceAll('_',' ')} copied`, 'Could not copy section');
     },
@@ -2798,7 +2790,9 @@ const app = {
             this.setNotice('No trace open', 'warn', 2000);
             return;
         }
-        this.copyText(JSON.stringify(this.currentTrace, null, 2), 'Trace JSON copied', 'Could not copy trace JSON');
+        const cleaned = JSON.parse(JSON.stringify(this.currentTrace));
+        if (cleaned.trace) { delete cleaned.trace.system_prompt; delete cleaned.trace.user_prompt; }
+        this.copyText(JSON.stringify(cleaned, null, 2), 'Trace JSON copied', 'Could not copy trace JSON');
     },
 
     downloadCurrentTraceJSON() {
@@ -2807,7 +2801,9 @@ const app = {
             return;
         }
         try {
-            const blob = new Blob([JSON.stringify(this.currentTrace, null, 2)], { type: 'application/json' });
+            const cleaned = JSON.parse(JSON.stringify(this.currentTrace));
+            if (cleaned.trace) { delete cleaned.trace.system_prompt; delete cleaned.trace.user_prompt; }
+            const blob = new Blob([JSON.stringify(cleaned, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             const id = String(this.currentTrace.alert_id || 'trace').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -2932,6 +2928,9 @@ const app = {
         const btn=document.querySelector(`[data-tab="${tab}"]`), panel=$('tab-'+tab);
         if(btn) btn.classList.add('active');
         if(panel) panel.classList.add('active');
+        // Live Feed only relevant on overview and alerts tabs
+        const feed=$('liveFeedCard');
+        if(feed) feed.style.display=(tab==='overview'||tab==='alerts')?'block':'none';
         // Clear alert badge when user views the alerts tab
         if (tab==='alerts') {
             const badge=$('alertBadge'); if(badge){badge.textContent='';badge.style.display='none';}
@@ -3204,7 +3203,7 @@ const app = {
 
     async refreshAll() {
         let [health,metrics,pipeline,alerts,iot,gov,llmDiag,credits,govPending,dedup,rateLimiter]=await Promise.all([
-            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(120),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits(),api.getGovPending(),api.getDedupStats(),api.getAlertRateLimiterStatus()
+            api.getHealth(),api.getMetrics(),api.getPipeline(),api.getAlerts(500),api.getIoT(),api.getGov(),api.getLLMDiag(),api.getCredits(),api.getGovPending(),api.getDedupStats(),api.getAlertRateLimiterStatus()
         ]);
         if (!gov) gov = { status: 'error', status_code: 503, detail: 'network' };
         if (!govPending) govPending = { status: 'error', status_code: 503, detail: 'network' };

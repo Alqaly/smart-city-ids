@@ -7,8 +7,8 @@ Use this guide for the current active deployment path.
 Start with:
 
 ```bash
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 bash scripts/llm-manager.sh check
 ```
 
@@ -95,7 +95,7 @@ Check detector mix:
 curl -s 'http://localhost:30800/api/alerts?limit=120' | jq '.alerts | group_by(.source) | map({source: (.[0].source // "unknown"), count: length})'
 ```
 
-## 7. Need live proof during a demo
+## 7. Need live proof during a presentation
 
 Processed event feed:
 
@@ -135,10 +135,10 @@ Rules:
 Run this sequence:
 
 ```bash
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 bash scripts/llm-manager.sh check
-bash scripts/comprehensive-test.sh
+bash scripts/readiness-check.sh
 ```
 
 If those pass, the active runtime path is healthy.

@@ -27,7 +27,17 @@ while [[ $# -gt 0 ]]; do
         --scales)       SCALE_LEVELS_CSV="$2"; shift 2 ;;
         --duration)     WAIT_SECONDS="$2"; shift 2 ;;
         --results-dir)  RESULTS_DIR="$2"; shift 2 ;;
-        --help)         print_help "scalability-test.sh [--scales LEVELS] [--duration SECONDS]"; exit 0 ;;
+        --help)
+            cat <<'HELP'
+Usage: scalability-test.sh [options]
+
+Options:
+  --scales CSV        Comma-separated device counts (default: 10,100,500,1000)
+  --duration SECS     Observation window per scale level (default: 60)
+  --results-dir DIR   Output directory (default: scalability-results/)
+  --help              Show this help message
+HELP
+            exit 0 ;;
         *)              die "Unknown option: $1" ;;
     esac
 done
@@ -70,12 +80,6 @@ log_info "Duration per Scale: ${WAIT_SECONDS}s"
 log_info "Results Directory: $RESULTS_DIR"
 log_info "Prometheus URL: $PROMETHEUS_URL"
 log_info "IDS API URL: $IDS_API_URL"
-echo ""
-
-echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║     Smart City IDS - Scalability Test Suite                ║${NC}"
-echo -e "${BLUE}║     TASK 5: 10 → 100 → 500 → 1000 Devices                  ║${NC}"
-echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # Create results directory
@@ -132,7 +136,7 @@ record_metrics() {
     local scale=$1
     local timestamp=$(date -Iseconds)
     
-    echo -e "${YELLOW}📊 Recording metrics at scale=$scale...${NC}"
+    echo -e "${YELLOW}Recording metrics at scale=$scale...${NC}"
     
     # Prometheus metrics
     local iot_messages=$(query_prometheus "sum(rate(iot_messages_sent_total[5m])*60)")
@@ -151,7 +155,11 @@ record_metrics() {
     
     # Pod counts
     local running_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
-    local iot_pods=$(kubectl get pods -n "$NAMESPACE" -l app=iot-device --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+    local iot_pods=0
+    for dep in traffic-camera healthcare-api parking-system env-sensor street-lighting; do
+        local cnt=$(kubectl get deploy "$dep" -n "$NAMESPACE" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+        iot_pods=$((iot_pods + ${cnt:-0}))
+    done
     
     # CPU/Memory (if metrics-server available)
     local cpu_usage=$(kubectl top pods -n "$NAMESPACE" --no-headers 2>/dev/null | awk '{sum+=$2} END {print sum"m"}' || echo "N/A")
@@ -227,46 +235,54 @@ EOF
 }
 EOF
 
-    echo -e "${GREEN}✅ Metrics recorded for scale=$scale${NC}"
+    echo -e "${GREEN}Metrics recorded for scale=$scale${NC}"
 }
+
+# Real IoT service deployments in the cluster
+IOT_DEPLOYMENTS=(traffic-camera healthcare-api parking-system env-sensor street-lighting)
 
 # Function to scale IoT devices
 scale_iot() {
     local target=$1
     
-    echo -e "${BLUE}🔄 Scaling IoT devices to $target devices...${NC}"
+    echo -e "${BLUE}Scaling IoT services to ~${target} total replicas...${NC}"
     
-    # Calculate distribution across device classes
-    # 40% high, 50% medium, 10% burst
-    local high_count=$((target * 40 / 100))
-    local medium_count=$((target * 50 / 100))
-    local burst_count=$((target - high_count - medium_count))
+    # Distribute replicas evenly across the 5 real IoT deployments
+    local num_deps=${#IOT_DEPLOYMENTS[@]}
+    local base_replicas=$((target / num_deps))
+    local remainder=$((target % num_deps))
     
-    echo "   HIGH: $high_count, MEDIUM: $medium_count, BURST: $burst_count"
-    
-    # Scale deployments
-    kubectl scale deployment/iot-device-high -n "$NAMESPACE" --replicas=$high_count 2>/dev/null || echo "   (iot-device-high not found)"
-    kubectl scale deployment/iot-device-medium -n "$NAMESPACE" --replicas=$medium_count 2>/dev/null || echo "   (iot-device-medium not found)"
-    kubectl scale deployment/iot-device-burst -n "$NAMESPACE" --replicas=$burst_count 2>/dev/null || echo "   (iot-device-burst not found)"
+    local idx=0
+    for dep in "${IOT_DEPLOYMENTS[@]}"; do
+        local replicas=$base_replicas
+        if [[ $idx -lt $remainder ]]; then
+            replicas=$((replicas + 1))
+        fi
+        # Ensure at least 1 replica per deployment
+        [[ $replicas -lt 1 ]] && replicas=1
+        echo "   ${dep}: ${replicas} replicas"
+        kubectl scale deployment/"$dep" -n "$NAMESPACE" --replicas="$replicas" 2>/dev/null || echo "   (${dep} not found)"
+        idx=$((idx + 1))
+    done
     
     # Wait for pods to be ready
     echo "   Waiting for pods to be ready..."
-    kubectl rollout status deployment/iot-device-high -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-    kubectl rollout status deployment/iot-device-medium -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
-    kubectl rollout status deployment/iot-device-burst -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+    for dep in "${IOT_DEPLOYMENTS[@]}"; do
+        kubectl rollout status deployment/"$dep" -n "$NAMESPACE" --timeout=120s 2>/dev/null || true
+    done
     
     # Stabilization wait
     echo -e "${YELLOW}   Stabilizing for ${WAIT_SECONDS}s...${NC}"
     sleep $WAIT_SECONDS
     
-    echo -e "${GREEN}✅ Scaled to $target devices${NC}"
+    echo -e "${GREEN}Scaled to ~${target} total replicas${NC}"
 }
 
 # Check prerequisites
-echo -e "${YELLOW}🔍 Checking prerequisites...${NC}"
+echo -e "${YELLOW}Checking prerequisites...${NC}"
 
 if ! command -v kubectl &> /dev/null; then
-    echo -e "${RED}❌ kubectl not found${NC}"
+    echo -e "${RED}ERROR: kubectl not found${NC}"
     exit 1
 fi
 
@@ -274,20 +290,20 @@ if ! kubectl cluster-info &> /dev/null; then
     sleep 2
 fi
 if ! kubectl cluster-info &> /dev/null; then
-    echo -e "${RED}❌ Cannot connect to Kubernetes cluster${NC}"
+    echo -e "${RED}ERROR: Cannot connect to Kubernetes cluster${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✅ Prerequisites OK${NC}"
+echo -e "${GREEN}Prerequisites OK${NC}"
 echo ""
 
 # Run scalability test
-echo -e "${BLUE}🚀 Starting scalability test...${NC}"
+echo -e "${BLUE}Starting scalability test...${NC}"
 echo ""
 
 for scale in "${SCALE_LEVELS[@]}"; do
     echo "════════════════════════════════════════════════════════════"
-    echo -e "${BLUE}📈 Testing scale level: $scale devices${NC}"
+    echo -e "${BLUE}Testing scale level: $scale replicas${NC}"
     echo "════════════════════════════════════════════════════════════"
     
     # Scale to target
@@ -300,7 +316,7 @@ for scale in "${SCALE_LEVELS[@]}"; do
 done
 
 # Scale back down to 10 after test
-echo -e "${YELLOW}🔄 Scaling back down to baseline (10 devices)...${NC}"
+echo -e "${YELLOW}Scaling back down to baseline (10 replicas)...${NC}"
 scale_iot 10
 
 # Generate summary
@@ -341,7 +357,6 @@ The Smart City IDS successfully scaled through all test levels:
 ---
 
 *Generated by Smart City IDS Scalability Test Suite*
-*Capstone II Integration Plan - TASK 5*
 EOF
 
 echo ""

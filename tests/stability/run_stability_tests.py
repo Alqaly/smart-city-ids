@@ -2,7 +2,7 @@
 """
 Smart City IDS - Comprehensive Stability Testing Suite
 ======================================================
-Capstone II - Week 8: Stability Testing
+Smart City IDS - Stability Testing
 
 This script runs comprehensive tests to validate:
 1. Attack reproduction at scale

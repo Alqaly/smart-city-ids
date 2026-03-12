@@ -76,6 +76,17 @@ ARG1="${1:-}"
 ARG2="${2:-}"
 
 case "$ARG1" in
+    --help|-h)
+        echo "Usage: $0 [replicas|up|down] [service]"
+        echo ""
+        echo "Examples:"
+        echo "  $0           # Show current status"
+        echo "  $0 3         # Scale all to 3 replicas"
+        echo "  $0 5 env-sensor  # Scale one service"
+        echo "  $0 up        # Increase all by 1"
+        echo "  $0 down      # Decrease all by 1"
+        exit 0
+        ;;
     up)
         echo -e "${GREEN}Scaling all IoT services UP (+1)${NC}"
         for svc in "${SERVICES[@]}"; do

@@ -20,9 +20,9 @@ Expected local endpoints:
 ## 2. Baseline health
 
 ```bash
-bash scripts/check-setup.sh
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 ```
 
 Pass criteria:
@@ -50,7 +50,8 @@ Pass criteria:
 ## 4. End-to-end pipeline validation
 
 ```bash
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh
+python scripts/eval-complete.py --api-url http://localhost:8000
 ```
 
 If `GET /api/llm/diagnostics` reports `summary.operational = 0`, fix provider credentials or quota first and then rerun the governance/E2E checks.
@@ -149,9 +150,9 @@ Common non-code failures:
 ## 9. Minimum evidence bundle
 
 For technical review, capture:
-- output of `bash scripts/pre-demo-check.sh`
+- output of `bash scripts/readiness-check.sh`
 - output of `bash scripts/test-governance-modes.sh`
-- output of `bash scripts/e2e-verbose-test.sh --quick`
+- output of `bash scripts/readiness-check.sh`
 - one `run-live-attacks.sh` protocol run
 - screenshots or JSON from:
   - `/api/alerts`

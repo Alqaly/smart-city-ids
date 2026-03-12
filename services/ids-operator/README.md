@@ -1,6 +1,6 @@
-# Capstone II: Smart City IDS Operator
+# Smart City IDS Operator
 
-This operator automates security threat response for the Smart City demo, using Kopf and a custom ThreatResponse CRD.
+Kubernetes operator that automates security threat response, using Kopf and a custom ThreatResponse CRD.
 
 ## Features
 - Watches for ThreatResponse resources (CRD)
@@ -35,8 +35,3 @@ This operator automates security threat response for the Smart City demo, using 
 - `Dockerfile` — Operator container
 - `tests/unit/` — Unit tests
 - `tests/integration/` — Integration tests
-
-## References
-- [docs/CAPSTONE_II_KUBERNETES_OPERATOR.md](../../docs/CAPSTONE_II_KUBERNETES_OPERATOR.md)
-- [docs/CAPSTONE_II_IMPLEMENTATION_CHECKLIST.md](../../docs/CAPSTONE_II_IMPLEMENTATION_CHECKLIST.md)
-- [docs/CAPSTONE_II_GETTING_STARTED.md](../../docs/CAPSTONE_II_GETTING_STARTED.md)

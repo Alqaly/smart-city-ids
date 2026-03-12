@@ -17,7 +17,7 @@ class LoginRequest(BaseModel):
     """
 
     username: str  # Demo users: analyst, operator, admin.
-    password: str  # Plaintext password (demo only — use hashing in production).
+    password: str  # Plaintext password (research prototype — use hashing in production).
 
 
 class LoginResponse(BaseModel):

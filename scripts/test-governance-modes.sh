@@ -142,11 +142,16 @@ INITIAL_PENDING_AFTER_DRAIN=0
 RESTORE_DONE=0
 
 require_operational_llm() {
-    local diag operational
+    local diag operational usable
     diag="$(curl -sS "${API_BASE}/api/llm/diagnostics" 2>/dev/null || true)"
     operational="$(printf '%s' "$diag" | jq -r '.summary.operational // 0' 2>/dev/null || echo 0)"
-    if [[ "$operational" -lt 1 ]]; then
-        echo "Governance mode validation requires at least one operational LLM provider." >&2
+    # Count unverified providers with closed circuit as usable (configured but awaiting first analysis)
+    usable="$operational"
+    local unverified_closed
+    unverified_closed="$(printf '%s' "$diag" | jq -r '[.providers | to_entries[] | select(.value.status == "unverified" and .value.circuit_breaker_state == "closed")] | length' 2>/dev/null || echo 0)"
+    usable=$(( usable + unverified_closed ))
+    if [[ "$usable" -lt 1 ]]; then
+        echo "Governance mode validation requires at least one usable LLM provider." >&2
         echo "Current diagnostics summary:" >&2
         printf '%s' "$diag" | jq '{summary, providers: (.providers | map_values({status, model, error_category, circuit_breaker_state}))}' >&2 || printf '%s\n' "$diag" >&2
         exit 4
@@ -575,7 +580,7 @@ run_mode_case() {
 
     printf '%s\n' "$summary_json"
 
-    # Print a compact audit trace excerpt for supervisor evidence.
+    # Print a compact audit trace excerpt.
     printf '%s\n' "$trace_json" | jq -c --arg mode "$mode" '{mode:$mode, trace_id, step_count, steps:[.steps[] | {event_type,status,payload:(.payload|{mode,action_type,target,reason,decision_status,rule})}]}'
 }
 

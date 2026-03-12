@@ -570,7 +570,7 @@ Then update the dashboard HTML in `services/ids-api/static/index.html` to add a 
 
 Note on counting:
 - `GET /api/iot/devices` now exposes a hybrid view with logical devices + pod-enriched devices.
-- Prefer **Registry + Heartbeat** for defensible fleet counts in exams/demos.
+- Prefer **Registry + Heartbeat** for defensible fleet counts in evaluations.
 - Use `last_seen`, `source`, and IP presence when proving that a listed device is actually active.
 
 ---

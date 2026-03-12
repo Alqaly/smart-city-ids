@@ -113,7 +113,7 @@ export const api = {
   getGovernanceStatus: () => request('/api/governance/status'),
   getOperatorDashboard: () => request('/api/operator/dashboard'),
   getGovernancePending: () => request('/api/governance/pending'),
-  getGovernanceHistory: (limit = 20) => request(`/api/governance/history?limit=${limit}`),
+  getGovernanceHistory: (limit = 100) => request(`/api/governance/history?limit=${limit}`),
   setGovernanceMode: (mode) =>
     request(`/api/governance/mode?mode=${mode}`, { method: 'POST' }),
   approveAction: (id, comment = 'Approved via dashboard') =>

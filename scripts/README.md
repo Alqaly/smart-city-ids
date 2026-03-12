@@ -1,90 +1,82 @@
-# Scripts Guide
+# Scripts
 
-This folder contains many scripts, but most users only need a small active set.
+Operational and utility scripts for the Smart City IDS.
 
-## Start Here: 3 Commands for Non-Technical Use
-
-Use these three commands in order:
+## Quick Start (3 commands)
 
 ```bash
-# 1. Start or recover the local Smart City IDS cluster
+# 1. Deploy (or recover) the cluster
 sudo bash scripts/start-everything.sh
 
-# 2. Check that the system is ready
-bash scripts/pre-demo-check.sh
+# 2. Validate the system
+bash scripts/readiness-check.sh
 
-# 3. Show a live demonstration feed
+# 3. Watch the live IDS feed while running attacks
 bash scripts/live-pipeline-log.sh --attacks
 ```
 
-What they do:
-- `start-everything.sh` brings up the local cluster and active services.
-- `pre-demo-check.sh` confirms the API, dashboard, login, detectors, and core pods are healthy.
-- `live-pipeline-log.sh --attacks` shows the processed IDS event stream while launching a short live attack run.
-
-## If You Changed Code
-
-After editing code, run:
+## After Code Changes
 
 ```bash
 bash scripts/deploy-code.sh
 ```
 
-This updates the running cluster with the current code and static files.
+Hot-reloads code and static files into the running cluster.
 
-## If You Want Raw Logs
+## Script Reference
 
-Use this in a second terminal:
+### Deployment & Lifecycle
 
-```bash
-SINCE=5m bash scripts/tail-pipeline-pods.sh
-```
+| Script | Purpose |
+|--------|---------|
+| `start-everything.sh` | Full cluster bootstrap (K3s, namespaces, manifests, Falco, Suricata) |
+| `deploy-code.sh` | Hot-reload code/static into running cluster via ConfigMaps |
+| `cleanup.sh` | Cluster teardown (supports `--soft`, `--hard`, `--full`) |
+| `access-stack.sh` | Port-forward IDS API, Grafana, Prometheus to localhost |
 
-This shows raw logs from:
-- `ids-api`
-- IoT services
-- MQTT broker
-- Suricata and Suricata forwarder
-- Falco and Falco forwarder
+### Validation & Testing
 
-## If You Want a Bigger Validation Check
+| Script | Purpose |
+|--------|---------|
+| `readiness-check.sh` | Operational readiness (pods, services, endpoints, login, detectors) |
+| `test-governance-modes.sh` | Validates manual / assisted / autonomous governance modes |
+| `eval-complete.py` | Single-alert E2E evaluation (health → LLM → alert → governance → metrics) |
+| `eval-day.sh` | Full evaluation orchestrator (bootstrap + attacks + validation) |
 
-Use these only when needed:
+### Attack Simulation & Monitoring
 
-```bash
-bash scripts/demo-readiness.sh --quick
-bash scripts/llm-manager.sh check
-bash scripts/comprehensive-test.sh
-bash scripts/e2e-verbose-test.sh --quick
-bash scripts/test-governance-modes.sh
-```
+| Script | Purpose |
+|--------|---------|
+| `run-live-attacks.sh` | In-cluster attack runner: HTTP, MQTT, protocol, and runtime vectors |
+| `live-pipeline-log.sh` | Real-time SSE event observer (use `--attacks` for combined feed) |
+| `tail-pipeline-pods.sh` | Raw pod log tailing (ids-api, IoT, MQTT, Suricata, Falco) |
 
-## Active Scripts
+### Scaling
 
-These are the current scripts that belong to the active runtime path:
+| Script | Purpose |
+|--------|---------|
+| `scale-iot.sh` | Manual per-service scaling (`3`, `up`, `down`, or per-service) |
+| `scale-profile.sh` | Named preset profiles (`small`, `medium`, `large`) |
 
-- `scripts/start-everything.sh`
-- `scripts/deploy-code.sh`
-- `scripts/access-stack.sh`
-- `scripts/pre-demo-check.sh`
-- `scripts/demo-readiness.sh`
-- `scripts/llm-manager.sh`
-- `scripts/run-live-attacks.sh`
-- `scripts/live-pipeline-log.sh`
-- `scripts/tail-pipeline-pods.sh`
-- `scripts/scale-profile.sh`
-- `scripts/scale-iot.sh`
-- `scripts/comprehensive-test.sh`
-- `scripts/e2e-verbose-test.sh`
-- `scripts/test-governance-modes.sh`
-- `scripts/apply-llm-env-to-k8s-secret.sh`
+### LLM Management
 
-## Historical / Do Not Use First
+| Script | Purpose |
+|--------|---------|
+| `llm-manager.sh` | Provider health, credits, priority, interactive control |
+| `apply-llm-env-to-k8s-secret.sh` | Sync `.env` API keys into K8s secrets and restart |
 
-These paths are retained for history or old demos. They are not the primary workflow:
+### Research & Reporting
 
-- `scripts/archive/`
-- `scripts/demos/`
-- `*.disabled`
+| Script | Purpose |
+|--------|---------|
+| `scalability-test.sh` | Automated scale testing with metrics collection |
+| `llm-compare-report.py` | Multi-provider LLM evaluation report |
+| `render-figures.py` | Documentation figure renderer |
 
-If you are unsure, ignore them and stay on the active script list above.
+### Internal
+
+| Script | Purpose |
+|--------|---------|
+| `lib/script-utils.sh` | Shared shell library (colors, logging, kubeconfig, port-forward) |
+| `lib/llm-control.sh` | LLM credit/priority helpers |
+| `db/run_migrations.sh` | PostgreSQL schema migrations |

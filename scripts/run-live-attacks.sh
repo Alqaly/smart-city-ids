@@ -6,7 +6,7 @@
 # Suricata (network) and Falco (runtime) detections end-to-end.
 #
 # No synthetic alert injection into the IDS API.
-# Generates real cluster traffic/runtime behavior for a research IDS testbed.
+# Generates real cluster traffic and runtime behavior for detection validation.
 # =============================================================================
 
 set -euo pipefail
@@ -49,11 +49,11 @@ done
 ensure_commands kubectl awk python3
 ensure_kubeconfig
 
-vlog() { [[ "$VERBOSE" == "1" ]] && log_info "$*"; }
+vlog() { [[ "$VERBOSE" == "1" ]] && log_info "$*" || true; }
 
 emit_scenario_metadata() {
   cat <<'EOF'
-Attack scenario mapping (research testbed):
+Attack scenario mapping:
   ddos    -> HTTP flood / service pressure (MITRE ATT&CK: T1498 Network DoS-like behavior)
   sqli    -> SQL injection payload delivery against HTTP APIs (application attack semantics)
   privesc -> Suspicious shell + sensitive file access in containers (runtime abuse / credential access)
@@ -84,7 +84,7 @@ if [[ "$EXPLAIN" == "1" ]]; then
   echo "This is a controlled evaluation scenario; it does not use synthetic IDS alert injection."
   emit_scenario_metadata
   echo ""
-  echo "Examiner verification commands:"
+  echo "Verification commands:"
   echo "  curl -s ${IDS_EXAMPLE_BASE}/api/alerts?limit=5 | jq ."
   echo "  curl -s ${IDS_EXAMPLE_BASE}/api/rate-limiter/status | jq ."
   echo "  kubectl logs -n falco-system -l app=falco --tail=20"
@@ -155,7 +155,7 @@ kubectl run "$ATTACK_POD" -n "$NAMESPACE" \
 kubectl wait --for=condition=Ready pod/$ATTACK_POD -n "$NAMESPACE" --timeout=120s >/dev/null || die "Attack runner pod failed to become Ready"
 
 log_subsection "Installing in-pod deps (httpx + paho-mqtt)"
-kubectl exec -n "$NAMESPACE" "$ATTACK_POD" -- /bin/sh -lc 'python -V && pip -q install --no-cache-dir httpx paho-mqtt' >/dev/null
+kubectl exec -n "$NAMESPACE" "$ATTACK_POD" -- /bin/sh -lc 'python -V && pip -q install --no-cache-dir httpx paho-mqtt' 2>/dev/null
 fi
 
 run_http_attacks() {
@@ -616,10 +616,9 @@ fi
 
 if [[ "$EXPLAIN" == "1" ]]; then
   echo ""
-  echo "How to explain the result:"
-  echo "  1) Real cluster actions/traffic were executed (not synthetic IDS API alert injection)."
+  echo "Summary:"
+  echo "  1) Real cluster actions/traffic were executed (not synthetic alert injection)."
   echo "  2) Falco and/or Suricata produced detections from runtime/network telemetry."
   echo "  3) IDS API ingested, processed, and exposed the resulting alerts via metrics/API."
-  echo "  4) Some detections (e.g., SQLi strings) validate signature matching behavior even without a vulnerable backend DB exploit succeeding."
 fi
 log_info "Attack scenario run finished"

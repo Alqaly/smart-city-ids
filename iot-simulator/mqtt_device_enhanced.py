@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Smart City IDS - Enhanced IoT Device Emulator
-Implements realistic IoT traffic patterns for Capstone II validation.
+Implements realistic IoT traffic patterns for system validation.
 
 Features:
 - Poisson arrival process with time-of-day λ(t)

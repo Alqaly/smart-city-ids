@@ -7,8 +7,8 @@ Day-to-day operating guide for the current Smart City IDS deployment.
 Use:
 
 ```bash
-bash scripts/pre-demo-check.sh
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh
+bash scripts/readiness-check.sh --quick
 ```
 
 These are the fastest current checks for:
@@ -67,7 +67,7 @@ Run real governance validation:
 
 ```bash
 bash scripts/test-governance-modes.sh
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh
 ```
 
 These require at least one operational LLM provider.
@@ -91,7 +91,7 @@ Important meanings:
 - manual tests update diagnostics, not DB-backed usage totals
 - `unverified` means configured but not yet proven by a successful live call in the current process
 
-## Live demo and attack flow
+## Live attack flow
 
 Run a live protocol/runtime exercise:
 
@@ -99,7 +99,7 @@ Run a live protocol/runtime exercise:
 bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose
 ```
 
-Use two terminals during demos:
+Use two terminals during live exercises:
 
 ```bash
 # Processed IDS events

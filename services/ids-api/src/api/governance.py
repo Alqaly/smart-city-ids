@@ -95,8 +95,27 @@ async def governance_status(user: str = Depends(verify_token)):
 
     Returns a comprehensive dashboard dict including the current mode,
     counts of pending / approved / rejected actions, and aggregate metrics.
+    Merges in-process runtime counters with persisted DB lifetime totals
+    so counters survive pod restarts.
     """
-    return _gov()["status"]()
+    status = _gov()["status"]()
+    # Merge lifetime DB counts so counters survive restarts.
+    try:
+        _, db = _deps()
+        db_counts = db.get_automation_action_counts()
+        rt = status.get("metrics", {})
+        rt["auto_executed"] = max(rt.get("auto_executed", 0), db_counts.get("auto_executed", 0) + db_counts.get("executed", 0))
+        approved_db = db_counts.get("approved_and_executed", 0)
+        rt["approved"] = max(rt.get("approved", 0), approved_db)
+        rt["manual_approved"] = max(rt.get("manual_approved", 0), approved_db)
+        rt["rejected"] = max(rt.get("rejected", 0), db_counts.get("rejected", 0))
+        rt["expired"] = max(rt.get("expired", 0), db_counts.get("expired", 0))
+        total_db = db_counts.get("total", 0)
+        rt["total_actions_requested"] = max(rt.get("total_actions_requested", 0), total_db)
+        status["metrics"] = rt
+    except Exception:
+        pass  # graceful: return runtime-only if DB is unreachable
+    return status
 
 
 @router.get("/mode")
@@ -304,15 +323,64 @@ async def reject_action(
 
 
 @router.get("/history")
-async def action_history(limit: int = 50, user: str = Depends(verify_token)):
+async def action_history(limit: int = 100, user: str = Depends(verify_token)):
     """Get recent action history for audit trail.
 
     Returns the last ``limit`` governance decisions (approved, rejected,
-    auto-executed) in reverse chronological order.  Used by the operator
-    dashboard and for compliance / examiner review.
+    auto-executed) in reverse chronological order.  Reads from the
+    persistent database audit_logs table so history survives pod restarts.
 
     Args:
-        limit: Maximum number of history entries to return (default 50).
+        limit: Maximum number of history entries to return (default 100).
     """
+    _, db = _deps()
+    if db:
+        rows = db.get_governance_audit_logs(limit=limit)
+        history = []
+        for r in rows:
+            details = r.get("details") or {}
+            if isinstance(details, str):
+                import json as _json
+                try:
+                    details = _json.loads(details)
+                except Exception:
+                    details = {}
+            inner = details.get("details", {}) if isinstance(details.get("details"), dict) else {}
+            event = details.get("event", r.get("action", ""))
+            mode = details.get("mode", "")
+            ts = r.get("created_at")
+            if hasattr(ts, "isoformat"):
+                ts = ts.isoformat()
+            # Build target and status based on event type
+            if event == "mode_change":
+                target = f"{inner.get('old', '?')} → {inner.get('new', '?')}"
+                status = "completed"
+                operator = r.get("actor") or "system"
+            elif event == "autonomous_force_toggle":
+                enabled = inner.get("enabled")
+                target = f"force_autonomy={'on' if enabled else 'off'}"
+                status = "toggled"
+                operator = r.get("actor") or "system"
+            else:
+                target = inner.get("target", inner.get("resource_id", r.get("resource_id", ""))) or ""
+                status = inner.get("status", r.get("status", "")) or event
+                operator = inner.get("approved_by", r.get("actor", "")) or "system"
+            history.append({
+                "timestamp": ts or details.get("timestamp", ""),
+                "action_type": event,
+                "target": target,
+                "status": status,
+                "operator": operator,
+                "mode": mode,
+            })
+        # Get total count from DB for display purposes
+        total_count = len(history)
+        try:
+            with db._cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM audit_logs WHERE resource_type = 'governance'")
+                total_count = cur.fetchone()[0]
+        except Exception:
+            pass
+        return {"total": total_count, "history": history}
     g = _gov()
-    return {"history": g["governance"].get_action_history(limit)}
+    return {"total": 0, "history": g["governance"].get_action_history(limit)}

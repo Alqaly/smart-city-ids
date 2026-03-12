@@ -268,7 +268,7 @@ The three P0 backlog items are now implemented in runtime code:
 - Improvement: persist all audit events to durable store with retention policies.
 
 43) Explain smoke test script and validation scope?
-- scripts/demo-readiness.sh validates cluster reachability, namespaces, core workloads, API health/auth, alerts presence, IoT pods, and demo command smoke checks.
+- scripts/readiness-check.sh validates cluster reachability, namespaces, core workloads, API health/auth, alerts presence, IoT pods, and demo command smoke checks.
 - quick mode skips heavier checks.
 - Improvement: add explicit LLM endpoint and governance pending-queue checks.
 

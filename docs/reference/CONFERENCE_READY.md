@@ -50,7 +50,7 @@ bash scripts/one-command-ready.sh --with-iot-emulation
 Quick readiness check:
 
 ```bash
-bash scripts/demo-readiness.sh --quick
+bash scripts/readiness-check.sh --quick
 ```
 
 This checks:
@@ -122,7 +122,7 @@ These are typically printed by the scripts:
 
 ## 6) If something fails
 
-- Check readiness output first: `bash scripts/demo-readiness.sh`
+- Check readiness output first: `bash scripts/readiness-check.sh`
 - Tail pipeline logs:
 
 ```bash

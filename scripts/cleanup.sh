@@ -35,7 +35,20 @@ while [[ $# -gt 0 ]]; do
         --full)     MODE="full"; shift ;;
         --all)      MODE="full"; shift ;;   # backward compat
         --force)    FORCE=1; shift ;;
-        --help)     print_help "cleanup.sh [--light|--full] [--dry-run] [--force]"; exit 0 ;;
+        --help)
+            cat <<'HELP'
+Usage: cleanup.sh [options]
+
+Options:
+  --light     Delete namespaces only; leave K3s running
+  --full      Full teardown: uninstall K3s, remove images, wipe data
+  --dry-run   Show what would be done without doing it
+  --force     Skip confirmation prompts
+  --help      Show this help message
+
+Default (no flag) runs a standard cleanup (namespaces + images).
+HELP
+            exit 0 ;;
         *)          die "Unknown option: $1" ;;
     esac
 done

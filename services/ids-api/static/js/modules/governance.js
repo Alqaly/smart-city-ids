@@ -127,20 +127,31 @@ function loadPending(refreshFn) {
  * Load and render governance action history.
  */
 function loadHistory() {
-  api.getGovernanceHistory().then(data => {
+  api.getGovernanceHistory(100).then(data => {
     const el = $('govHistory');
     if (!el) return;
-    if (!data || !data.history || !data.history.length) {
-      el.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3)">No action history</td></tr>';
+    const items = (data && data.history) ? data.history : [];
+    const total = data && data.total != null ? data.total : items.length;
+    if (!items.length) {
+      el.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3)">No governance decisions recorded</td></tr>';
       return;
     }
+    // Update header with count
+    const header = el.closest('table')?.querySelector('caption');
+    if (header) header.textContent = `Action History — ${total} records`;
     let html = '';
-    data.history.forEach(h => {
-      html += '<tr><td>' + shortTime(h.timestamp) + '</td>' +
-        '<td>' + (h.action_type || h.action || '-') + '</td>' +
-        '<td>' + (h.target || '-') + '</td>' +
-        '<td><span class="badge ' + (h.status === 'approved' || h.status === 'executed' ? 'badge-low' : h.status === 'rejected' ? 'badge-crit' : 'badge-med') + '">' + (h.status || '-') + '</span></td>' +
-        '<td>' + (h.operator || '-') + '</td></tr>';
+    items.forEach(h => {
+      const ts = h.timestamp ? shortTime(h.timestamp) : '-';
+      const action = h.action_type || h.action || '-';
+      const target = h.target || '-';
+      const status = h.status || h.action_type || '-';
+      const statusClass = (status === 'approved' || status === 'auto_execute') ? 'badge-low' : status === 'rejected' ? 'badge-crit' : 'badge-med';
+      const operator = h.operator || h.actor || 'system';
+      html += '<tr><td>' + ts + '</td>' +
+        '<td>' + esc(action) + '</td>' +
+        '<td>' + esc(target) + '</td>' +
+        '<td><span class="badge ' + statusClass + '">' + esc(status) + '</span></td>' +
+        '<td>' + esc(operator) + '</td></tr>';
     });
     el.innerHTML = html;
   });

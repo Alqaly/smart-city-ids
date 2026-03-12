@@ -979,6 +979,33 @@ class Database:
             self._memory_automation_actions.append(action)
             return action["id"]
 
+    def get_automation_action_counts(self) -> Dict[str, int]:
+        """Return lifetime counts of automation actions grouped by status."""
+        defaults = {"auto_executed": 0, "executed": 0, "approved_and_executed": 0,
+                     "rejected": 0, "blocked": 0,
+                     "pending_approval": 0, "expired": 0, "total": 0,
+                     "approved_execution_failed": 0}
+        if self.use_memory or not self._ensure_connection():
+            with self._memory_lock:
+                for a in self._memory_automation_actions:
+                    s = str(a.get("status", "")).lower()
+                    if s in defaults:
+                        defaults[s] += 1
+                    defaults["total"] += 1
+            return defaults
+        try:
+            with self._cursor() as cur:
+                cur.execute("SELECT status, COUNT(*) FROM automation_actions GROUP BY status")
+                for row in cur.fetchall():
+                    s = str(row[0] or "").lower()
+                    if s in defaults:
+                        defaults[s] = int(row[1])
+                    defaults["total"] += int(row[1])
+            return defaults
+        except Exception as e:
+            logger.error(f"Error getting automation action counts: {e}")
+            return defaults
+
     def add_audit_log(self, log_entry: Dict[str, Any]) -> int:
         """Record an audit log entry for governance decisions."""
         if self.use_memory or not self._ensure_connection():
@@ -1010,6 +1037,48 @@ class Database:
             log_entry["id"] = len(self._memory_audit_logs) + 1
             self._memory_audit_logs.append(log_entry)
             return log_entry["id"]
+
+    def get_governance_audit_logs(self, limit: int = 100, action: str = None) -> List[Dict[str, Any]]:
+        """Fetch governance audit log entries from the database."""
+        if self.use_memory or not self._ensure_connection():
+            logs = [a for a in self._memory_audit_logs if a.get("resource_type") == "governance"]
+            if action:
+                logs = [a for a in logs if a.get("action") == action]
+            return list(reversed(logs[-limit:]))
+
+        try:
+            with self._cursor(RealDictCursor) as cur:
+                if action:
+                    cur.execute("""
+                        SELECT id, action, resource_type, resource_id, details,
+                               status, actor, created_at
+                        FROM audit_logs
+                        WHERE resource_type = 'governance' AND action = %s
+                        ORDER BY created_at DESC LIMIT %s
+                    """, (action, limit))
+                else:
+                    cur.execute("""
+                        SELECT id, action, resource_type, resource_id, details,
+                               status, actor, created_at
+                        FROM audit_logs
+                        WHERE resource_type = 'governance'
+                        ORDER BY created_at DESC LIMIT %s
+                    """, (limit,))
+                rows = cur.fetchall()
+                result = []
+                for r in rows:
+                    d = dict(r)
+                    if isinstance(d.get("details"), str):
+                        try:
+                            d["details"] = json.loads(d["details"])
+                        except Exception:
+                            pass
+                    result.append(d)
+                return result
+        except Exception as e:
+            logger.error(f"Error fetching governance audit logs: {e}")
+            logs = [a for a in self._memory_audit_logs if a.get("resource_type") == "governance"]
+            return list(reversed(logs[-limit:]))
 
     def add_system_log(self, level: str, component: str, message: str, details: Dict = None) -> int:
         """Add a system log entry for debugging and audit."""

@@ -13,11 +13,11 @@ This repository contains both:
 
 ## Scope (Important for External Readers)
 
-This is a **research prototype**, not a production SOC platform. Some components are evaluation-focused (IoT emulators, controlled attack scripts, review-support docs), while core runtime components are real and testable.
+This is a **research prototype**, not a production SOC platform. Some components are evaluation-focused (IoT emulators, controlled attack scripts), while core runtime components are real and testable.
 
 To avoid stale-claim confusion:
 - Use this `README.md` + [`docs/INDEX.md`](docs/INDEX.md) as the **current entry points**
-- Treat `docs/archive-legacy/` and `docs/archive/` as **historical**
+- Treat `docs/reference/` as **academic support material** (not operational truth)
 - Validate runtime claims against live endpoints (`/health`, `/api/metrics`) and `kubectl`
 
 ## What the System Does
@@ -72,7 +72,7 @@ bash scripts/deploy-code.sh
 
 ```bash
 sudo bash scripts/start-everything.sh
-bash scripts/pre-demo-check.sh
+bash scripts/readiness-check.sh
 ```
 
 This now verifies:
@@ -167,12 +167,11 @@ Use these scripts as the active operational surface of the repository.
 - `bash scripts/access-stack.sh start` — stable localhost access (`8000`, `3000`, `9090`) when NodePort is inconvenient
 
 ### Validation
-- `bash scripts/pre-demo-check.sh` — fast readiness check
-- `bash scripts/demo-readiness.sh --quick` — broader readiness audit
+- `bash scripts/readiness-check.sh` — fast readiness check
+- `bash scripts/readiness-check.sh --quick` — broader readiness audit
 - `bash scripts/llm-manager.sh check` — LLM and end-to-end alert-analysis health
-- `bash scripts/comprehensive-test.sh` — broader platform validation
 - `bash scripts/test-governance-modes.sh` — manual/assisted/autonomous governance validation
-- `bash scripts/e2e-verbose-test.sh --quick` — end-to-end pipeline validation
+- `python scripts/eval-complete.py` — end-to-end alert pipeline evaluation
 
 ### Operations / Demo
 - `bash scripts/run-live-attacks.sh --mode protocol --duration 30 --show-alerts 5 --verbose` — live protocol and runtime exercise
@@ -217,16 +216,11 @@ Then go deeper only if needed:
   - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)
 - LLM:
   - [`docs/LLM_CONFIGURATION.md`](docs/LLM_CONFIGURATION.md)
-  - [`docs/LLM_CONTROL_AND_TROUBLESHOOTING.md`](docs/LLM_CONTROL_AND_TROUBLESHOOTING.md)
   - [`docs/LLM_EVALUATION.md`](docs/LLM_EVALUATION.md)
 - IoT:
   - [`docs/IOT_INTEGRATION_SDK.md`](docs/IOT_INTEGRATION_SDK.md)
-  - [`docs/IOT_EMULATION_REPORT.md`](docs/IOT_EMULATION_REPORT.md)
 
-Reference and archive material are still kept under:
-- `docs/reference/`
-- `docs/archive/`
-- `docs/archive-legacy/`
+Academic support material is kept under `docs/reference/`.
 
 ## Public LLM Evaluation Summary
 
@@ -289,7 +283,7 @@ This is expected behavior in a multi-provider resilient design.
 
 Recent fix:
 - the service now **auto-retries DB connection and recovers back to PostgreSQL** after transient DB startup/race failures
-- `scripts/pre-demo-check.sh` reports degraded persistence explicitly
+- `scripts/readiness-check.sh` reports degraded persistence explicitly
 
 Use this check before sharing screenshots/claims:
 
@@ -308,24 +302,18 @@ bash scripts/deploy-code.sh
 bash scripts/access-stack.sh start
 
 # Readiness checks (broader)
-bash scripts/demo-readiness.sh --quick
-
-# E2E validation (quick)
-bash scripts/e2e-verbose-test.sh --quick
+bash scripts/readiness-check.sh --quick
 
 # Scale profile (small|medium|large)
 bash scripts/scale-profile.sh status
 bash scripts/scale-profile.sh medium
-
-# Full scripted validation
-bash scripts/comprehensive-test.sh
 ```
 
 ## Sharing This Repository (Recommended)
 
 Before sharing with experts:
 
-1. Run `bash scripts/pre-demo-check.sh` (name retained for compatibility)
+1. Run `bash scripts/readiness-check.sh` (name retained for compatibility)
 2. Confirm DB is connected (not `memory-fallback`)
 3. If discussing fleet size, use `/api/iot/devices`, not only `iot_devices_active`
 4. If discussing a “real active device”, show `last_seen`, `source`, heartbeat/telemetry, and IP context

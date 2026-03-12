@@ -4,7 +4,7 @@ help:
 	@echo "Available targets: check db-migrate start ids-api-venv test docs-check smoke-test"
 
 check:
-	@bash scripts/check-setup.sh
+	@bash scripts/readiness-check.sh --quick
 
 db-migrate:
 	@bash scripts/db/run_migrations.sh

@@ -22,7 +22,7 @@ Demo credentials (configured in ``infrastructure/auth.py``):
     * ``admin`` / ``admin`` — full demo access
 
 Security note:
-    The credentials and JWT secret are hard-coded for the capstone
+    The credentials and JWT secret are hard-coded for this research prototype
     demonstration.  In a production deployment they would be replaced
     with an external identity provider (e.g., OAuth 2.0 / OIDC).
 """
