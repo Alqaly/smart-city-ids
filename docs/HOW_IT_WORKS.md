@@ -79,9 +79,9 @@ Governance modes:
 - `autonomous`
 
 Meaning:
-- manual -> actions wait for approval
-- assisted -> policy-approved actions may run automatically, others wait
-- autonomous -> policy-approved actions run automatically
+- manual -> all actions queue for operator approval
+- assisted -> confidence >= 0.90 auto-executes; lower confidence queues for approval
+- autonomous -> confidence >= 0.90 auto-executes; lower confidence queues unless the force-execution toggle is enabled
 
 Validate the real behavior with:
 

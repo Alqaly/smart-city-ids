@@ -33,10 +33,9 @@ This is used for repeatable evaluation scenarios and validation runs in the smar
 
 The Governance controls determine whether IDS-generated response actions execute automatically:
 
-- **Manual**: every automated response requires approval
-- **Assisted**: critical actions require approval; lower-risk actions can run automatically
-- **Autonomous**: actions run automatically
-- **Emergency**: threshold-based bypass for urgent containment
+- **Manual**: all actions queue for operator approval
+- **Assisted**: high-confidence actions (>= 0.90) auto-execute; lower confidence queues for approval
+- **Autonomous**: high-confidence actions auto-execute; lower confidence queues unless force-execution is enabled
 
 The queue view shows pending actions awaiting analyst approval/rejection.
 

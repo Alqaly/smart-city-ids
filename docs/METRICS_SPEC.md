@@ -44,7 +44,7 @@ Metrics are treated as an API. Names, types, and labels are stable.
 
 | Metric | Type | Labels | Question Answered |
 |---|---|---|---|
-| `smartcity_ids_automation_mode` | Gauge | `mode` | Is the system in autonomous/assisted/manual (or emergency) mode? |
+| `smartcity_ids_automation_mode` | Gauge | `mode` | Current automation mode: `autonomous`, `assisted`, or `manual` |
 | `smartcity_ids_approval_pending_count` | Gauge | none | Are approvals backing up? |
 | `smartcity_ids_human_override_requests_total` | Counter | `reason` | How often is human override required? |
 | `smartcity_ids_automated_decisions_total` | Counter | `action_type` | How many decisions were automated? |

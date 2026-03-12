@@ -386,18 +386,17 @@ Response time: 10-50x faster
 ### Governance Modes
 ```
 MANUAL (safest)
-↓ All actions require explicit operator approval
-↓ Operator signs off on each decision
+↓ All actions queue for operator approval
 
 ASSISTED (balanced)
-↓ Severity < 8: Automatic execution
-↓ Severity ≥ 8: Requires operator approval
-↓ Good balance of speed + safety
+↓ Confidence >= 0.90: auto-executes
+↓ Confidence 0.70–0.90: queued for approval
+↓ Confidence < 0.70: queued for approval
 
-AUTOPILOT (fastest)
-↓ All actions execute automatically
+AUTONOMOUS (fastest)
+↓ Confidence >= 0.90: auto-executes
+↓ Lower confidence: queued unless force-execution is enabled
 ↓ Operator can override/review in real-time
-↓ Appropriate for high-maturity SOCs
 ```
 
 ---

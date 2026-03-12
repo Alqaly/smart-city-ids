@@ -14,20 +14,20 @@ Planning note (2026-02-16)
 Files changed
 - services/ids-api/static/index.html
   - Added: Governance nav item and `#tab-governance` section
-  - Added: Mode buttons (manual/assisted/autonomous/emergency)
+  - Added: Mode buttons (manual/assisted/autonomous)
   - Added: Pending queue renderer for actions awaiting approval
 
 Backend / API notes (no code changes required)
 - The UI expects the following endpoints (already provided by the IDS API):
   - `GET /api/governance/status` — overall governance state (mode + counters)
   - `GET /api/governance/pending` — returns `{ "pending_count": N, "actions": [...] }`
-  - `POST /api/governance/mode?mode=manual|assisted|autonomous|emergency` — change automation mode
+  - `POST /api/governance/mode?mode=manual|assisted|autonomous` — change automation mode
 
 How the new UI flow works
 1. Operator logs in (credentials configured via `IDS_USER_*` / `IDS_PASS_*`).
 2. Click **Governance** tab.
 3. UI loads `GET /api/governance/status` and `GET /api/governance/pending`.
-4. Operator selects the automation mode (manual/assisted/autonomous/emergency).
+4. Operator selects the automation mode (manual/assisted/autonomous).
 5. Pending actions remain visible so the operator can review what the system is waiting on.
 
 Testing steps (local)
