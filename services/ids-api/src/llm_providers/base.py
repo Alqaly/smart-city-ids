@@ -278,6 +278,7 @@ Provide analysis for human operator review. Respond with JSON ONLY:
     def _parse_response(self, content: str) -> Dict[str, Any]:
         """Parse JSON from LLM response."""
         import json
+        import re
         
         if not content:
             return self._fallback_response("No response content")
@@ -302,6 +303,18 @@ Provide analysis for human operator review. Respond with JSON ONLY:
                 code_block = content.split("```")[1].split("```")[0].strip()
                 return json.loads(code_block)
             except (json.JSONDecodeError, IndexError):
+                pass
+        
+        # Try extracting the outermost JSON object by brace-matching.
+        # Handles cases where the LLM wraps JSON in prose or thinking text.
+        first_brace = content.find('{')
+        last_brace = content.rfind('}')
+        if first_brace != -1 and last_brace > first_brace:
+            try:
+                parsed = json.loads(content[first_brace:last_brace + 1])
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
                 pass
         
         return self._fallback_response(f"Could not parse response: {content[:100]}...")

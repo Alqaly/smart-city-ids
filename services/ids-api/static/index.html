@@ -126,6 +126,7 @@
             <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="kubernetes" onclick="app.switchTab('kubernetes')"><i class="fas fa-cubes mr-2"></i>K8s Cluster</button>
             <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="llm-control" onclick="app.switchTab('llm-control')"><i class="fas fa-sliders-h mr-2"></i>LLM Control</button>
             <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="governance" onclick="app.switchTab('governance')"><i class="fas fa-user-shield mr-2"></i>Automation</button>
+            <button class="tab-btn px-5 py-4 text-sm font-semibold" data-tab="chat" onclick="app.switchTab('chat')"><i class="fas fa-robot mr-2"></i>AI Analyst</button>
             <!-- Attack Simulation removed: live attacks only -->
         </div>
     </nav>
@@ -622,6 +623,36 @@
     <div class="glass-panel rounded-xl p-6 mt-6">
         <h3 style="font-size:15px;font-weight:800;margin:0 0 12px;">Action History <span id="govHistoryBadge" style="margin-left:8px;font-size:11px;color:#94a3b8;font-weight:600;">recent</span></h3>
         <div id="govHistoryList" style="color:#606080;font-size:13px;">Loading…</div>
+    </div>
+</div>
+
+<!-- ── AI ANALYST CHAT ──────────────────────────────────────── -->
+<div id="tab-chat" class="tab-panel">
+    <div class="glass-panel rounded-xl p-6" style="display:flex;flex-direction:column;height:calc(100vh - 200px);min-height:400px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div>
+                <h2 style="font-size:18px;font-weight:800;margin:0 0 4px;"><i class="fas fa-robot" style="color:var(--accent-cyan);margin-right:8px;"></i>AI Security Analyst</h2>
+                <div style="font-size:12px;color:#606080;">Ask questions about threats, alerts, and system status. Powered by multi-provider LLM engine.</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <select id="chatProviderSelect" style="padding:6px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(0,240,255,0.2);border-radius:6px;color:var(--accent-cyan);font-size:11px;font-family:inherit;cursor:pointer;outline:none;">
+                    <option value="">Auto (failover)</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="openai">OpenAI (GPT-4o)</option>
+                    <option value="gemini">Gemini (Flash)</option>
+                    <option value="kimi">Kimi (Moonshot)</option>
+                    <option value="xai">xAI (Grok)</option>
+                </select>
+                <span id="chatProvider" style="font-size:11px;padding:4px 10px;border-radius:6px;background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid rgba(0,240,255,0.2);">—</span>
+            </div>
+        </div>
+        <div id="chatMessages" style="flex:1;overflow-y:auto;padding:12px;background:rgba(0,0,0,0.25);border-radius:12px;border:1px solid rgba(255,255,255,0.06);margin-bottom:12px;display:flex;flex-direction:column;gap:10px;">
+            <div style="color:#606080;font-size:13px;text-align:center;padding:40px 0;"><i class="fas fa-comments" style="font-size:24px;display:block;margin-bottom:10px;"></i>Start a conversation with the AI analyst</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <input id="chatInput" type="text" placeholder="Ask about threats, alerts, or system status..." style="flex:1;padding:12px 16px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:#fff;font-size:13px;outline:none;font-family:inherit;" onkeydown="if(event.key==='Enter')app.sendChat()">
+            <button onclick="app.sendChat()" style="padding:12px 20px;background:linear-gradient(135deg,rgba(0,240,255,0.15),rgba(184,41,221,0.15));border:1px solid rgba(0,240,255,0.3);color:var(--accent-cyan);border-radius:10px;font-size:13px;cursor:pointer;font-weight:700;white-space:nowrap;"><i class="fas fa-paper-plane mr-2"></i>Send</button>
+        </div>
     </div>
 </div>
 
@@ -1388,6 +1419,14 @@ const api = {
     getLLMDiag()  { return this._pub('/api/llm/diagnostics'); },
     getCredits()  { return this._pub('/api/llm/credits/'); },
     // Synthetic attack helpers removed (live traffic only).
+    postChat(messages, provider) {
+        const body = { messages };
+        if (provider) body.provider = provider;
+        return this._fetch('/api/analyst/chat', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    },
 };
 
 // ── Live SSE feed ──────────────────────────────────────────────────────
@@ -2943,6 +2982,9 @@ const app = {
             // LLM Control data is not fetched in refreshAll() — load on demand.
             this.refreshLLMControl(false);
         }
+        if (tab==='chat') {
+            const inp=$('chatInput'); if(inp) inp.focus();
+        }
         this._renderTab(tab);
     },
 
@@ -3247,6 +3289,60 @@ const app = {
     },
 
     // Synthetic attack launchers removed (live attacks only).
+
+    _chatMessages: [],
+
+    async sendChat() {
+        const inp=$('chatInput');
+        if(!inp) return;
+        const text=inp.value.trim();
+        if(!text) return;
+        inp.value='';
+        this._chatMessages.push({role:'user',content:text});
+        this._renderChatMessages();
+        // Show typing indicator
+        const container=$('chatMessages');
+        const typing=document.createElement('div');
+        typing.id='chatTyping';
+        typing.style.cssText='color:#606080;font-size:12px;padding:8px 12px;';
+        typing.innerHTML='<i class="fas fa-circle-notch fa-spin mr-2"></i>AI analyst is thinking...';
+        container.appendChild(typing);
+        container.scrollTop=container.scrollHeight;
+        const sel=$('chatProviderSelect');
+        const provider=sel?sel.value:'';
+        const resp=await api.postChat(this._chatMessages, provider||null);
+        const t=$('chatTyping'); if(t) t.remove();
+        if(resp && resp.message && resp.message.content) {
+            this._chatMessages.push({role:'assistant',content:resp.message.content});
+            const prov=$('chatProvider');
+            if(prov) prov.textContent=resp.provider_used||'unknown';
+        } else {
+            this._chatMessages.push({role:'assistant',content:'Error: No response from AI. Check LLM provider status in LLM Control tab.'});
+        }
+        this._renderChatMessages();
+    },
+
+    _renderChatMessages() {
+        const container=$('chatMessages');
+        if(!container) return;
+        container.innerHTML='';
+        if(!this._chatMessages.length) {
+            container.innerHTML='<div style="color:#606080;font-size:13px;text-align:center;padding:40px 0;"><i class="fas fa-comments" style="font-size:24px;display:block;margin-bottom:10px;"></i>Start a conversation with the AI analyst</div>';
+            return;
+        }
+        for(const m of this._chatMessages) {
+            const div=document.createElement('div');
+            const isUser=m.role==='user';
+            div.style.cssText=`max-width:85%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.55;word-break:break-word;white-space:pre-wrap;${
+                isUser
+                ? 'align-self:flex-end;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);color:#d0f0ff;'
+                : 'align-self:flex-start;background:rgba(184,41,221,0.08);border:1px solid rgba(184,41,221,0.15);color:#e0d0f0;'
+            }`;
+            div.textContent=m.content;
+            container.appendChild(div);
+        }
+        container.scrollTop=container.scrollHeight;
+    },
 };
 
 // Global modal shortcuts

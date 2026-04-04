@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Figure 5: Backend Alert Processing Pipeline</title>
+<style>
+  body { margin: 0; padding: 30px; background: #fff; font-family: 'Segoe UI', Arial, sans-serif; }
+  svg { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<svg width="820" height="1120" viewBox="0 0 820 1120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#444"/></marker>
+    <marker id="arr-r" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#c0392b"/></marker>
+    <marker id="arr-g" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#27ae60"/></marker>
+    <filter id="sh" x="-3%" y="-3%" width="106%" height="106%"><feDropShadow dx="1" dy="1" stdDeviation="2" flood-opacity="0.1"/></filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="410" y="28" text-anchor="middle" font-size="17" font-weight="bold" fill="#222">Figure 5: Backend Alert Processing Pipeline</text>
+
+  <!-- ===== ROW 1: Start ===== -->
+  <rect x="280" y="50" width="260" height="40" rx="20" fill="#d6eaf8" stroke="#2980b9" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="75" text-anchor="middle" font-size="12" fill="#1a5276" font-weight="600">Alert Received (Falco / Suricata)</text>
+  <line x1="410" y1="90" x2="410" y2="115" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== ROW 2: Rate Limit ===== -->
+  <polygon points="410,118 505,155 410,192 315,155" fill="#fef9e7" stroke="#f39c12" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="152" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">Rate limit</text>
+  <text x="410" y="164" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">exceeded?</text>
+  <!-- YES → right -->
+  <line x1="505" y1="155" x2="600" y2="155" stroke="#c0392b" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="545" y="148" text-anchor="middle" font-size="10" fill="#c0392b" font-weight="bold">YES</text>
+  <rect x="602" y="138" width="130" height="34" rx="17" fill="#fadbd8" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="667" y="159" text-anchor="middle" font-size="11" fill="#922b21">Return 429</text>
+  <!-- NO ↓ -->
+  <line x1="410" y1="192" x2="410" y2="218" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="420" y="208" font-size="10" fill="#27ae60" font-weight="bold">NO</text>
+
+  <!-- ===== ROW 3: Queue Full ===== -->
+  <polygon points="410,220 505,257 410,294 315,257" fill="#fef9e7" stroke="#f39c12" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="254" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">Queue</text>
+  <text x="410" y="266" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">full?</text>
+  <line x1="505" y1="257" x2="600" y2="257" stroke="#c0392b" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="545" y="250" text-anchor="middle" font-size="10" fill="#c0392b" font-weight="bold">YES</text>
+  <rect x="602" y="240" width="130" height="34" rx="17" fill="#fadbd8" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="667" y="261" text-anchor="middle" font-size="11" fill="#922b21">Return 503</text>
+  <line x1="410" y1="294" x2="410" y2="320" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="420" y="310" font-size="10" fill="#27ae60" font-weight="bold">NO</text>
+
+  <!-- ===== ROW 4: Fingerprint ===== -->
+  <rect x="290" y="322" width="240" height="42" rx="6" fill="#eaf2f8" stroke="#2c3e50" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="410" y="340" text-anchor="middle" font-size="11" fill="#2c3e50" font-weight="600">Compute Fingerprint</text>
+  <text x="410" y="355" text-anchor="middle" font-size="9.5" fill="#5d6d7e">MD5(rule + container + output[0:200])</text>
+  <line x1="410" y1="364" x2="410" y2="390" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== ROW 5: Cache Hit ===== -->
+  <polygon points="410,392 505,429 410,466 315,429" fill="#fef9e7" stroke="#f39c12" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="426" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">Cache</text>
+  <text x="410" y="438" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">hit?</text>
+  <line x1="505" y1="429" x2="600" y2="429" stroke="#27ae60" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="545" y="422" text-anchor="middle" font-size="10" fill="#27ae60" font-weight="bold">YES</text>
+  <rect x="602" y="412" width="150" height="34" rx="17" fill="#d5f5e3" stroke="#27ae60" stroke-width="1.5"/>
+  <text x="677" y="433" text-anchor="middle" font-size="11" fill="#1e8449">Return cached result</text>
+  <line x1="410" y1="466" x2="410" y2="492" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="420" y="482" font-size="10" fill="#c0392b" font-weight="bold">NO</text>
+
+  <!-- ===== ROW 6: Select Provider ===== -->
+  <rect x="290" y="494" width="240" height="42" rx="6" fill="#f4ecf7" stroke="#8e44ad" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="410" y="512" text-anchor="middle" font-size="11" fill="#6c3483" font-weight="600">Select LLM Provider</text>
+  <text x="410" y="527" text-anchor="middle" font-size="9.5" fill="#7d3c98">from priority chain (5 providers)</text>
+  <line x1="410" y1="536" x2="410" y2="562" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== ROW 7: Circuit Breaker ===== -->
+  <polygon points="410,564 505,601 410,638 315,601" fill="#fef9e7" stroke="#f39c12" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="596" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">Circuit breaker</text>
+  <text x="410" y="608" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">closed?</text>
+  <!-- NO → left, loop back up -->
+  <line x1="315" y1="601" x2="220" y2="601" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="262" y="594" text-anchor="middle" font-size="10" fill="#c0392b" font-weight="bold">NO</text>
+  <line x1="220" y1="601" x2="220" y2="515" stroke="#c0392b" stroke-width="1.5"/>
+  <line x1="220" y1="515" x2="288" y2="515" stroke="#c0392b" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="225" y="556" font-size="9" fill="#c0392b" font-style="italic">try next</text>
+  <line x1="410" y1="638" x2="410" y2="664" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="420" y="654" font-size="10" fill="#27ae60" font-weight="bold">YES</text>
+
+  <!-- ===== ROW 8: LLM Analysis ===== -->
+  <rect x="290" y="666" width="240" height="42" rx="6" fill="#f4ecf7" stroke="#8e44ad" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="410" y="684" text-anchor="middle" font-size="11" fill="#6c3483" font-weight="600">Send to LLM for Analysis</text>
+  <text x="410" y="699" text-anchor="middle" font-size="9.5" fill="#7d3c98">structured JSON response expected</text>
+  <line x1="410" y1="708" x2="410" y2="730" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== ROW 9: Valid Response ===== -->
+  <polygon points="410,732 490,760 410,788 330,760" fill="#fef9e7" stroke="#f39c12" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="764" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">Valid?</text>
+  <!-- NO → left, record failure, loop back -->
+  <line x1="330" y1="760" x2="185" y2="760" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="262" y="753" text-anchor="middle" font-size="10" fill="#c0392b" font-weight="bold">NO</text>
+  <rect x="130" y="745" width="110" height="30" rx="5" fill="#fadbd8" stroke="#c0392b" stroke-width="1"/>
+  <text x="185" y="764" text-anchor="middle" font-size="10" fill="#922b21">Record failure</text>
+  <line x1="185" y1="745" x2="185" y2="515" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <line x1="185" y1="515" x2="288" y2="515" stroke="#c0392b" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-r)"/>
+  <line x1="410" y1="788" x2="410" y2="812" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="420" y="803" font-size="10" fill="#27ae60" font-weight="bold">YES</text>
+
+  <!-- ===== ROW 10: Cache + Severity ===== -->
+  <rect x="305" y="814" width="210" height="34" rx="6" fill="#eaf2f8" stroke="#2c3e50" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="410" y="835" text-anchor="middle" font-size="11" fill="#2c3e50" font-weight="600">Cache result (TTL = 60s)</text>
+  <line x1="410" y1="848" x2="410" y2="870" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== ROW 11: Severity Branch ===== -->
+  <polygon points="410,872 500,905 410,938 320,905" fill="#fef9e7" stroke="#f39c12" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="902" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">Severity</text>
+  <text x="410" y="914" text-anchor="middle" font-size="11" fill="#7d6608" font-weight="600">level?</text>
+
+  <!-- Severity ≥ 8 → left -->
+  <line x1="320" y1="905" x2="200" y2="905" stroke="#c0392b" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="258" y="898" text-anchor="middle" font-size="10" fill="#c0392b" font-weight="bold">≥ 8</text>
+  <rect x="80" y="889" width="120" height="34" rx="6" fill="#fadbd8" stroke="#c0392b" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="140" y="910" text-anchor="middle" font-size="11" fill="#922b21" font-weight="600">isolate_pod</text>
+
+  <!-- Severity ≥ 6 → right -->
+  <line x1="500" y1="905" x2="620" y2="905" stroke="#e67e22" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="558" y="898" text-anchor="middle" font-size="10" fill="#e67e22" font-weight="bold">≥ 6</text>
+  <rect x="620" y="889" width="120" height="34" rx="6" fill="#fdebd0" stroke="#e67e22" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="680" y="910" text-anchor="middle" font-size="11" fill="#a04000" font-weight="600">scale_up</text>
+
+  <!-- Severity < 6 → down -->
+  <line x1="410" y1="938" x2="410" y2="960" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="425" y="952" font-size="10" fill="#27ae60" font-weight="bold">&lt; 6</text>
+
+  <!-- Converge lines -->
+  <line x1="140" y1="923" x2="140" y2="970" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="140" y1="970" x2="410" y2="970" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="680" y1="923" x2="680" y2="970" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="680" y1="970" x2="410" y2="970" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+
+  <!-- ===== ROW 12: Governance ===== -->
+  <polygon points="410,972 500,1005 410,1038 320,1005" fill="#e8daef" stroke="#8e44ad" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="1002" text-anchor="middle" font-size="11" fill="#6c3483" font-weight="600">Governance</text>
+  <text x="410" y="1014" text-anchor="middle" font-size="11" fill="#6c3483" font-weight="600">allows?</text>
+  <!-- NO → right: queue -->
+  <line x1="500" y1="1005" x2="600" y2="1005" stroke="#8e44ad" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="545" y="998" text-anchor="middle" font-size="10" fill="#8e44ad" font-weight="bold">NO</text>
+  <rect x="602" y="989" width="150" height="34" rx="6" fill="#e8daef" stroke="#8e44ad" stroke-width="1.5"/>
+  <text x="677" y="1010" text-anchor="middle" font-size="11" fill="#6c3483">Queue for approval</text>
+  <line x1="410" y1="1038" x2="410" y2="1052" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="420" y="1048" font-size="10" fill="#27ae60" font-weight="bold">YES</text>
+  <!-- Queue converge -->
+  <line x1="677" y1="1023" x2="677" y2="1060" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="677" y1="1060" x2="410" y2="1060" stroke="#888" stroke-width="1" stroke-dasharray="4,2"/>
+
+  <!-- ===== ROW 13: Persist ===== -->
+  <rect x="280" y="1054" width="260" height="34" rx="6" fill="#eaf2f8" stroke="#2c3e50" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="410" y="1075" text-anchor="middle" font-size="11" fill="#2c3e50" font-weight="600">Persist → PostgreSQL + Prometheus + SSE</text>
+  <line x1="410" y1="1088" x2="410" y2="1100" stroke="#444" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== ROW 14: End ===== -->
+  <rect x="310" y="1100" width="200" height="34" rx="17" fill="#d5f5e3" stroke="#27ae60" stroke-width="2" filter="url(#sh)"/>
+  <text x="410" y="1121" text-anchor="middle" font-size="12" fill="#1e8449" font-weight="600">Return Analysis Response</text>
+
+  <!-- ===== FALLBACK NOTE ===== -->
+  <rect x="58" y="630" width="130" height="50" rx="6" fill="#f8f9fa" stroke="#adb5bd" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="123" y="650" text-anchor="middle" font-size="9.5" fill="#6c757d" font-style="italic">All providers fail →</text>
+  <text x="123" y="664" text-anchor="middle" font-size="9.5" fill="#6c757d" font-style="italic">safe-mode fallback</text>
+  <text x="123" y="676" text-anchor="middle" font-size="9.5" fill="#6c757d" font-style="italic">(deterministic, no LLM)</text>
+</svg>
+</body>
+</html>

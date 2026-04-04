@@ -47,6 +47,8 @@ scalability-results/
 payload.json
 a
 *.bak
+*.bak[0-9]*
+*.zip
 node_modules/
 puppeteer-config.json
 

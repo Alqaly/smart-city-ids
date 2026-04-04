@@ -60,6 +60,18 @@ Be concise, accurate, and security-focused. Always respond with valid JSON only.
             user_prompt = self._build_prompt(alert)
             
             async with httpx.AsyncClient(timeout=30.0) as client:
+                # Gemini 2.5 "thinking" models consume maxOutputTokens for
+                # internal reasoning.  Disable thinking for structured JSON
+                # analysis and use a higher output budget.
+                gemini_max = max(Config.LLM_MAX_TOKENS, 2048)
+                gen_config: dict = {
+                    "temperature": Config.LLM_TEMPERATURE,
+                    "maxOutputTokens": gemini_max,
+                    "responseMimeType": "application/json",
+                }
+                if "2.5" in self.model:
+                    gen_config["thinkingConfig"] = {"thinkingBudget": 0}
+
                 response = await client.post(
                     f"{self.base_url}?key={self.api_key}",
                     headers={"Content-Type": "application/json"},
@@ -70,11 +82,7 @@ Be concise, accurate, and security-focused. Always respond with valid JSON only.
                         "contents": [{
                             "parts": [{"text": user_prompt}]
                         }],
-                        "generationConfig": {
-                            "temperature": Config.LLM_TEMPERATURE,
-                            "maxOutputTokens": Config.LLM_MAX_TOKENS,
-                            "responseMimeType": "application/json"
-                        }
+                        "generationConfig": gen_config,
                     }
                 )
                 

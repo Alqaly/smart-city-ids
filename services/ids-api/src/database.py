@@ -780,6 +780,20 @@ class Database:
                 )
             """)
             
+            # Chat conversations for cross-session correlation
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_conversations (
+                    id SERIAL PRIMARY KEY,
+                    session_id VARCHAR(128) NOT NULL,
+                    role VARCHAR(20) NOT NULL,
+                    content TEXT NOT NULL,
+                    provider VARCHAR(50),
+                    intent VARCHAR(100),
+                    trace_id VARCHAR(128),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Initialize default LLM priority if not exists
             cur.execute("""
                 INSERT INTO system_config (key, value)
@@ -811,6 +825,8 @@ class Database:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_throttled_created ON throttled_alerts(created_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_api_calls(created_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_provider_created ON llm_api_calls(provider_name, created_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_conversations(session_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_created ON chat_conversations(created_at)")
             
             logger.info("✅ Database tables initialized")
     
@@ -1901,6 +1917,66 @@ class Database:
         now = datetime.utcnow()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         return self.get_llm_usage_window(start, now)
+
+    # ============== CHAT CONVERSATIONS ==============
+
+    def save_chat_message(self, session_id: str, role: str, content: str,
+                          provider: str = None, intent: str = None,
+                          trace_id: str = None) -> Optional[int]:
+        """Persist a single chat message (user or assistant) for correlation."""
+        if self.use_memory or not self._ensure_connection():
+            return None
+        try:
+            with self._cursor() as cur:
+                cur.execute("""
+                    INSERT INTO chat_conversations
+                        (session_id, role, content, provider, intent, trace_id, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (session_id, role, content, provider, intent, trace_id,
+                      datetime.now()))
+                return cur.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error saving chat message: {e}")
+            return None
+
+    def get_chat_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent messages for a specific session."""
+        if self.use_memory or not self._ensure_connection():
+            return []
+        try:
+            with self._cursor(RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, session_id, role, content, provider, intent,
+                           trace_id, created_at
+                    FROM chat_conversations
+                    WHERE session_id = %s
+                    ORDER BY created_at ASC
+                    LIMIT %s
+                """, (session_id, limit))
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"Error fetching chat history: {e}")
+            return []
+
+    def get_recent_chat_context(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Return the most recent chat exchanges across all sessions for LLM context."""
+        if self.use_memory or not self._ensure_connection():
+            return []
+        try:
+            with self._cursor(RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT session_id, role, content, intent, created_at
+                    FROM chat_conversations
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (limit,))
+                rows = [dict(r) for r in cur.fetchall()]
+                rows.reverse()
+                return rows
+        except Exception as e:
+            logger.error(f"Error fetching recent chat context: {e}")
+            return []
 
 
 # Global database instance

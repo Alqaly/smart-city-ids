@@ -793,43 +793,54 @@ class EnhancedLLMManager:
     async def analyze_security_alert(self, alert_data: Dict[str, Any], system_prompt: str, force_provider: Optional[str] = None) -> Dict[str, Any]:
         """
         Specialized analysis for security alerts with conversational context.
-        Used by the Analyst API.
+        Used by the Analyst API.  Tries providers in priority order with fallback.
         """
-        # Select engine (default to first available)
-        provider = force_provider or (list(self.engines.keys())[0] if self.engines else None)
-        
-        if not provider or provider not in self.engines:
-            return {"status": "error", "error": f"No engine available (requested: {force_provider})"}
-            
-        engine = self.engines[provider]
-        
-        try:
-            # Extract conversation history
-            conversation = alert_data.get("conversation", [])
-            last_msg = conversation[-1] if conversation else {"content": ""}
-            user_content = last_msg.get('content', '')
-            
-            # Simple context appending for stateless engines
-            context_str = json.dumps([m for m in conversation[:-1]], indent=2)
-            full_system = f"{system_prompt}\n\nPREVIOUS CONTEXT:\n{context_str}"
-            
-            # Call API
-            response_text = await engine._call_api(full_system, user_content)
-            
-            # Estimate cost
-            input_tokens = len(full_system + user_content) / 4
-            output_tokens = len(response_text) / 4
-            cost = ((input_tokens + output_tokens) / 1000) * engine.ESTIMATED_COST_PER_1K_TOKENS
-            
-            return {
-                "status": "success",
-                "analysis": {"raw_analysis": response_text},
-                "provider": provider,
-                "credit_info": {"estimated_cost_usd": cost}
-            }
-        except Exception as e:
-            logger.error(f"Chat analysis failed: {e}")
-            return {"status": "error", "error": str(e)}
+        # Build provider order: forced provider first, then priority order
+        if force_provider and force_provider in self.engines:
+            order = [force_provider] + [e for e in self.config.get_priority_order() if e != force_provider]
+        else:
+            order = self.config.get_priority_order() or list(self.engines.keys())
+
+        if not order:
+            return {"status": "error", "error": "No LLM engine available"}
+
+        # Extract conversation once
+        conversation = alert_data.get("conversation", [])
+        last_msg = conversation[-1] if conversation else {"content": ""}
+        user_content = last_msg.get('content', '')
+        context_str = json.dumps([m for m in conversation[:-1]], indent=2)
+        full_system = f"{system_prompt}\n\nPREVIOUS CONTEXT:\n{context_str}"
+
+        last_error = None
+        for provider in order:
+            engine = self.engines.get(provider)
+            if not engine:
+                continue
+            if self._is_provider_in_cooldown(provider):
+                logger.debug(f"Chat: skipping {provider} - in cooldown")
+                continue
+
+            try:
+                response_text = await engine._call_api(full_system, user_content)
+
+                input_tokens = len(full_system + user_content) / 4
+                output_tokens = len(response_text) / 4
+                cost = ((input_tokens + output_tokens) / 1000) * engine.ESTIMATED_COST_PER_1K_TOKENS
+
+                return {
+                    "status": "success",
+                    "analysis": {"raw_analysis": response_text},
+                    "provider": provider,
+                    "credit_info": {"estimated_cost_usd": cost}
+                }
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Chat: {provider} failed: {last_error}")
+                if self._should_cooldown_provider(last_error):
+                    self._activate_provider_cooldown(provider, last_error)
+
+        logger.error(f"Chat analysis failed: all providers exhausted. Last error: {last_error}")
+        return {"status": "error", "error": f"All providers failed. Last: {last_error}"}
 
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any], governance_mode: str = "assisted") -> Dict[str, Any]:
         """Execute a tool on behalf of the LLM"""

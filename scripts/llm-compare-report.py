@@ -256,6 +256,9 @@ def run_strict_evaluation(
         prompt_snapshot = build_eval_prompt_from_alert(alert)
         for provider in providers:
             for run_idx in range(1, runs + 1):
+                # Respect rate limits: pause between API calls to avoid 429s.
+                import time as _time
+                _time.sleep(4)
                 try:
                     result = post_json(
                         f"{api_url}/api/alerts/{alert_id}/reanalyze?engine={provider}&strict=true&persist=false",

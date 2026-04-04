@@ -254,6 +254,7 @@ class ConversationRequest(BaseModel):
     session_id: Optional[str] = None
     use_tools: bool = True
     stream: bool = False
+    provider: Optional[str] = None
 
 class ConversationResponse(BaseModel):
     message: ChatMessage
@@ -595,6 +596,26 @@ async def chat_with_analyst(request: ConversationRequest, http_request: Request)
             .replace("{session_id}", request.session_id or "anonymous")
             .replace("{providers}", ", ".join(providers) if providers else "none available")
         )
+
+        # Inject recent chat history from DB for cross-session correlation
+        try:
+            from database import db as _db
+            recent_chats = _db.get_recent_chat_context(limit=20)
+            if recent_chats:
+                history_lines = []
+                for msg in recent_chats:
+                    ts = msg.get("created_at", "")
+                    if hasattr(ts, "strftime"):
+                        ts = ts.strftime("%Y-%m-%d %H:%M")
+                    role = msg.get("role", "?")
+                    snippet = (msg.get("content") or "")[:300]
+                    history_lines.append(f"[{ts}] {role}: {snippet}")
+                system_prompt += (
+                    "\n\n--- Recent analyst conversation history (use for correlation) ---\n"
+                    + "\n".join(history_lines)
+                )
+        except Exception as e:
+            logger.debug(f"Could not inject chat history: {e}")
         
         # Prepare messages for LLM
         messages = [{"role": "system", "content": system_prompt}]
@@ -612,7 +633,7 @@ async def chat_with_analyst(request: ConversationRequest, http_request: Request)
         response = await analyst_llm.analyze_security_alert(
             alert_data={"conversation": messages, "tools_available": request.use_tools},
             system_prompt=system_prompt,
-            force_provider=None  # Auto-select based on credits
+            force_provider=request.provider,
         )
         
         # Parse response for tool calls
@@ -704,6 +725,34 @@ async def chat_with_analyst(request: ConversationRequest, http_request: Request)
             )
         except Exception as audit_error:
             logger.debug(f"Skipped chat audit event: {audit_error}")
+
+        # Persist chat messages to DB for cross-session correlation
+        try:
+            from database import db as _db
+            chat_session = request.session_id or trace_id
+            provider_used = response.get("provider", "unknown")
+            # Save the latest user message
+            if request.messages:
+                last_user = request.messages[-1]
+                _db.save_chat_message(
+                    session_id=chat_session,
+                    role=last_user.role,
+                    content=last_user.content,
+                    provider=None,
+                    intent=user_intent,
+                    trace_id=trace_id,
+                )
+            # Save the assistant response
+            _db.save_chat_message(
+                session_id=chat_session,
+                role="assistant",
+                content=content,
+                provider=provider_used,
+                intent=user_intent,
+                trace_id=trace_id,
+            )
+        except Exception as db_err:
+            logger.debug(f"Could not persist chat message: {db_err}")
 
         response_obj = ConversationResponse(
             message=ChatMessage(

@@ -1,12 +1,15 @@
 """
 Human-in-the-Loop Governance System
-Governance Module — Autopilot / Assisted / Manual modes
+Governance Module — Autonomous / Assisted / Manual modes
 
-Implements three automation modes:
+Implements three user-selectable automation modes:
 - AUTONOMOUS: High-confidence actions auto-execute
 - ASSISTED: Medium-confidence actions require quick operator approval
 - MANUAL: Human-only execution
-- EMERGENCY: Catastrophic high-confidence events bypass gates
+
+Plus an API-only emergency bypass (not exposed in the dashboard UI):
+- EMERGENCY: Severity 10 + confidence >= 0.85 bypasses all gates including
+  protected-service checks.  Activated only via API or environment variable.
 
 Each mode provides IEEE-defensible trade-offs between response time and safety.
 """

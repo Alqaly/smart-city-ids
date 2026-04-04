@@ -4,7 +4,8 @@ This module implements the **Human-in-the-Loop (HITL) governance layer** that
 controls whether automated Kubernetes actions (pod isolation, scaling, eviction)
 are executed immediately or held for human approval.
 
-Three automation modes are supported:
+Three user-selectable automation modes are supported, plus an API-only
+emergency bypass:
 
     ┌─────────────┬──────────────────────────────────────────────────────────┐
     │ Mode        │ Behaviour                                                │
@@ -12,7 +13,8 @@ Three automation modes are supported:
     │ autonomous  │ High-confidence actions execute automatically.            │
     │ assisted    │ Medium-confidence actions require one-click approval.     │
     │ manual      │ Every recommended action is queued for human review.      │
-    │ emergency   │ Severity+confidence threshold bypasses normal gates.      │
+    ├─────────────┼──────────────────────────────────────────────────────────┤
+    │ emergency   │ API-only: sev 10 + conf ≥ 0.85 bypasses all gates.       │
     └─────────────┴──────────────────────────────────────────────────────────┘
 
 Endpoints (all require JWT authentication):

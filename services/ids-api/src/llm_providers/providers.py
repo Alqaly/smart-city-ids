@@ -13,6 +13,7 @@ To add a new provider:
 That's it - the provider will be auto-discovered.
 """
 
+import os
 import httpx
 import logging
 
@@ -198,8 +199,44 @@ class GeminiProvider(BaseProvider):
     DEFAULT_MODEL = "gemini-2.5-flash-lite"
     DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
     
+    # Expected analysis JSON schema — forces Gemini to produce valid output.
+    _RESPONSE_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string"},
+            "severity": {"type": "integer"},
+            "threat_type": {"type": "string"},
+            "confidence": {"type": "number"},
+            "recommendations": {"type": "array", "items": {"type": "string"}},
+            "automated_actions": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["summary", "severity", "threat_type", "confidence",
+                      "recommendations", "automated_actions"],
+    }
+
     async def _call_api(self, system_prompt: str, user_prompt: str) -> str:
         url = f"{self.base_url}/models/{self.model}:generateContent?key={self.api_key}"
+
+        # Gemini 2.5 "thinking" models consume maxOutputTokens for internal
+        # reasoning, leaving very few tokens for the actual JSON response.
+        # Fix: use a higher output budget and disable thinking for structured
+        # JSON analysis where chain-of-thought adds no value.
+        gemini_max_tokens = int(os.getenv(
+            "GEMINI_MAX_TOKENS", str(max(self.config.max_tokens, 2048))
+        ))
+
+        generation_config: dict = {
+            "temperature": self.config.temperature,
+            "maxOutputTokens": gemini_max_tokens,
+            "responseMimeType": "application/json",
+            "responseSchema": self._RESPONSE_SCHEMA,
+        }
+
+        # Disable thinking for 2.5+ models so the full token budget goes
+        # to the JSON response instead of hidden reasoning tokens.
+        if "2.5" in self.model:
+            generation_config["thinkingConfig"] = {"thinkingBudget": 0}
+
         async with httpx.AsyncClient(timeout=self.config.timeout) as client:
             response = await client.post(
                 url,
@@ -207,17 +244,20 @@ class GeminiProvider(BaseProvider):
                 json={
                     "system_instruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{"parts": [{"text": user_prompt}]}],
-                    "generationConfig": {
-                        "temperature": self.config.temperature,
-                        "maxOutputTokens": self.config.max_tokens,
-                        "responseMimeType": "application/json"
-                    }
+                    "generationConfig": generation_config,
                 }
             )
             if response.status_code != 200:
                 raise Exception(f"API error {response.status_code}: {response.text[:200]}")
             body = response.json()
-            content = body["candidates"][0]["content"]["parts"][0]["text"]
+
+            # Concatenate all text parts (some models split across parts)
+            candidates = body.get("candidates", [])
+            if not candidates:
+                raise Exception("No candidates in Gemini response")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            content = "".join(p.get("text", "") for p in parts if "text" in p)
+
             usage = body.get("usageMetadata") or {}
             return content, _normalize_usage(
                 prompt_tokens=usage.get("promptTokenCount"),
