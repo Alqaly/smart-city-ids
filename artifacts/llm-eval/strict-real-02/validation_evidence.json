@@ -1,0 +1,343 @@
+{
+  "ground_truth_integrity": {
+    "alerts_used_n": 16,
+    "alerts_with_scored_ground_truth_n": 16,
+    "non_matching_alert_ids": []
+  },
+  "strictness_check": {
+    "raw_rows_total": 64,
+    "scored_rows_total": 48,
+    "violations_excluded_n": 16,
+    "violations": [
+      {
+        "alert_id": "14664",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: API error 429: {\\\"error\\\":{\\\"message\\\":\\\"The engine is currently overloaded, please try again later\\\",\\\"type\\\":\\\"engine_overloaded_error\\\"}}\"}"
+      },
+      {
+        "alert_id": "14663",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (874s remaining)\"}"
+      },
+      {
+        "alert_id": "14659",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (843s remaining)\"}"
+      },
+      {
+        "alert_id": "14650",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (810s remaining)\"}"
+      },
+      {
+        "alert_id": "14797",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (782s remaining)\"}"
+      },
+      {
+        "alert_id": "14796",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (753s remaining)\"}"
+      },
+      {
+        "alert_id": "14625",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (728s remaining)\"}"
+      },
+      {
+        "alert_id": "14624",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (701s remaining)\"}"
+      },
+      {
+        "alert_id": "14662",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (674s remaining)\"}"
+      },
+      {
+        "alert_id": "14653",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (646s remaining)\"}"
+      },
+      {
+        "alert_id": "14666",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (615s remaining)\"}"
+      },
+      {
+        "alert_id": "14661",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (588s remaining)\"}"
+      },
+      {
+        "alert_id": "14592",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (562s remaining)\"}"
+      },
+      {
+        "alert_id": "14579",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (533s remaining)\"}"
+      },
+      {
+        "alert_id": "14627",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (505s remaining)\"}"
+      },
+      {
+        "alert_id": "14626",
+        "provider": "kimi",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: kimi in cooldown (475s remaining)\"}"
+      }
+    ]
+  },
+  "provider_recomputed": {
+    "kimi": {
+      "attempts": 16,
+      "strict_success": 0,
+      "strict_fail": 16,
+      "avg_latency_s": null,
+      "tokens_total": 0,
+      "estimated_cost_total": 0,
+      "sample_error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: API error 429: {\\\"error\\\":{\\\"message\\\":\\\"The engine is currently overloaded, please try ag"
+    },
+    "openai": {
+      "attempts": 16,
+      "strict_success": 16,
+      "strict_fail": 0,
+      "avg_latency_s": 2.0223,
+      "tokens_total": 11875,
+      "estimated_cost_total": 0.11875,
+      "sample_error": null
+    },
+    "xai": {
+      "attempts": 16,
+      "strict_success": 16,
+      "strict_fail": 0,
+      "avg_latency_s": 21.454,
+      "tokens_total": 35334,
+      "estimated_cost_total": 0.278424,
+      "sample_error": null
+    },
+    "anthropic": {
+      "attempts": 16,
+      "strict_success": 16,
+      "strict_fail": 0,
+      "avg_latency_s": 5.1828,
+      "tokens_total": 14897,
+      "estimated_cost_total": 0.238352,
+      "sample_error": null
+    }
+  },
+  "per_scenario_coverage": {
+    "anpr_exfiltration": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "modbus_write_tamper": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "mqtt_misuse": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "network_dos": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "onvif_misuse": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "onvif_recon": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "runtime_shell": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "sqli": {
+      "anthropic": 2,
+      "openai": 2,
+      "xai": 2
+    }
+  },
+  "safety_issue_rows": [
+    {
+      "alert_id": "14666",
+      "provider": "anthropic",
+      "scenario_family": "onvif_recon",
+      "issues": [
+        "false_high"
+      ],
+      "severity_pred": "8",
+      "expected_range": [
+        "5",
+        "7"
+      ],
+      "threat_pred": "Data Exfiltration",
+      "expected_threat": "Collection",
+      "action_pred": "block_ip; isolate_pod; alert_team",
+      "expected_action": "investigate"
+    }
+  ],
+  "slide_alignment": {
+    "artifact_dir": "artifacts/llm-eval/strict-real-02",
+    "distinct_alerts_scored": [
+      "14579",
+      "14592",
+      "14624",
+      "14625",
+      "14626",
+      "14627",
+      "14650",
+      "14653",
+      "14659",
+      "14661",
+      "14662",
+      "14663",
+      "14664",
+      "14666",
+      "14796",
+      "14797"
+    ],
+    "provider_attempts_total": 64,
+    "successful_provider_attempts": 48,
+    "failed_provider_attempts": 16,
+    "providers_requested": [
+      "anthropic",
+      "kimi",
+      "openai",
+      "xai"
+    ],
+    "providers_scored": {
+      "anthropic": 16,
+      "openai": 16,
+      "xai": 16
+    },
+    "scenario_families": [
+      "anpr_exfiltration",
+      "modbus_write_tamper",
+      "mqtt_misuse",
+      "network_dos",
+      "onvif_misuse",
+      "onvif_recon",
+      "runtime_shell",
+      "sqli"
+    ],
+    "provider_metrics": {
+      "anthropic": {
+        "scored_alerts_n": 16,
+        "success_rate_runtime": 1.0,
+        "avg_latency_s": 5.1828,
+        "p95_latency_s": 5.851,
+        "tokens_total": 14897,
+        "estimated_cost_usd_total": 0.238352,
+        "severity_accuracy_pct": 93.75,
+        "threat_type_accuracy_pct": 31.25,
+        "action_relevance_score_1_to_5": 3.75,
+        "quality_composite_score_pct": 65.0,
+        "safety_calibration_score_proxy_pct": 98.12
+      },
+      "openai": {
+        "scored_alerts_n": 16,
+        "success_rate_runtime": 1.0,
+        "avg_latency_s": 2.0223,
+        "p95_latency_s": 2.733,
+        "tokens_total": 11875,
+        "estimated_cost_usd_total": 0.11875,
+        "severity_accuracy_pct": 100.0,
+        "threat_type_accuracy_pct": 31.25,
+        "action_relevance_score_1_to_5": 3.75,
+        "quality_composite_score_pct": 67.5,
+        "safety_calibration_score_proxy_pct": 100.0
+      },
+      "xai": {
+        "scored_alerts_n": 16,
+        "success_rate_runtime": 1.0,
+        "avg_latency_s": 21.454,
+        "p95_latency_s": 25.781,
+        "tokens_total": 35334,
+        "estimated_cost_usd_total": 0.278424,
+        "severity_accuracy_pct": 100.0,
+        "threat_type_accuracy_pct": 43.75,
+        "action_relevance_score_1_to_5": 3.75,
+        "quality_composite_score_pct": 72.5,
+        "safety_calibration_score_proxy_pct": 100.0
+      }
+    }
+  }
+}

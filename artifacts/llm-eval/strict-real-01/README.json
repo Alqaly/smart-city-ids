@@ -1,0 +1,48 @@
+{
+  "api_url": "http://localhost:30800",
+  "pricing_unit_label": "USD_per_1M_tokens",
+  "cost_values_are_estimated": true,
+  "cost_estimation_method": "token_based_rate_per_1k",
+  "provider_count": 5,
+  "alerts_exported": 41,
+  "ground_truth_rules_loaded": 16,
+  "matched_alerts_for_scoring": 41,
+  "matched_alerts_for_scoring_direct_provider": 41,
+  "matched_alerts_for_scoring_cache_hits": 0,
+  "scenario_families_scored": 7,
+  "charts_generated_n": 10,
+  "outputs": [
+    "artifacts/llm-eval/strict-real-01/provider_summary_template.csv",
+    "artifacts/llm-eval/strict-real-01/scenario_alert_scoring_template.csv",
+    "artifacts/llm-eval/strict-real-01/provider_summary_scored.csv",
+    "artifacts/llm-eval/strict-real-01/scenario_family_results_scored.csv",
+    "artifacts/llm-eval/strict-real-01/cache_hit_rollup.csv",
+    "artifacts/llm-eval/strict-real-01/provider_scorecard_ranked.csv",
+    "artifacts/llm-eval/strict-real-01/strict_eval_raw_results.csv"
+  ],
+  "charts": [
+    "artifacts/llm-eval/strict-real-01/charts/avg_latency_by_provider.png",
+    "artifacts/llm-eval/strict-real-01/charts/cost_per_1m_tokens_by_provider.png",
+    "artifacts/llm-eval/strict-real-01/charts/success_rate_runtime_by_provider.png",
+    "artifacts/llm-eval/strict-real-01/charts/severity_accuracy_by_provider.png",
+    "artifacts/llm-eval/strict-real-01/charts/threat_accuracy_by_provider.png",
+    "artifacts/llm-eval/strict-real-01/charts/cost_vs_latency_scatter.png",
+    "artifacts/llm-eval/strict-real-01/charts/scenario_family_severity_accuracy.png",
+    "artifacts/llm-eval/strict-real-01/charts/scenario_family_threat_accuracy.png",
+    "artifacts/llm-eval/strict-real-01/charts/scenario_family_cache_share.png",
+    "artifacts/llm-eval/strict-real-01/charts/scenario_family_safety_proxy.png"
+  ],
+  "scoring_scope_note": "Direct provider quality metrics exclude cache-hit rows; cache-hit rows are reported separately.",
+  "safety_scoring_note": "Safety calibration fields are proxy metrics derived from ground-truth severity ranges and configurable under_escalation_weight values.",
+  "strict_eval": {
+    "providers_requested": [
+      "kimi",
+      "openai",
+      "xai"
+    ],
+    "runs_per_provider": 1,
+    "max_per_family": 2,
+    "successful_strict_runs": 41,
+    "failed_strict_runs": 1
+  }
+}

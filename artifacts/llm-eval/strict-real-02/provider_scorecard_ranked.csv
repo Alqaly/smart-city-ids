@@ -1,0 +1,6 @@
+provider,model,scored_alerts_n_direct,scored_alerts_n_total_including_cache,cache_hit_share_pct_of_scored,quality_composite_score_pct,severity_accuracy_pct,threat_type_accuracy_pct,action_relevance_score_1_to_5,estimated_cost_usd_per_1m_tokens,avg_latency_ms,reliability_runtime_success_pct,safety_calibration_score_proxy_pct,ot_under_escalation_rate_pct,consistency_score_pct,rank_quality,rank_cost,rank_latency,rank_reliability_runtime,rank_safety_proxy,overall_rank_proxy,scorecard_note
+anthropic,claude-sonnet-4-20250514,16,16,0.0,65.0,93.75,31.25,3.75,16.0,5182.8,1.0,98.12,0.0,96.67,3,3,2,1,3,3,
+gemini,gemini-2.0-flash,0,0,,,,,,,,,,,,,,,,,,low_direct_scored_sample;no_runtime_attempts_for_latency_reliability
+kimi,moonshot-v1-8k,0,0,,,,,,,,0.0,,,,,,,4,,,low_direct_scored_sample;runtime_attempts_present_but_db_calls_zero
+openai,gpt-3.5-turbo,16,16,0.0,67.5,100.0,31.25,3.75,10.0,2022.3,1.0,100.0,0.0,100.0,2,2,1,1,1,1,
+xai,grok-4-latest,16,16,0.0,72.5,100.0,43.75,3.75,7.879776,21454.0,1.0,100.0,0.0,95.33,1,1,3,1,1,1,

@@ -1,0 +1,6 @@
+provider,model,status,status_category,last_error_category,circuit_breaker_state,runtime_attempts,runtime_successes,runtime_failures,calls,tokens_total,avg_latency_s,p95_latency_s,success_rate_runtime,estimated_cost_usd_total,estimated_cost_usd_per_1m_tokens,pricing_unit_label,severity_accuracy_pct,threat_type_accuracy_pct,action_relevance_score_1_to_5,false_high_severity_rate_pct,false_low_severity_rate_pct,ot_under_escalation_rate_pct,weighted_under_escalation_penalty_avg,unsafe_action_recommendation_rate_pct,quality_composite_score_pct,safety_calibration_score_proxy_pct,consistency_score_pct,notes
+anthropic,claude-sonnet-4-20250514,auth_failed,auth,auth,closed,0,0,0,0,0,0.0,0.0,0.0,0.0,,USD_per_1M_tokens,,,,,,,,,,,,
+gemini,gemini-2.0-flash,cooldown,cooldown,cooldown,closed,0,0,0,0,0,0.0,0.0,0.0,0.0,,USD_per_1M_tokens,,,,,,,,,,,,
+kimi,moonshot-v1-8k,operational,none,none,closed,40,22,0,22,68363,3.2656,3.6886,1.0,0.410178,6.0,USD_per_1M_tokens,,,,,,,,,,,,
+openai,gpt-3.5-turbo,operational,none,none,closed,16,0,0,0,0,0.0,0.0,0.0,0.0,,USD_per_1M_tokens,,,,,,,,,,,,
+xai,grok-4-latest,operational,none,none,closed,17,0,0,0,0,0.0,0.0,0.0,0.0,,USD_per_1M_tokens,,,,,,,,,,,,

@@ -1,0 +1,6 @@
+provider,model,n,quality_composite_pct,severity_accuracy_pct,threat_accuracy_pct,action_avg,safety_proxy_pct,false_high_pct,false_low_pct,ot_under_escalation_pct,unsafe_action_pct,avg_latency_ms,p95_latency_ms,total_tokens,cost_per_1m,total_cost,rank_quality,rank_cost,rank_latency,rank_safety
+kimi,moonshot-v1-128k,20,76.0,100.0,50.0,4.0,98.0,0.0,0.0,0.0,10.0,2923,3661,0,6.0,0.0,1,2,3,3
+openai,gpt-4o,20,76.0,100.0,50.0,4.0,100.0,0.0,0.0,0.0,0.0,2549,3990,15620,10.0,0.1562,2,4,1,1
+xai,grok-4-latest,20,76.0,100.0,50.0,4.0,98.0,0.0,0.0,0.0,10.0,3383,5095,0,8.0,0.0,3,3,4,4
+gemini,gemini-2.5-flash-lite,20,74.0,100.0,45.0,4.0,98.0,0.0,0.0,0.0,10.0,2659,4934,0,0.5,0.0,4,1,2,2
+anthropic,claude-sonnet-4-20250514,20,68.0,80.0,50.0,4.0,93.33,0.0,20.0,0.0,0.0,4978,5521,18955,16.0,0.30328,5,5,5,5

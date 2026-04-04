@@ -1,0 +1,6 @@
+provider,model,status,status_category,last_error_category,circuit_breaker_state,runtime_attempts,runtime_successes,runtime_failures,calls,tokens_total,avg_latency_s,p95_latency_s,success_rate_runtime,estimated_cost_usd_total,estimated_cost_usd_per_1m_tokens,pricing_unit_label,severity_accuracy_pct,threat_type_accuracy_pct,action_relevance_score_1_to_5,false_high_severity_rate_pct,false_low_severity_rate_pct,ot_under_escalation_rate_pct,weighted_under_escalation_penalty_avg,unsafe_action_recommendation_rate_pct,quality_composite_score_pct,safety_calibration_score_proxy_pct,consistency_score_pct,notes
+anthropic,claude-sonnet-4-20250514,operational,none,none,closed,2,0,0,1,793,0.0,0.0,0.0,0.012688,16.0,USD_per_1M_tokens,,,,,,,,,,,,
+gemini,gemini-2.5-flash,operational,none,none,closed,3,0,0,0,0,0.0,0.0,0.0,0.0,,USD_per_1M_tokens,,,,,,,,,,,,
+kimi,moonshot-v1-128k,cooldown,quota_or_rate_limit_cooldown,quota_or_rate_limit_cooldown,closed,3,2,0,2,90424,3.5747,3.8768,1.0,0.542544,6.0,USD_per_1M_tokens,,,,,,,,,,,,
+openai,gpt-4o,operational,none,none,closed,1,0,0,7,5159,0.0,0.0,0.0,0.05159,10.0,USD_per_1M_tokens,,,,,,,,,,,,
+xai,grok-4-latest,operational,none,none,closed,1,0,0,72,104521,0.0,0.0,0.0,1.254252,12.0,USD_per_1M_tokens,,,,,,,,,,,,

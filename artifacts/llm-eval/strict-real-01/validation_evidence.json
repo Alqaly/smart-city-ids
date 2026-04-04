@@ -1,0 +1,235 @@
+{
+  "ground_truth_integrity": {
+    "alerts_used_n": 14,
+    "alerts_with_scored_ground_truth_n": 14,
+    "non_matching_alert_ids": []
+  },
+  "strictness_check": {
+    "raw_rows_total": 42,
+    "scored_rows_total": 41,
+    "violations_excluded_n": 1,
+    "violations": [
+      {
+        "alert_id": "14295",
+        "provider": "xai",
+        "run_index": "1",
+        "status": "error",
+        "strict_requested": "True",
+        "strict_satisfied": "False",
+        "engine_used": "xai",
+        "latency_s": "",
+        "prompt_tokens": "",
+        "completion_tokens": "",
+        "total_tokens": "",
+        "estimated_cost_usd": "0.0",
+        "summary": "",
+        "severity": "",
+        "threat_type": "",
+        "action_text": "",
+        "error": "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: \"}"
+      }
+    ]
+  },
+  "provider_recomputed": {
+    "kimi": {
+      "strict_calls_total": 14,
+      "strict_success": 14,
+      "strict_fail": 0,
+      "avg_latency_s": 3.7296,
+      "p95_latency_s": 5.375,
+      "prompt_tokens": 9549,
+      "completion_tokens": 2118,
+      "total_tokens": 11667,
+      "estimated_cost_total": 0.070002,
+      "cost_per_alert": 0.005,
+      "cost_per_1000_alerts": 5.0,
+      "failure_reasons": {},
+      "severity_accuracy_pct": 100.0,
+      "threat_accuracy_pct": 42.86,
+      "action_relevance": 3.4286,
+      "quality_composite_pct": 70.86,
+      "safety_proxy_pct": 100.0
+    },
+    "openai": {
+      "strict_calls_total": 14,
+      "strict_success": 14,
+      "strict_fail": 0,
+      "avg_latency_s": 2.2774,
+      "p95_latency_s": 3.365,
+      "prompt_tokens": 9124,
+      "completion_tokens": 1589,
+      "total_tokens": 10713,
+      "estimated_cost_total": 0.10713,
+      "cost_per_alert": 0.007652,
+      "cost_per_1000_alerts": 7.65,
+      "failure_reasons": {},
+      "severity_accuracy_pct": 100.0,
+      "threat_accuracy_pct": 28.57,
+      "action_relevance": 3.4286,
+      "quality_composite_pct": 65.14,
+      "safety_proxy_pct": 100.0
+    },
+    "xai": {
+      "strict_calls_total": 14,
+      "strict_success": 13,
+      "strict_fail": 1,
+      "avg_latency_s": 25.4889,
+      "p95_latency_s": 29.049,
+      "prompt_tokens": 16975,
+      "completion_tokens": 2074,
+      "total_tokens": 28943,
+      "estimated_cost_total": 0.228588,
+      "cost_per_alert": 0.017584,
+      "cost_per_1000_alerts": 17.58,
+      "failure_reasons": {
+        "HTTP 502: {\"detail\": \"LLM returned error: All providers failed. Last: \"}": 1
+      },
+      "severity_accuracy_pct": 84.62,
+      "threat_accuracy_pct": 38.46,
+      "action_relevance": 3.3846,
+      "quality_composite_pct": 62.77,
+      "safety_proxy_pct": 94.87
+    }
+  },
+  "per_scenario_coverage": {
+    "anpr_exfiltration": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 1
+    },
+    "lateral_movement_or_platform_access": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "modbus_write_tamper": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "mqtt_misuse": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "onvif_misuse": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "onvif_recon": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 2
+    },
+    "runtime_shell": {
+      "kimi": 2,
+      "openai": 2,
+      "xai": 2
+    }
+  },
+  "safety_issue_rows": [
+    {
+      "alert_id": "14165",
+      "provider": "xai",
+      "scenario_family": "lateral_movement_or_platform_access",
+      "issues": [
+        "under_escalated"
+      ],
+      "severity_pred": "3",
+      "expected_range": [
+        "4",
+        "7"
+      ],
+      "threat_pred": "Policy Violation",
+      "expected_threat": "Lateral Movement",
+      "action_pred": "alert_team",
+      "expected_action": "investigate"
+    },
+    {
+      "alert_id": "14164",
+      "provider": "xai",
+      "scenario_family": "lateral_movement_or_platform_access",
+      "issues": [
+        "under_escalated"
+      ],
+      "severity_pred": "2",
+      "expected_range": [
+        "4",
+        "7"
+      ],
+      "threat_pred": "Policy Violation",
+      "expected_threat": "Lateral Movement",
+      "action_pred": "alert_team",
+      "expected_action": "investigate"
+    }
+  ],
+  "slide_alignment": {
+    "artifact_dir": "artifacts/llm-eval/strict-real-01",
+    "alerts_exported": 14,
+    "provider_attempts_total": 42,
+    "providers_requested": [
+      "kimi",
+      "openai",
+      "xai"
+    ],
+    "providers_scored": {
+      "kimi": 14,
+      "openai": 14,
+      "xai": 13
+    },
+    "scenario_families": [
+      "anpr_exfiltration",
+      "lateral_movement_or_platform_access",
+      "modbus_write_tamper",
+      "mqtt_misuse",
+      "onvif_misuse",
+      "onvif_recon",
+      "runtime_shell"
+    ],
+    "provider_summary": {
+      "kimi": {
+        "strict_success": 14,
+        "strict_fail": 0,
+        "avg_latency_s": 3.7296,
+        "p95_latency_s": 5.375,
+        "total_tokens": 11667,
+        "cost_per_alert": 0.005,
+        "cost_per_1000_alerts": 5.0,
+        "severity_accuracy_pct": 100.0,
+        "threat_accuracy_pct": 42.86,
+        "action_relevance": 3.4286,
+        "quality_composite_pct": 70.86,
+        "safety_proxy_pct": 100.0
+      },
+      "openai": {
+        "strict_success": 14,
+        "strict_fail": 0,
+        "avg_latency_s": 2.2774,
+        "p95_latency_s": 3.365,
+        "total_tokens": 10713,
+        "cost_per_alert": 0.007652,
+        "cost_per_1000_alerts": 7.65,
+        "severity_accuracy_pct": 100.0,
+        "threat_accuracy_pct": 28.57,
+        "action_relevance": 3.4286,
+        "quality_composite_pct": 65.14,
+        "safety_proxy_pct": 100.0
+      },
+      "xai": {
+        "strict_success": 13,
+        "strict_fail": 1,
+        "avg_latency_s": 25.4889,
+        "p95_latency_s": 29.049,
+        "total_tokens": 28943,
+        "cost_per_alert": 0.017584,
+        "cost_per_1000_alerts": 17.58,
+        "severity_accuracy_pct": 84.62,
+        "threat_accuracy_pct": 38.46,
+        "action_relevance": 3.3846,
+        "quality_composite_pct": 62.77,
+        "safety_proxy_pct": 94.87
+      }
+    }
+  }
+}

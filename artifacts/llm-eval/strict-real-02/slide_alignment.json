@@ -1,0 +1,69 @@
+{
+  "artifact_dir": "artifacts/llm-eval/strict-real-02",
+  "distinct_alerts_scored": 16,
+  "provider_attempts_total": 64,
+  "successful_provider_attempts": 48,
+  "failed_provider_attempts": 16,
+  "providers_requested": [
+    "anthropic",
+    "kimi",
+    "openai",
+    "xai"
+  ],
+  "providers_scored": {
+    "anthropic": 16,
+    "openai": 16,
+    "xai": 16
+  },
+  "scenario_families": [
+    "anpr_exfiltration",
+    "modbus_write_tamper",
+    "mqtt_misuse",
+    "network_dos",
+    "onvif_misuse",
+    "onvif_recon",
+    "runtime_shell",
+    "sqli"
+  ],
+  "provider_metrics": {
+    "anthropic": {
+      "scored_alerts_n": 16,
+      "success_rate_runtime": 1.0,
+      "avg_latency_s": 5.1828,
+      "p95_latency_s": 5.851,
+      "tokens_total": 14897,
+      "estimated_cost_usd_total": 0.238352,
+      "severity_accuracy_pct": 93.75,
+      "threat_type_accuracy_pct": 31.25,
+      "action_relevance_score_1_to_5": 3.75,
+      "quality_composite_score_pct": 65.0,
+      "safety_calibration_score_proxy_pct": 98.12
+    },
+    "openai": {
+      "scored_alerts_n": 16,
+      "success_rate_runtime": 1.0,
+      "avg_latency_s": 2.0223,
+      "p95_latency_s": 2.733,
+      "tokens_total": 11875,
+      "estimated_cost_usd_total": 0.11875,
+      "severity_accuracy_pct": 100.0,
+      "threat_type_accuracy_pct": 31.25,
+      "action_relevance_score_1_to_5": 3.75,
+      "quality_composite_score_pct": 67.5,
+      "safety_calibration_score_proxy_pct": 100.0
+    },
+    "xai": {
+      "scored_alerts_n": 16,
+      "success_rate_runtime": 1.0,
+      "avg_latency_s": 21.454,
+      "p95_latency_s": 25.781,
+      "tokens_total": 35334,
+      "estimated_cost_usd_total": 0.278424,
+      "severity_accuracy_pct": 100.0,
+      "threat_type_accuracy_pct": 43.75,
+      "action_relevance_score_1_to_5": 3.75,
+      "quality_composite_score_pct": 72.5,
+      "safety_calibration_score_proxy_pct": 100.0
+    }
+  }
+}
