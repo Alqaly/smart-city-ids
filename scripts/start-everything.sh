@@ -275,11 +275,13 @@ PY
 normalize_ids_api_env
 
 MANIFESTS=(
+    "k8s-manifests/rbac.yaml"
     "k8s-manifests/postgres-deployment.yaml"
     "k8s-manifests/mqtt-broker.yaml"
     "k8s-manifests/ids-api.yaml"
     "k8s-manifests/smart-city-services.yaml"
     "k8s-manifests/suricata.yaml"
+    "k8s-manifests/suricata-forwarder-deployment.yaml"
     "k8s-manifests/falco-forwarder.yaml"
     "k8s-manifests/prometheus-deployment.yaml"
     "k8s-manifests/prometheus-alerts.yaml"
