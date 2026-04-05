@@ -49,7 +49,7 @@ start_all() {
 
     if ! service_exists smart-city ids-api-service; then
         log_error "Missing service: smart-city/ids-api-service"
-        log_error "Apply manifests first: kubectl apply -f k8s-manifests/ids-api-FINAL.yaml"
+        log_error "Apply manifests first: kubectl apply -f k8s-manifests/ids-api.yaml"
         exit 1
     fi
 

@@ -4,6 +4,9 @@
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Kubernetes](https://img.shields.io/badge/Platform-K3s%20%2F%20Kubernetes-326CE5.svg)](https://k3s.io/)
 
+> **UDST Capstone Project** — Ali Suhail (60106420), Khaled Rahman (60104156), Abdullah Mahmoud (60300336)
+> Supervisor: Dr. Dana Haj Hussein
+
 An intrusion detection system for smart-city IoT infrastructure, built on Kubernetes. It combines Falco and Suricata detection with LLM-powered alert analysis and governance-controlled automated response.
 
 The IoT workloads are protocol-faithful software emulators running in the cluster, not physical hardware. This is a research prototype, not a production SOC platform.
@@ -91,11 +94,15 @@ bash scripts/access-stack.sh start
 |------|---------|
 | `services/ids-api/` | Core IDS backend (FastAPI), dashboard, LLM engines, K8s automation |
 | `services/forwarders/` | Falco and Suricata alert forwarders |
+| `services/ids-operator/` | Kubernetes operator for ThreatResponse CRDs |
 | `smart-city-services/` | IoT emulators: traffic camera, healthcare API, parking, env sensor, street lighting |
-| `k8s-manifests/` | Kubernetes manifests for all workloads |
-| `scripts/` | Deployment, validation, attack simulation, and operations |
-| `docs/` | Technical documentation |
 | `iot-simulator/` | MQTT-based IoT device simulator |
+| `k8s-manifests/` | Kubernetes manifests for all workloads |
+| `infrastructure/` | Grafana dashboards, Prometheus alerts, DB migrations |
+| `scripts/` | Deployment, validation, attack simulation, and operations |
+| `tests/` | Smoke tests, stability tests, unit tests |
+| `docs/` | Technical documentation ([index](docs/INDEX.md)) |
+| `docker/` | Dockerfiles for IDS API, forwarders, and smart-city services |
 
 ## Documentation
 

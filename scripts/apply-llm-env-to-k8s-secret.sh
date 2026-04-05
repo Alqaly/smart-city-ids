@@ -124,7 +124,7 @@ normalize_ids_api_env() {
 import json
 import yaml
 
-with open("k8s-manifests/ids-api-FINAL.yaml", "r", encoding="utf-8") as fh:
+with open("k8s-manifests/ids-api.yaml", "r", encoding="utf-8") as fh:
     for doc in yaml.safe_load_all(fh):
         if doc and doc.get("kind") == "Deployment" and doc.get("metadata", {}).get("name") == "ids-api":
             print(json.dumps(doc["spec"]["template"]["spec"]["containers"][0]["env"]))
@@ -137,7 +137,7 @@ PY
 }
 
 normalize_ids_api_env
-echo "✅ ids-api env normalized from k8s-manifests/ids-api-FINAL.yaml"
+echo "✅ ids-api env normalized from k8s-manifests/ids-api.yaml"
 
 echo "Restarting deployment $NAMESPACE/$RESTART_DEPLOYMENT to pick up all changes…"
 kubectl -n "$NAMESPACE" rollout restart deployment "$RESTART_DEPLOYMENT"

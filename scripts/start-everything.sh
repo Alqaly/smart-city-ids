@@ -260,7 +260,7 @@ normalize_ids_api_env() {
 import json
 import yaml
 
-with open("k8s-manifests/ids-api-FINAL.yaml", "r", encoding="utf-8") as fh:
+with open("k8s-manifests/ids-api.yaml", "r", encoding="utf-8") as fh:
     for doc in yaml.safe_load_all(fh):
         if doc and doc.get("kind") == "Deployment" and doc.get("metadata", {}).get("name") == "ids-api":
             print(json.dumps(doc["spec"]["template"]["spec"]["containers"][0]["env"]))
@@ -277,9 +277,9 @@ normalize_ids_api_env
 MANIFESTS=(
     "k8s-manifests/postgres-deployment.yaml"
     "k8s-manifests/mqtt-broker.yaml"
-    "k8s-manifests/ids-api-FINAL.yaml"
-    "k8s-manifests/services-no-build.yaml"
-    "k8s-manifests/suricata-fixed.yaml"
+    "k8s-manifests/ids-api.yaml"
+    "k8s-manifests/smart-city-services.yaml"
+    "k8s-manifests/suricata.yaml"
     "k8s-manifests/falco-forwarder.yaml"
     "k8s-manifests/prometheus-deployment.yaml"
     "k8s-manifests/grafana-deployment.yaml"
