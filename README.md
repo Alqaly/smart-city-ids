@@ -20,7 +20,7 @@
 
 A Kubernetes-native intrusion detection system for smart-city IoT infrastructure. It combines **Falco** (runtime) and **Suricata** (network) detection with **LLM-powered alert analysis** across five providers, governed by configurable response automation that can isolate pods, scale services, and create ThreatResponse CRDs — all observable through **Prometheus**, **Grafana**, and a built-in operator dashboard.
 
-The IoT workloads are protocol-faithful software emulators (MQTT, Modbus, ONVIF, DALI/TALQ, FHIR) running in the cluster. This is a research prototype, not a production SOC platform.
+The IoT workloads are protocol-faithful software emulators (MQTT, Modbus, ONVIF, DALI/TALQ, FHIR) running inside the Kubernetes cluster.
 
 ---
 
