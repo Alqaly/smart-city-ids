@@ -1,6 +1,6 @@
 # IoT Device Integration SDK
 
-> How to add **any** IoT device — hardware or software — to the Smart City IDS.
+> How to connect any IoT device — physical hardware or software emulator — to the Smart City IDS.
 
 ---
 

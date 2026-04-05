@@ -1,6 +1,6 @@
 # Demo Day Runbook (Examiner-Friendly)
 
-Last updated: 2026-02-24
+Last updated: 2026-04-05
 
 ## Goal
 Show a real Smart City IDS detecting attacks, analyzing alerts, and updating the dashboard in real time.

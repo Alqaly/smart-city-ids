@@ -1,6 +1,6 @@
 # Demo QA Checklist
 
-Last updated: 2026-02-24
+Last updated: 2026-04-05
 
 Related prep docs:
 - `docs/reference/EXAMINER_QA_30.md` — concise, code-backed answers for common examiner questions

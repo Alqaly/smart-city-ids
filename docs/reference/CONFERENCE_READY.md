@@ -1,7 +1,7 @@
 # Conference-Ready Runbook (Smart City IDS)
 
 > [!IMPORTANT]
-> Historical / snapshot document. This file may contain time-bound results, legacy route names, or report-only summaries.
+> Snapshot document for demo preparation. May contain time-bound results or legacy route names.
 > Do not use it as the current API/runtime contract. Verify current behavior using `docs/INDEX.md`, `docs/API_REFERENCE.md`,
 > and live checks (`/health`, `/api/alerts`, `/api/metrics`).
 

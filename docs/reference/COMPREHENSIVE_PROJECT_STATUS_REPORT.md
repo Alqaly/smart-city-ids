@@ -1,6 +1,6 @@
 # Smart City IDS — Comprehensive Project Status Report
 
-**Generated:** 2026-03-11  
+**Generated:** 2026-03-11 | **Last reviewed:** 2026-04-05  
 **Node:** capstone (K3s v1.34.3+k3s1, Kali Linux Rolling, kernel 6.18.12+kali-amd64)  
 **Author:** Automated deep analysis of entire codebase + live cluster verification
 

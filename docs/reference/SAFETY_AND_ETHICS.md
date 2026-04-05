@@ -1,4 +1,4 @@
-# Safety, Ethics, and Containment (Cluster-Only Attacks)
+# Safety, Ethics, and Containment
 
 This project contains intentionally malicious *simulated attack injections* for academic IDS evaluation. The safety goal is: **no impact outside the Kubernetes test environment**.
 

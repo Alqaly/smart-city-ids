@@ -1,6 +1,6 @@
 # IDS & LLM Reality Check
 
-This document provides a critical analysis of the role of the Intrusion Detection Systems (Falco, Suricata) and the Large Language Model (LLM) within the emulation, focusing on what can and cannot be realistically inferred.
+Critical analysis of the role of Intrusion Detection Systems (Falco, Suricata) and the LLM within the emulation — what can and cannot be realistically inferred.
 
 ---
 

@@ -1,6 +1,6 @@
 # Metrics Audit & Defensibility
 
-This document audits the metrics collected by Prometheus and displayed in Grafana, ensuring they are realistic, defensible, and directly tied to the behavior of the emulated IIoT system.
+Audit of Prometheus metrics and Grafana dashboards — ensuring they are realistic, defensible, and directly tied to emulated IIoT system behavior.
 
 ---
 

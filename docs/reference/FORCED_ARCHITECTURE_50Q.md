@@ -1,6 +1,6 @@
 # Forced Architecture Documentation (50 Questions)
 
-Date: 2026-02-20
+Date: 2026-02-20 | Last reviewed: 2026-04-05
 Scope reviewed: IDS API routers/state/config, LLM provider manager stack, Falco/Suricata forwarders, Kubernetes operator CRD, K8s manifests, dashboard UI.
 
 This document answers each required question from code reality, then adds improvement guidance where gaps exist.

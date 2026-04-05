@@ -1,6 +1,6 @@
 # Current Docs (Live-Verified)
 
-This file lists the documents and runtime checks that were verified against the current deployed Smart City IDS instance.
+Documents and runtime checks verified against the deployed Smart City IDS instance.
 
 ## What this is
 

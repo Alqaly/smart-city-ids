@@ -1,6 +1,7 @@
 # Reference Documents
 
-This folder contains supporting material, not the primary runtime path.
+Academic support material for technical review, report writing, and evaluation preparation.  
+For operational docs, see the parent [docs/INDEX.md](../INDEX.md).
 
 Use it when you need:
 - examiner and reviewer preparation

@@ -1,6 +1,6 @@
 # Operator Interface & Human-in-the-Loop Governance
 
-## Presentation Planning Update (2026-02-16)
+## Overview
 
 For the stakeholder-facing roadmap and phased UX/security upgrades, see:
 - `docs/LLM_SECURITY_INTERFACE_IMPROVEMENT_PLAN.md`

@@ -1,6 +1,6 @@
 # Detection, Telemetry, Attack Mechanics, Impact, and Countermeasures Q&A
 
-Date: 2026-02-20
+Date: 2026-02-20 | Last reviewed: 2026-04-05
 Scope: Smart City IDS simulated scenarios (Falco + Suricata + IoT protocol emulators).
 
 This document answers all requested questions with two lenses:

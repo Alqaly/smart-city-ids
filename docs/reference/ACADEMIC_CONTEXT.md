@@ -1,6 +1,6 @@
-# Academic Context: An Implementation-Level IIoT Emulation
+# Academic Context: Implementation-Level IIoT Emulation
 
-This document provides the academic justification for the system's architecture, classifying it as an **implementation-level IIoT emulation** on Kubernetes. It is intended to defend the methodology against scrutiny in a Capstone or IEEE context.
+Academic justification for the system's architecture, classifying it as an **implementation-level IIoT emulation** on Kubernetes. Intended to defend the methodology in a Capstone or IEEE context.
 
 ---
 

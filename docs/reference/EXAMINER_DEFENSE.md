@@ -1,6 +1,6 @@
-### Task 6: Examiner Defense Language
+### Examiner Defense Language
 
-Here is the concise, examiner-safe explanation of the system's realism.
+Concise, examiner-safe explanation of the system's realism.
 
 **Question: "Is this system realistic?"**
 
