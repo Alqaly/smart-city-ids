@@ -69,11 +69,6 @@ Hot-reloads code and static files into the running cluster via ConfigMaps.
 | `apply-llm-env-to-k8s-secret.sh` | Sync `.env` API keys into K8s secrets and restart |
 | `llm-compare-report.py` | Multi-provider LLM evaluation CSV report |
 
-### Monitoring & Observability
-
-| Script | Purpose |
-|--------|---------|
-| `generate-grafana-provisioning.sh` | Regenerate Grafana dashboard ConfigMap from `infrastructure/monitoring/*.json` |
 
 ### Database
 

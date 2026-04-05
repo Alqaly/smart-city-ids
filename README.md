@@ -120,12 +120,7 @@ Falco forwarder     ──┤           │
 IoT pods (DNS SD)   ──┘     Alert rules (8 groups, 30 rules)
 ```
 
-Dashboards are auto-provisioned from `infrastructure/monitoring/*.json` into a Grafana ConfigMap during deployment. To regenerate after editing dashboard JSON:
-
-```bash
-bash scripts/generate-grafana-provisioning.sh
-kubectl apply -f k8s-manifests/grafana-provisioning-dashboards.yaml -n monitoring
-```
+Dashboards are auto-provisioned from `k8s-manifests/grafana-provisioning-dashboards.yaml` which embeds the JSON from `infrastructure/monitoring/`. The ConfigMap is applied during `start-everything.sh` alongside Prometheus and Grafana.
 
 ---
 
@@ -185,7 +180,7 @@ All operational scripts live in `scripts/` and share a common library (`scripts/
 | **Attack** | `run-live-attacks.sh`, `live-pipeline-log.sh`, `tail-pipeline-pods.sh` |
 | **Scale** | `scale-iot.sh`, `scale-profile.sh`, `scalability-test.sh` |
 | **LLM** | `llm-manager.sh`, `apply-llm-env-to-k8s-secret.sh`, `llm-compare-report.py` |
-| **Monitoring** | `access-stack.sh` (port-forward IDS + Grafana + Prometheus), `generate-grafana-provisioning.sh` |
+| **Monitoring** | `access-stack.sh` (port-forward IDS + Grafana + Prometheus) |
 
 ---
 
