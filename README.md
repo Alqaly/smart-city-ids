@@ -24,6 +24,27 @@ The IoT workloads are protocol-faithful software emulators (MQTT, Modbus, ONVIF,
 
 ---
 
+## Project Scale
+
+| Metric | Count |
+|--------|-------|
+| **Total lines of code** | 75 000+ (Python, Shell, JS, HTML, YAML, SQL, Markdown) |
+| **Python source** | 35 700+ lines across IDS backend, forwarders, operator, IoT emulators |
+| **Kubernetes manifests** | 18 YAML files deploying 31 pods across 8 namespaces |
+| **API endpoints** | 92 REST endpoints (FastAPI) |
+| **LLM providers integrated** | 5 (xAI Grok, OpenAI GPT-4o, Anthropic Claude, Google Gemini, Kimi) |
+| **IoT protocols** | 5 (MQTT, Modbus, ONVIF, DALI/TALQ, FHIR) |
+| **Smart city services** | 5 emulated services with full protocol stacks |
+| **Database tables** | 12 (PostgreSQL) |
+| **Prometheus metrics** | 40+ metric families with 11 alerting rules |
+| **Grafana dashboards** | 2 auto-provisioned (IEEE Capstone + Unified Operations) |
+| **Operational scripts** | 17 (deployment, attacks, scaling, LLM management, evaluation) |
+| **Documentation pages** | 20 technical documents |
+| **Docker images** | 7 custom-built |
+| **Git commits** | 110+ |
+
+---
+
 ## Architecture
 
 ```
