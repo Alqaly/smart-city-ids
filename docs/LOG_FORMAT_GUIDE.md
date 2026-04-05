@@ -41,7 +41,7 @@ STAGE 2: Normalization
        ▼
 STAGE 3: LLM Analysis
 ┌─────────────┐
-│   IDS API   │  Calls xAI Grok / OpenAI GPT
+│   IDS API   │  Calls LLM providers (xAI, OpenAI, Anthropic, Gemini, Kimi)
 │  (FastAPI)  │  → Gets threat type, recommendations, actions
 └──────┬──────┘
        │ LLM Response: {"severity":8, "threat_type":"Credential Access", ...}
@@ -234,7 +234,7 @@ You are a security analyst for a Smart City IDS. Analyze the following security 
 
 ### What the LLM Returns
 
-**LLM Response (xAI Grok / OpenAI GPT):**
+**LLM Response (xAI Grok / OpenAI GPT / Anthropic / Gemini / Kimi):**
 ```json
 {
   "status": "success",
@@ -402,11 +402,19 @@ rate(smartcity_ids_alerts_received_total[5m])
 
 ### Database Schema
 
-**Tables:**
-1. `alerts` - All received alerts
-2. `analysis_results` - LLM analysis outputs
-3. `automation_actions` - Actions executed by K8s automation
-4. `audit_logs` - Audit trail for compliance
+**Tables (12):**
+1. `alerts` — All received alerts
+2. `analysis_results` — LLM analysis outputs
+3. `automation_actions` — Actions executed by K8s automation
+4. `audit_logs` — Audit trail for compliance
+5. `chat_conversations` — Analyst chat history for cross-session correlation
+6. `iot_devices` — Registered IoT device inventory
+7. `iot_events` — IoT telemetry events
+8. `llm_api_calls` — Per-call LLM usage tracking
+9. `llm_provider_health` — Provider health snapshots
+10. `system_config` — Runtime configuration (LLM priority, cost ceilings)
+11. `system_logs` — Internal system log entries
+12. `throttled_alerts` — Alerts dropped by rate limiter
 
 ### Sample Queries
 

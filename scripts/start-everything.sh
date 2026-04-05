@@ -362,7 +362,7 @@ if [[ -n "${NODE_IP:-}" ]]; then
     echo -e "  ${CYAN}NodePort Prometheus:${NC} http://${NODE_IP}:${PROM_PORT}"
 fi
 echo ""
-echo -e "  ${YELLOW}Login:${NC}          operator / operator"
+echo -e "  ${YELLOW}Login:${NC}          admin / admin"
 echo ""
 echo -e "  ${CYAN}LLM Control:${NC}    ./scripts/llm-manager.sh status"
 echo -e "  ${CYAN}Access Control:${NC} ./scripts/access-stack.sh [start|stop|status]"

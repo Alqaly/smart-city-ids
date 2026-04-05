@@ -92,9 +92,9 @@ The current supported path uses:
 ```text
 k8s-manifests/postgres-deployment.yaml
 k8s-manifests/mqtt-broker.yaml
-k8s-manifests/ids-api-FINAL.yaml
-k8s-manifests/services-no-build.yaml
-k8s-manifests/suricata-fixed.yaml
+k8s-manifests/ids-api.yaml
+k8s-manifests/smart-city-services.yaml
+k8s-manifests/suricata.yaml
 k8s-manifests/falco-forwarder.yaml
 k8s-manifests/prometheus-deployment.yaml
 k8s-manifests/grafana-deployment.yaml
@@ -158,6 +158,9 @@ bash scripts/readiness-check.sh
 |----------|----------|---------|-------------|
 | `XAI_API_KEY` | Yes* | - | xAI Grok API key |
 | `OPENAI_API_KEY` | Yes* | - | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Yes* | - | Anthropic Claude API key |
+| `GEMINI_API_KEY` | Yes* | - | Google Gemini API key |
+| `KIMI_API_KEY` | Yes* | - | Moonshot Kimi API key |
 | `KUBECONFIG` | No | /etc/rancher/k3s/k3s.yaml | Kubernetes config |
 | `K8S_NAMESPACE` | No | smart-city | Target namespace |
 | `POSTGRES_USER` | No | idsuser | Database user |

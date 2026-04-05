@@ -15,7 +15,7 @@ init_script "$0" "Scalability Test Suite"
 NAMESPACE="smart-city"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 RESULTS_DIR="${PROJECT_ROOT}/scalability-results"
-PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:31701}"
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:31106}"
 IDS_API_URL="${IDS_API_URL:-}"
 WAIT_SECONDS=60
 SCALE_LEVELS_CSV="${SCALE_LEVELS:-10,100,500,1000}"
@@ -56,8 +56,8 @@ done
 [[ $cluster_ok -eq 1 ]] || die "Cannot connect to Kubernetes cluster"
 
 NODE_IP=$(get_node_ip)
-if [[ "${PROMETHEUS_URL:-}" == "http://localhost:31701" ]]; then
-    PROM_PORT=$(get_service_nodeport "prometheus" "monitoring" "31701")
+if [[ "${PROMETHEUS_URL:-}" == "http://localhost:31106" ]]; then
+    PROM_PORT=$(get_service_nodeport "prometheus" "monitoring" "31106")
     PROMETHEUS_URL="http://${NODE_IP}:${PROM_PORT}"
 fi
 if [[ -z "${IDS_API_URL:-}" ]]; then

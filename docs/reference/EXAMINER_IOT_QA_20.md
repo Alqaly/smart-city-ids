@@ -9,12 +9,12 @@ Q1: The live system represents **six IoT-related workload families** in `smart-c
 
 ## Q2. What Kubernetes resources represent individual IoT devices? Deployments, StatefulSets, DaemonSets? Why this choice?
 Q2: IoT device families are modeled as **Kubernetes Deployments** (not StatefulSets/DaemonSets). A single pod often emulates many logical devices internally (e.g., many parking sensors, many luminaires, multiple environmental stations), so Deployment is simpler and scales horizontally.  
-**Code ref:** `k8s-manifests/services-no-build.yaml:4`, `k8s-manifests/services-no-build.yaml:115`, `k8s-manifests/services-no-build.yaml:225`, `k8s-manifests/mqtt-broker.yaml:1`, `smart-city-services/parking-system/app.py:296`, `smart-city-services/environmental-sensor/app.py:29`, `smart-city-services/street-lighting/app.py:70`  
+**Code ref:** `k8s-manifests/smart-city-services.yaml:4`, `k8s-manifests/smart-city-services.yaml:115`, `k8s-manifests/smart-city-services.yaml:225`, `k8s-manifests/mqtt-broker.yaml:1`, `smart-city-services/parking-system/app.py:296`, `smart-city-services/environmental-sensor/app.py:29`, `smart-city-services/street-lighting/app.py:70`  
 **Verify:** `kubectl get deploy,statefulset,daemonset -n smart-city`
 
 ## Q3. How many replica pods per IoT device type, and why not 1:1 pod-to-device?
 Q3: Replica counts and fleet counts are different. Pod-backed emulator rows come from Kubernetes, while external/logical devices come from the registry + heartbeat path. Use `/api/iot/devices` to show `total`, `logical_total`, `pod_backed_total`, and `counting_mode`. It is not 1:1 pod-to-device because each pod can emulate many logical devices internally.  
-**Code ref:** `k8s-manifests/services-no-build.yaml:11`, `k8s-manifests/services-no-build.yaml:122`, `k8s-manifests/services-no-build.yaml:232`, `services/ids-api/src/api/_state.py:1227`, `smart-city-services/parking-system/app.py:300`, `smart-city-services/environmental-sensor/app.py:29`, `smart-city-services/street-lighting/app.py:72`  
+**Code ref:** `k8s-manifests/smart-city-services.yaml:11`, `k8s-manifests/smart-city-services.yaml:122`, `k8s-manifests/smart-city-services.yaml:232`, `services/ids-api/src/api/_state.py:1227`, `smart-city-services/parking-system/app.py:300`, `smart-city-services/environmental-sensor/app.py:29`, `smart-city-services/street-lighting/app.py:72`  
 **Verify:** `kubectl get deploy -n smart-city traffic-camera healthcare-api parking-system env-sensor street-lighting mqtt-broker`
 
 ## Q4. Show the exact labels/selectors used to discover "13 IoT devices" on dashboard. Run `kubectl get pods -l=...` to verify.
@@ -24,7 +24,7 @@ Q4: The dashboard now distinguishes **pod-backed activity** from **logical regis
 
 ## Q5. Are IoT services using NodePort, ClusterIP, LoadBalancer? Why? Impact on Suricata detection?
 Q5: IoT services are mostly **ClusterIP** (internal only); `ids-api` and `iot-stream-bridge` are NodePort. ClusterIP keeps attack traffic in-cluster (good for Suricata on `cni0`), while NodePort is only for operator UI/stream access.  
-**Code ref:** `k8s-manifests/services-no-build.yaml:74`, `k8s-manifests/services-no-build.yaml:184`, `k8s-manifests/services-no-build.yaml:294`, `k8s-manifests/mqtt-broker.yaml:44`, `k8s-manifests/iot-stream-bridge.yaml:160`, `k8s-manifests/suricata-fixed.yaml:126`, `k8s-manifests/suricata-fixed.yaml:139`  
+**Code ref:** `k8s-manifests/smart-city-services.yaml:74`, `k8s-manifests/smart-city-services.yaml:184`, `k8s-manifests/smart-city-services.yaml:294`, `k8s-manifests/mqtt-broker.yaml:44`, `k8s-manifests/iot-stream-bridge.yaml:160`, `k8s-manifests/suricata.yaml:126`, `k8s-manifests/suricata.yaml:139`  
 **Verify:** `kubectl get svc -n smart-city`
 
 ## Q6. What HTTP endpoints do your IoT services expose, and how do they mimic real device APIs?
@@ -55,12 +55,12 @@ Q9: MQTT traffic is explicitly modeled:
 - Parking service exposes MQTT topic tree and sample payloads (`qos`, `retain`)
 - Enhanced simulator publishes `sensors/{namespace}/{class}/{pod}` with `qos=1`
 UDP traffic is mostly DNS (Suricata watches DNS tunneling); CoAP is emulated via HTTP endpoints, not actual UDP CoAP server in the current running services.  
-**Code ref:** `k8s-manifests/mqtt-broker.yaml:21`, `k8s-manifests/mqtt-broker.yaml:54`, `smart-city-services/parking-system/app.py:234`, `smart-city-services/parking-system/app.py:240`, `smart-city-services/parking-system/app.py:241`, `smart-city-services/parking-system/app.py:356`, `iot-simulator/mqtt_device_enhanced.py:531`, `iot-simulator/mqtt_device_enhanced.py:536`, `k8s-manifests/suricata-fixed.yaml:93`, `k8s-manifests/suricata-fixed.yaml:101`  
+**Code ref:** `k8s-manifests/mqtt-broker.yaml:21`, `k8s-manifests/mqtt-broker.yaml:54`, `smart-city-services/parking-system/app.py:234`, `smart-city-services/parking-system/app.py:240`, `smart-city-services/parking-system/app.py:241`, `smart-city-services/parking-system/app.py:356`, `iot-simulator/mqtt_device_enhanced.py:531`, `iot-simulator/mqtt_device_enhanced.py:536`, `k8s-manifests/suricata.yaml:93`, `k8s-manifests/suricata.yaml:101`  
 **Verify:** `kubectl get svc -n smart-city mqtt-broker` and `kubectl exec -n smart-city deploy/parking-system -- curl -s localhost:5002/api/mqtt/topics | head`
 
 ## Q10. How do you simulate IoT firmware vulnerabilities (SQLi, command injection) in the services?
 Q10: SQLi/command injection are primarily **network detection simulations** (Suricata signatures on malicious HTTP payloads), not real SQL execution in the service code. The services themselves simulate insecure firmware/API design (no auth, debug endpoints, unsafe updates).  
-**Code ref:** `k8s-manifests/suricata-fixed.yaml:59`, `k8s-manifests/suricata-fixed.yaml:65`, `scripts/run-live-attacks.sh:154`, `scripts/run-live-attacks.sh:166`, `smart-city-services/traffic-camera/app.py:700`, `smart-city-services/parking-system/app.py:618`, `smart-city-services/healthcare-api/app.py:704`  
+**Code ref:** `k8s-manifests/suricata.yaml:59`, `k8s-manifests/suricata.yaml:65`, `scripts/run-live-attacks.sh:154`, `scripts/run-live-attacks.sh:166`, `smart-city-services/traffic-camera/app.py:700`, `smart-city-services/parking-system/app.py:618`, `smart-city-services/healthcare-api/app.py:704`  
 **Verify:** `bash scripts/run-live-attacks.sh --duration 5 --mode sqli --show-alerts 2`
 
 ## Q11. Which IoT services are intentionally vulnerable to trigger Suricata rules? Code excerpts.
@@ -86,12 +86,12 @@ Q13: Lateral movement between IoT pods is currently possible because services ar
 Q14: IoT-to-IoT abuse detection is handled by both Suricata and Falco:
 - Suricata: HTTP flood, MQTT cleartext, DNS tunneling, exfil, mining ports
 - Falco: unexpected outbound connections from IoT containers (custom rule)  
-**Code ref:** `k8s-manifests/suricata-fixed.yaml:86`, `k8s-manifests/suricata-fixed.yaml:93`, `k8s-manifests/suricata-fixed.yaml:101`, `k8s-manifests/suricata-fixed.yaml:96`, `k8s-manifests/falco-values.yaml:71`  
+**Code ref:** `k8s-manifests/suricata.yaml:86`, `k8s-manifests/suricata.yaml:93`, `k8s-manifests/suricata.yaml:101`, `k8s-manifests/suricata.yaml:96`, `k8s-manifests/falco-values.yaml:71`  
 **Verify:** `bash scripts/run-live-attacks.sh --duration 5 --mode ddos --show-alerts 3`
 
 ## Q15. How do you scale IoT attack surface for stress testing? HPA config?
 Q15: Attack surface scaling is implemented with HPAs on the three HTTP IoT services (`traffic-camera`, `healthcare-api`, `parking-system`) and optional larger MQTT simulator deployments (`high/medium/burst`) in `iot-simulator/k8s-enhanced.yaml`.  
-**Code ref:** `k8s-manifests/services-no-build.yaml:90`, `k8s-manifests/services-no-build.yaml:199`, `k8s-manifests/services-no-build.yaml:309`, `iot-simulator/k8s-enhanced.yaml:45`, `iot-simulator/k8s-enhanced.yaml:53`, `iot-simulator/k8s-enhanced.yaml:128`, `iot-simulator/k8s-enhanced.yaml:136`, `iot-simulator/k8s-enhanced.yaml:211`, `iot-simulator/k8s-enhanced.yaml:219`  
+**Code ref:** `k8s-manifests/smart-city-services.yaml:90`, `k8s-manifests/smart-city-services.yaml:199`, `k8s-manifests/smart-city-services.yaml:309`, `iot-simulator/k8s-enhanced.yaml:45`, `iot-simulator/k8s-enhanced.yaml:53`, `iot-simulator/k8s-enhanced.yaml:128`, `iot-simulator/k8s-enhanced.yaml:136`, `iot-simulator/k8s-enhanced.yaml:211`, `iot-simulator/k8s-enhanced.yaml:219`  
 **Verify:** `kubectl get hpa -n smart-city` and `rg -n 'replicas:' iot-simulator/k8s-enhanced.yaml`
 
 ## Q16. What resource limits/requests on IoT deployments mimic real edge device constraints?
@@ -99,7 +99,7 @@ Q16: Resource requests/limits mimic constrained edge workloads:
 - HTTP IoT service pods (traffic/healthcare/parking): typically `100m/128Mi` request, `500m/256Mi` limit
 - Env sensor + street lighting live deployments are smaller: `50m/64Mi` request, `300m/192Mi` limit
 - Enhanced MQTT simulator pods: `50m/64Mi` request, `200m/128Mi` limit  
-**Code ref:** `k8s-manifests/services-no-build.yaml:44`, `k8s-manifests/services-no-build.yaml:154`, `k8s-manifests/services-no-build.yaml:264`, `iot-simulator/k8s-enhanced.yaml:74`, `iot-simulator/k8s-enhanced.yaml:157`, `iot-simulator/k8s-enhanced.yaml:240`  
+**Code ref:** `k8s-manifests/smart-city-services.yaml:44`, `k8s-manifests/smart-city-services.yaml:154`, `k8s-manifests/smart-city-services.yaml:264`, `iot-simulator/k8s-enhanced.yaml:74`, `iot-simulator/k8s-enhanced.yaml:157`, `iot-simulator/k8s-enhanced.yaml:240`  
 **Verify:** `kubectl get deploy -n smart-city env-sensor street-lighting -o yaml | grep -A8 resources:`
 
 ## Q17. Do IoT pods have realistic network policies? Show `kubectl get netpol`.
@@ -130,7 +130,7 @@ kubectl get pods -n smart-city -l app=traffic-camera
 kubectl get svc -n smart-city traffic-camera-service -o yaml | grep -n 'app: traffic-camera'
 ```
 This adds another emulated camera pod and keeps service routing unchanged.  
-**Code ref:** `k8s-manifests/services-no-build.yaml:6`, `k8s-manifests/services-no-build.yaml:11`, `k8s-manifests/services-no-build.yaml:68`, `k8s-manifests/services-no-build.yaml:92`  
+**Code ref:** `k8s-manifests/smart-city-services.yaml:6`, `k8s-manifests/smart-city-services.yaml:11`, `k8s-manifests/smart-city-services.yaml:68`, `k8s-manifests/smart-city-services.yaml:92`  
 **Verify:** Commands above (expect traffic-camera pod count to increase from 2 to 3)
 
 ## Notes / Caveats (important for examiner honesty)

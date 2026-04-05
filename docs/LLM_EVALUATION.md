@@ -722,14 +722,14 @@ kubectl get pods -n falco-system
 curl -s http://localhost:30800/health | jq .
 ```
 
-### 15.2 Generate Fresh Alerts
+### 16.2 Generate Fresh Alerts
 
 ```bash
 # Run attack simulation to create alerts
 bash scripts/run-live-attacks.sh --mode protocol --duration 12 --show-alerts 8 --verbose
 ```
 
-### 15.3 Run the Evaluation
+### 16.3 Run the Evaluation
 
 ```bash
 # Three-provider comparison (like strict-real-01)
@@ -759,7 +759,7 @@ python3 scripts/llm-compare-report.py \
   --out-dir artifacts/llm-eval/five-provider-run
 ```
 
-### 15.4 Examine Results
+### 16.4 Examine Results
 
 ```bash
 # View provider rankings
@@ -774,7 +774,7 @@ ls artifacts/llm-eval/my-new-run/charts/
 
 ---
 
-## 16. Artifact Inventory
+## 17. Artifact Inventory
 
 | Artifact | Location | Purpose |
 |----------|----------|---------|
@@ -782,6 +782,7 @@ ls artifacts/llm-eval/my-new-run/charts/
 | Run 1 (Primary) | `artifacts/llm-eval/strict-real-01/` | 3-provider comparison: Kimi, OpenAI, xAI |
 | Run 2 (Anthropic) | `artifacts/llm-eval/strict-real-02/` | 4-provider run adding Anthropic |
 | Run 3 (Expanded) | `artifacts/llm-eval/strict-real-03/` | 5-provider attempt (Kimi failed) |
+| Run 4 (Post-Fix) | `artifacts/llm-eval/strict-real-04/` | 5-provider definitive run (Gemini fix applied) |
 | Eval Script | `scripts/llm-compare-report.py` | Automated strict evaluation runner |
 | Attack Script | `scripts/run-live-attacks.sh` | Alert generation through real attacks |
 
@@ -796,4 +797,4 @@ Each artifact directory contains:
 
 ---
 
-*Single evaluation document — last updated March 28, 2026*
+*Single evaluation document — last updated April 5, 2026*

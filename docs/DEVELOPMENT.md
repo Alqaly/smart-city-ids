@@ -121,12 +121,11 @@ The FastAPI app initializes on startup:
 
 ### Adding a New LLM Provider
 
-1. Create `services/ids-api/src/llm_engine_<name>.py` extending `BaseLLMEngine`
-2. Implement `analyze_alert(alert_data: dict) -> dict` — must return the standard response schema
-3. Register the engine in `llm_manager.py` (`ALL_PROVIDERS` list and initialization logic)
-4. Add `<NAME>_API_KEY` to `config.py`
-5. Add to `LLM_PRIORITY` default order
-6. Deploy: `./scripts/deploy-code.sh`
+1. Add a new class in `services/ids-api/src/llm_providers/providers.py` decorated with `@ProviderRegistry.register("name")`
+2. Implement `_call_api(messages, model, **kw) -> dict` — makes the raw HTTP call to the provider
+3. Add `<NAME>_API_KEY` to `config.py` and `PROVIDER_CONFIG` dict
+4. Add the provider name to `LLM_PRIORITY` default order
+5. Deploy: `./scripts/deploy-code.sh`
 
 ### Adding a New K8s Automation Action
 
@@ -138,10 +137,11 @@ The FastAPI app initializes on startup:
 
 ### Adding a New API Endpoint
 
-1. Add route handler in `main.py`
+1. Create or edit a router file in `services/ids-api/src/api/<module>.py` using `APIRouter`
 2. Add Pydantic models to `operator_models.py` if needed
-3. Choose auth: wrap with `Depends(api_key_dependency)` for JWT-protected, or leave open
-4. Add to the UI if user-facing (edit `static/index.html`)
+3. Register the router in `main.py` with `app.include_router()`
+4. Choose auth: wrap with `Depends(api_key_dependency)` for JWT-protected, or leave open
+5. Add to the UI if user-facing (edit `static/index.html`)
 
 ---
 
@@ -173,21 +173,15 @@ pytest tests/test_llm_parsing.py -v
 
 ```python
 import pytest
-from llm_engine_xai import XAIEngine
+from llm_engine_xai import XAIAnalyzer
 
 def test_parse_json_response():
     """LLM response with JSON fences should parse correctly."""
     raw = '```json\n{"severity": 8, "summary": "test", "threat_type": "Malware"}\n```'
-    result = XAIEngine._parse_response(raw)
+    engine = XAIAnalyzer.__new__(XAIAnalyzer)
+    result = engine._parse_json_response(raw)
     assert result["severity"] == 8
     assert result["threat_type"] == "Malware"
-
-def test_parse_fallback():
-    """Unparseable response should return conservative fallback."""
-    raw = "I cannot analyze this alert."
-    result = XAIEngine._parse_response(raw)
-    assert result["severity"] == 5
-    assert result["threat_type"] == "Policy Violation"
 ```
 
 ---

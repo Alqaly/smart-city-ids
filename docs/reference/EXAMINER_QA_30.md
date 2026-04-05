@@ -59,7 +59,7 @@ Recommended usage:
 ## 6) What is the role of Suricata, and what attacks does it detect here?
 - Suricata detects network-level attacks via signatures/rules (HTTP, DNS, protocol abuse patterns).
 - In this project, custom rules include SQLi patterns, HTTP flood, auth brute force, and DNS tunneling-style behavior.
-- These are defined in `k8s-manifests/suricata-fixed.yaml`.
+- These are defined in `k8s-manifests/suricata.yaml`.
 
 ## 7) What is the role of Falco, and what runtime behaviors do your custom rules focus on?
 - Falco detects suspicious runtime/syscall behavior inside containers.
@@ -78,7 +78,7 @@ Recommended usage:
 - Recent fix: throttled duplicates are stored in `throttled_alerts` and not sent to the live dashboard stream, which prevents UI flood.
 
 ## 10) Explain one custom Suricata rule and one custom Falco rule in detail.
-- Suricata example: `SMARTCITY HTTP flood` (`sid:9000003`, `k8s-manifests/suricata-fixed.yaml`)
+- Suricata example: `SMARTCITY HTTP flood` (`sid:9000003`, `k8s-manifests/suricata.yaml`)
   - Uses `detection_filter: track by_src, count 300, seconds 10`
   - Meaning: if one source sends >300 matching HTTP requests in 10s, trigger attempted-DoS alert.
 - Falco example: “Sensitive File Read” (custom rule set in `falco-values`)
