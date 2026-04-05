@@ -113,7 +113,7 @@ bash scripts/readiness-check.sh
 Use these for technical review:
 - `docs/API_REFERENCE.md`
 - `docs/ATTACK_SIMULATION_GUIDE.md`
-- `docs/reference/LLM_EVALUATION_CANONICAL.md`
+- `docs/LLM_EVALUATION.md`
 - `docs/reference/IOT_EMULATION_REPORT.md`
 - live API:
   - `/health`

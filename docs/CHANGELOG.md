@@ -7,7 +7,6 @@ For the current live deployment contract, use:
 - `README.md`
 - `docs/INDEX.md`
 - `docs/DEPLOYMENT.md`
-- `docs/CURRENT_DOCS_VERIFIED.md`
 - `docs/API_REFERENCE.md`
 
 ## 2026-03-10
@@ -132,7 +131,7 @@ Completed a live-stack hardening pass for governance mode validation, automation
     - strict scope limits and truth boundaries,
     - reproducible export procedure using existing APIs/scripts.
 
-- **Core docs alignment (`README.md`, `docs/API_REFERENCE.md`, `docs/OPERATIONS.md`, `docs/COMMANDS_REFERENCE.md`, `docs/TROUBLESHOOTING.md`, `docs/ATTACK_SIMULATION_GUIDE.md`)**
+- **Core docs alignment (`README.md`, `docs/API_REFERENCE.md`, `docs/OPERATIONS.md`, `docs/TROUBLESHOOTING.md`, `docs/ATTACK_SIMULATION_GUIDE.md`)**
   - Removed stale endpoint guidance tied to deleted `/api/attacks/*` paths.
   - Added strict provider diagnostic usage (`/api/llm/test/{provider}?strict=true`).
   - Added MQTT attack-chain runner documentation (`scripts/run-live-attacks.sh --mode mqtt`).

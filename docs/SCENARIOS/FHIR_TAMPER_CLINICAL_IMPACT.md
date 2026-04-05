@@ -1,8 +1,8 @@
 # Scenario Spec — FHIR Tamper + Clinical Impact
 
-Last updated: 2026-02-24
+Last updated: 2026-04-05
 
-Purpose: provide a staged, examiner-defensible scenario around healthcare API misuse/tampering using the current Smart City IDS implementation (FHIR-like API emulator + Suricata/Falco + IDS pipeline + governance/dashboard).
+Staged, examiner-defensible scenario around healthcare API misuse/tampering using the Smart City IDS implementation (FHIR-like API emulator + Suricata/Falco + IDS pipeline + governance/dashboard).
 
 ## 1. Scenario Goal
 

@@ -1,6 +1,6 @@
 # Operations Guide
 
-Day-to-day operating guide for the current Smart City IDS deployment.
+Day-to-day operating procedures for the Smart City IDS deployment.
 
 ## Daily checks
 

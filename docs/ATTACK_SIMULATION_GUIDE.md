@@ -1,5 +1,7 @@
 # Attack Simulation & Governance Guide
 
+Protocol-level and runtime attack scenarios for testing the IDS detection-analysis-response pipeline.
+
 ## Current deployment status (important)
 
 In the current deployment, the **Attack Simulation UI tab/backend is not active**.

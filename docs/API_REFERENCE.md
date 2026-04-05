@@ -91,6 +91,17 @@ Important:
 | `GET` | `/api/operator/dashboard` | dashboard summary data |
 | `GET` | `/api/operator/incidents` | incident list |
 
+## AI analyst chat
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/analyst/session` | start a new chat session |
+| `POST` | `/api/analyst/chat` | send message to AI analyst (rate-limited, supports provider selection) |
+| `GET` | `/api/analyst/tools` | list available analyst actions |
+| `POST` | `/api/analyst/action/submit` | execute analyst-approved action |
+| `POST` | `/api/analyst/action/pending-decision` | respond to pending governance approval |
+| `POST` | `/api/analyst/quick-analyze` | one-off alert analysis without session |
+
 ## Live checks
 
 ```bash

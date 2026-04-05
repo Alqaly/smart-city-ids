@@ -1,6 +1,6 @@
 # LLM Configuration Guide
 
-Current guide for configuring LLM providers in the Smart City IDS.
+Configuring and managing LLM providers (xAI Grok, Gemini, OpenAI, Mistral, local safe-mode) in the Smart City IDS.
 
 ## Basic rule
 

@@ -1,6 +1,6 @@
 # Security Model
 
-Security model for the current Smart City IDS research testbed.
+Security boundaries, threat model, and governance controls for the Smart City IDS.
 
 ## Scope
 

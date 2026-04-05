@@ -2,7 +2,7 @@
 
 **Status:** Frozen (do not rename metrics without a versioned contract update)  
 **Owner:** IDS API + IoT Device  
-**Last Updated:** 2026-02-04  
+**Last Updated:** 2026-04-05  
 
 This document defines the **authoritative metrics contract** for the Smart City IDS.  
 Metrics are treated as an API. Names, types, and labels are stable.

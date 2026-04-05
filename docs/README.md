@@ -2,6 +2,9 @@
 
 See [INDEX.md](INDEX.md) for the full documentation map and recommended reading order.
 
+Core docs cover architecture, deployment, operations, and API reference.  
+Supporting material covers attack simulation, LLM evaluation, metrics, and security model.
+
 Quick links:
 - **Run the project**: [QUICKSTART.md](QUICKSTART.md) → [DEPLOYMENT.md](DEPLOYMENT.md) → [OPERATIONS.md](OPERATIONS.md)
 - **Understand the system**: [ARCHITECTURE.md](ARCHITECTURE.md) → [HOW_IT_WORKS.md](HOW_IT_WORKS.md) → [API_REFERENCE.md](API_REFERENCE.md)

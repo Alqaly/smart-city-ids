@@ -1,6 +1,6 @@
 # How It Works
 
-End-to-end explanation of the current Smart City IDS pipeline.
+End-to-end explanation of the Smart City IDS pipeline — from detection through governance to automated response.
 
 ## 1. Activity happens in the cluster
 

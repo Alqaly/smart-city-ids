@@ -1,8 +1,8 @@
 # Scenario Spec — MQTT Flood + Lateral Movement + Impact
 
-Last updated: 2026-02-24
+Last updated: 2026-04-05
 
-Purpose: provide an examiner-defensible staged scenario spec using the **current implementation** (Suricata + Falco + IDS API + governance + dashboard), while framing it in a research-style structure.
+Examiner-defensible staged scenario spec using the current implementation (Suricata + Falco + IDS API + governance + dashboard), framed in a research-style structure.
 
 ## 1. Scenario Goal
 

@@ -1,6 +1,6 @@
 # Validation Checklist
 
-This checklist covers the current supported validation path for the live Smart City IDS stack.
+9-step validation path for verifying the live Smart City IDS stack end-to-end.
 
 ## 1. Bootstrap and access
 

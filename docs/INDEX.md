@@ -2,8 +2,7 @@
 
 Main documentation entry point for the repository.
 
-If you are new to the project, read the 5 documents below in order.
-Go into reference material only if needed.
+Start with the 5 core documents below, then refer to supporting material as needed.
 
 ## Start Here: 5 Documents
 

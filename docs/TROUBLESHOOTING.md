@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Use this guide for the current active deployment path.
+Common failure modes and recovery procedures for the Smart City IDS deployment.
 
 ## First commands to run
 

@@ -1,6 +1,6 @@
-# Scenario Specs (Research-Oriented)
+# Attack Scenario Specifications
 
-Use this folder to document each attack/emulation scenario as a staged, examiner-defensible spec.
+Structured, examiner-defensible scenario specs for each attack/emulation type.
 
 ## Required sections per scenario
 
