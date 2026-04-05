@@ -282,6 +282,8 @@ MANIFESTS=(
     "k8s-manifests/suricata.yaml"
     "k8s-manifests/falco-forwarder.yaml"
     "k8s-manifests/prometheus-deployment.yaml"
+    "k8s-manifests/prometheus-alerts.yaml"
+    "k8s-manifests/grafana-provisioning-dashboards.yaml"
     "k8s-manifests/grafana-deployment.yaml"
 )
 

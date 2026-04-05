@@ -1,6 +1,8 @@
 # Scripts
 
-Operational and utility scripts for the Smart City IDS.
+Operational and utility scripts for the Smart City IDS. All shell scripts share
+a common library (`lib/script-utils.sh`) for logging, kubeconfig, port-forwarding,
+and Kubernetes helpers.
 
 ## Quick Start (3 commands)
 
@@ -21,7 +23,7 @@ bash scripts/live-pipeline-log.sh --attacks
 bash scripts/deploy-code.sh
 ```
 
-Hot-reloads code and static files into the running cluster.
+Hot-reloads code and static files into the running cluster via ConfigMaps.
 
 ## Script Reference
 
@@ -29,10 +31,10 @@ Hot-reloads code and static files into the running cluster.
 
 | Script | Purpose |
 |--------|---------|
-| `start-everything.sh` | Full cluster bootstrap (K3s, namespaces, manifests, Falco, Suricata) |
+| `start-everything.sh` | Full cluster bootstrap (K3s, namespaces, manifests, Falco, Suricata, Prometheus, Grafana) |
 | `deploy-code.sh` | Hot-reload code/static into running cluster via ConfigMaps |
-| `cleanup.sh` | Cluster teardown (supports `--soft`, `--hard`, `--full`) |
-| `access-stack.sh` | Port-forward IDS API, Grafana, Prometheus to localhost |
+| `cleanup.sh` | Cluster teardown (`--soft` namespaces, `--hard` + K3s, `--full` + data wipe) |
+| `access-stack.sh` | Port-forward IDS API (8000), Grafana (3000), Prometheus (9090) to localhost |
 
 ### Validation & Testing
 
@@ -57,6 +59,7 @@ Hot-reloads code and static files into the running cluster.
 |--------|---------|
 | `scale-iot.sh` | Manual per-service scaling (`3`, `up`, `down`, or per-service) |
 | `scale-profile.sh` | Named preset profiles (`small`, `medium`, `large`) |
+| `scalability-test.sh` | Automated scale testing (10→1000 devices) with Prometheus metrics |
 
 ### LLM Management
 
@@ -64,19 +67,23 @@ Hot-reloads code and static files into the running cluster.
 |--------|---------|
 | `llm-manager.sh` | Provider health, credits, priority, interactive control |
 | `apply-llm-env-to-k8s-secret.sh` | Sync `.env` API keys into K8s secrets and restart |
+| `llm-compare-report.py` | Multi-provider LLM evaluation CSV report |
 
-### Research & Reporting
-
-| Script | Purpose |
-|--------|---------|
-| `scalability-test.sh` | Automated scale testing with metrics collection |
-| `llm-compare-report.py` | Multi-provider LLM evaluation report |
-| `render-figures.py` | Documentation figure renderer |
-
-### Internal
+### Monitoring & Observability
 
 | Script | Purpose |
 |--------|---------|
-| `lib/script-utils.sh` | Shared shell library (colors, logging, kubeconfig, port-forward) |
+| `generate-grafana-provisioning.sh` | Regenerate Grafana dashboard ConfigMap from `infrastructure/monitoring/*.json` |
+
+### Database
+
+| Script | Purpose |
+|--------|---------|
+| `db/run_migrations.sh` | Apply PostgreSQL schema migrations from `infrastructure/database/migrations/` |
+
+### Internal Libraries
+
+| Script | Purpose |
+|--------|---------|
+| `lib/script-utils.sh` | Shared shell library (colors, logging, kubeconfig, port-forward, K8s helpers) |
 | `lib/llm-control.sh` | LLM credit/priority helpers |
-| `db/run_migrations.sh` | PostgreSQL schema migrations |
