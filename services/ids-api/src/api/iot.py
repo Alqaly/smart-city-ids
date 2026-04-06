@@ -300,10 +300,11 @@ async def receive_iot_sensor_data(data: IoTSensorData):
             },
         )
 
-        # Forward to the cluster-internal alert endpoint (no auth required).
+        # Forward to the cluster-internal alert endpoint.
         from api.alerts import process_alert_internal
+        from config import Config
 
-        alert_response = await process_alert_internal(alert)
+        alert_response = await process_alert_internal(alert, x_ids_internal_token=Config.IDS_INTERNAL_ALERT_TOKEN)
         return {
             "status": "security_event_processed",
             "event_id": event_record["id"],
